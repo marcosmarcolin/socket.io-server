@@ -91,9 +91,10 @@ src/
     Server.php                  routes HTTP and WebSocket, handshake, sessions
     Socket.php                  session: state, heartbeat, upgrade, write buffer
     ServerOptions.php           pingInterval, pingTimeout, maxPayload, path, CORS...
-    Transport/Transport.php     base transport (Emitter)
+    Transport/Transport.php     base transport (Emitter): packet, ready, drain, error, close
     Transport/Polling.php       pending GET, POST, noop on upgrade
     Transport/WebSocket.php     one packet per frame, text or binary
+    Transport/HttpExchange.php, Transport/WebSocketConnection.php  I/O interfaces, faked in tests
     Protocol/HttpOrWebSocket.php  ProtocolInterface: Workerman HTTP, or switch to WebSocket
     Protocol/WebSocket.php      extends Workerman\Protocols\Websocket, exposes the opcode
     Parser.php, Packet.php, PacketType.php, InvalidPacketException.php
@@ -145,7 +146,12 @@ src/
   - a second concurrent `GET` gets 400, the pending one gets `1` (close), and the session closes;
   - a pending `GET` cancelled by the client (TCP connection closed) closes the session;
   - a received `close` packet answers the pending `GET` with `6` (noop), and the session closes;
-  - an invalid payload gets 400 and closes the session.
+  - an invalid payload gets 400 and closes the session;
+  - a `POST` with `Content-Type: application/octet-stream` gets 400 and closes the session (v4 sends binary as base64 text);
+  - any other method on an existing session gets 400;
+  - a close requested while no `GET` is pending is sent with the next `GET`, or completes after 30 s without one.
+
+  Workerman delivers a request only once its body is complete, so each `POST` is handled whole. The spec's rule against overlapping `POST`s therefore needs no code.
 - **Upgrade:**
   1. a WebSocket arrives with the `sid` of a polling session;
   2. the client sends `2probe` and the server answers `3probe`;
@@ -236,7 +242,7 @@ Worker::runAll();
 1. [x] Scaffold: Composer, Docker, PHPUnit, PHPStan max, phpcs, CI.
 2. [x] Engine.IO parser (`Engine\Parser`).
 3. [ ] `Scheduler`, `Emitter`, `Engine\Socket` and transports, tested with a fake scheduler and fake connections.
-4. [ ] `Engine\Server` and the Workerman protocols, with the official Engine.IO v4 suite running in CI.
+4. [ ] `Engine\Server`, the Workerman protocols, `WorkermanScheduler` and the Workerman implementations of `HttpExchange` and `WebSocketConnection`, with the official Engine.IO v4 suite running in CI.
 5. [ ] Socket.IO parser (`Encoder`, `Decoder`, `Binary`).
 6. [ ] `SocketIO`, `Nsp`, `Client`, `Socket`, `BroadcastOperator`, `InMemoryAdapter`, with the official Socket.IO v5 suite in CI.
 7. [ ] Integration with `socket.io-client@4` in CI.

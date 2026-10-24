@@ -1,0 +1,98 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Marcolin\SocketIO\Tests\Fake;
+
+use Closure;
+use Marcolin\SocketIO\Engine\Transport\HttpExchange;
+
+/**
+ * An HTTP request that records its answer, and that the test can abort.
+ */
+final class FakeHttpExchange implements HttpExchange
+{
+    public ?int $status = null;
+
+    public ?string $responseBody = null;
+
+    /** @var array<string, string> */
+    public array $responseHeaders = [];
+
+    /** @var list<Closure(): void> */
+    private array $abortCallbacks = [];
+
+    /**
+     * @param array<string, string> $headers
+     */
+    public function __construct(
+        private readonly string $method,
+        private readonly string $body = '',
+        private readonly array $headers = [],
+    ) {
+    }
+
+    public static function get(): self
+    {
+        return new self('GET');
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    public static function post(string $body, array $headers = []): self
+    {
+        return new self('POST', $body, $headers);
+    }
+
+    public function method(): string
+    {
+        return $this->method;
+    }
+
+    public function header(string $name): ?string
+    {
+        foreach ($this->headers as $key => $value) {
+            if (strcasecmp($key, $name) === 0) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    public function body(): string
+    {
+        return $this->body;
+    }
+
+    public function respond(int $status, string $body, array $headers = []): void
+    {
+        if ($this->status !== null) {
+            return;
+        }
+        $this->status = $status;
+        $this->responseBody = $body;
+        $this->responseHeaders = $headers;
+    }
+
+    public function onAbort(Closure $callback): void
+    {
+        $this->abortCallbacks[] = $callback;
+    }
+
+    /**
+     * Simulates the client closing the TCP connection, possibly after the answer (keep-alive).
+     */
+    public function abort(): void
+    {
+        foreach ($this->abortCallbacks as $callback) {
+            $callback();
+        }
+    }
+
+    public function isAnswered(): bool
+    {
+        return $this->status !== null;
+    }
+}
