@@ -293,6 +293,8 @@ Moving from [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io): se
 
 ## Status
 
+Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
 | Step | State |
 |---|---|
 | Engine.IO packet parser | Done |

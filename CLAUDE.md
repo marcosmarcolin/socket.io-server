@@ -38,7 +38,7 @@ A change is done only when all of these hold:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers (`tests/Compliance/socket-io-server.php`, run by `tests/Compliance/socket-io.sh`).
 4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh` and `tests/Integration/run.sh multi-process`).
-5. **The docs are current:** both READMEs (with the API reference), the migration guide in `docs/`, CLAUDE.md and examples match the behavior. Each example has a test with the official client (`tests/Integration/client/examples/`) that CI runs, so an example that stops working fails the build.
+5. **The docs are current:** both READMEs (with the API reference), the migration guide in `docs/`, CLAUDE.md and examples match the behavior, and `CHANGELOG.md` lists every user-visible change under `[Unreleased]`. Each example has a test with the official client (`tests/Integration/client/examples/`) that CI runs, so an example that stops working fails the build.
 
 ## Code rules
 
@@ -60,6 +60,7 @@ A change is done only when all of these hold:
 - No `echo`/`print`. Errors become exceptions or `error` events.
 - No production dependencies besides Workerman. `workerman/channel` is optional (in `suggest`).
 - Everything in English: code, comments, docs, commits, PRs. The exceptions are the Brazilian Portuguese translations of the user documentation: `README.pt-BR.md` and `docs/*.pt-BR.md`.
+- **`CHANGELOG.md`** follows Keep a Changelog, in English only, like the commits it summarizes. A PR that changes behavior, the API or the requirements adds its line under `[Unreleased]`. A release renames that section to the version and date.
 - **User docs in two languages, always in sync.** `README.md` and `docs/*.md` (English) are the reference. Every change to one goes to its `.pt-BR.md` translation in the same PR, and neither has content the other lacks. Code blocks are identical in both, except the comments of shell commands.
 
 ## Verification

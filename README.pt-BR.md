@@ -293,6 +293,8 @@ Vindo do [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io): veja 
 
 ## Situação
 
+As mudanças estão listadas no [CHANGELOG.md](CHANGELOG.md), em inglês.
+
 | Etapa | Estado |
 |---|---|
 | Parser de pacotes Engine.IO | Pronto |
