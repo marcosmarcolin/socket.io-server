@@ -36,7 +36,7 @@ A change is done only when all of these hold:
 2. **The quality tools pass:** PHPUnit, phpcs (PSR-12) and PHPStan at level `max`, locally in Docker and in CI.
 3. **The protocol suites pass in CI**, once they exist:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
-   - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers.
+   - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers (`tests/Compliance/socket-io-server.php`, run by `tests/Compliance/socket-io.sh`).
 4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process.
 5. **The docs are current:** both READMEs, CLAUDE.md and examples match the behavior.
 
@@ -54,7 +54,7 @@ A change is done only when all of these hold:
   - network I/O stays behind small interfaces that tests can replace with fakes.
 - Classes are `final` by default. Inheritance only where there's a documented extension point, such as adapters.
 - **No dynamic properties**, neither on our classes nor on Workerman objects. Per-connection state goes in a `WeakMap` or in `$connection->context`.
-- Magic only where the public API requires it and it's documented: `__get` for `broadcast` and `volatile`, and for the read-only `connected`, `disconnected` and `rooms` of `Socket`, annotated with `@property-read`.
+- Magic only where the public API requires it and it's documented: `__get` for `broadcast` and `volatile`, for the read-only `connected`, `disconnected` and `rooms` of `Socket`, and for `$io->worker`, annotated with `@property-read`.
 - PHPStan at level `max`. No new `ignoreErrors` without a written justification.
 - Short comments, one line, only to explain why.
 - No `echo`/`print`. Errors become exceptions or `error` events.
@@ -71,9 +71,10 @@ docker compose run --rm php composer install
 docker compose run --rm php vendor/bin/phpunit
 docker compose run --rm php composer lint
 tests/Compliance/engine-io.sh                  # official Engine.IO v4 suite, in Docker
+tests/Compliance/socket-io.sh                  # official Socket.IO v5 suite, in Docker
 ```
 
-The compliance script downloads the suite at a pinned commit of `socketio/socket.io` into `.cache/`, checks each file against a SHA-256 checksum, and runs it with a pinned Node image that shares the server container's network. To move to a newer suite, update the commit and the checksums together, after reading what changed.
+Both scripts share `tests/Compliance/suite.sh`, which downloads the suite at a pinned commit of `socketio/socket.io` into `.cache/`, checks each file against a SHA-256 checksum, and runs it with a pinned Node image that shares the server container's network. To move to a newer suite, update the commit and the checksums together, after reading what changed.
 
 ## Workflow
 
@@ -132,6 +133,10 @@ src/
 ```
 
 ### Workerman 5 integration
+
+- **Entry point.** `new SocketIO(3000, $options)` creates a worker on `tcp://0.0.0.0:3000`. To pick the address, the worker count or TLS (`$worker->transport = 'ssl'` plus the context), create the worker yourself and call `$io->attach($worker)`. Either way, call it before `Worker::runAll()`.
+  - `attach()` takes a `tcp` or `ssl` worker, once. It keeps the worker's own `onWorkerStart`/`onWorkerStop` and emits `workerStart`/`workerStop` after them.
+  - `$io->worker` is the attached worker, or `null`.
 
 - **One port for HTTP and WebSocket.** `Protocol\HttpOrWebSocket` inspects the headers of each request on the connection, so a keep-alive connection can upgrade later:
   - a `GET` with `Upgrade: websocket` switches `$connection->protocol` to `Protocol\WebSocket` and delegates to it (`TcpConnection` re-reads `protocol` for every package);
@@ -314,7 +319,7 @@ Worker::runAll();
 3. [x] `Scheduler`, `Emitter`, `Engine\Socket` and transports, tested with a fake scheduler and fake connections.
 4. [x] `Engine\Server`, the Workerman protocols, `WorkermanScheduler` and the Workerman implementations of `HttpExchange` and `WebSocketConnection`, with the official Engine.IO v4 suite running in CI.
 5. [x] Socket.IO parser (`Encoder`, `Decoder`, `Binary`).
-6. [ ] `SocketIO`, `Nsp`, `Client`, `Socket`, `BroadcastOperator`, `InMemoryAdapter`, with the official Socket.IO v5 suite in CI.
+6. [x] `SocketIO`, `Nsp`, `Client`, `Socket`, `BroadcastOperator`, `InMemoryAdapter`, with the official Socket.IO v5 suite in CI.
 7. [ ] Integration with `socket.io-client@4` in CI.
 8. [ ] `ChannelAdapter`, with a multi-process integration test and a scale check.
 9. [ ] Complete README, examples, and a migration guide from phpsocket.io 3.x.
