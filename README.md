@@ -28,8 +28,8 @@ For `socket.io-client` v1 and v2, use [workerman/phpsocket.io](https://github.co
 | Broadcast to rooms and namespaces | Done |
 | The official Socket.IO v5 test suite running in CI (32 of 32 passing) | Done |
 | Integration tests with the official `socket.io-client` 4.8.4: polling, WebSocket, upgrade, namespaces, rooms, acks, binary | Done |
-| Cross-process broadcast with `workerman/channel` | Next |
-| Multi-process broadcast with `workerman/channel` | Planned |
+| Cross-process broadcast: `ChannelAdapter` on `workerman/channel` | Done |
+| Multi-process integration tests and a scale check | Next |
 
 ## Usage
 

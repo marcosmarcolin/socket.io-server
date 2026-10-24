@@ -1,0 +1,44 @@
+<?php
+
+namespace Channel;
+
+/**
+ * Corrects workerman/channel's docblocks, whose "callback" type PHPStan reads as a class. Only what we use.
+ */
+class Client
+{
+    /** @var callable|null */
+    public static $onMessage;
+
+    /**
+     * @param string $ip
+     * @param int $port
+     */
+    public static function connect($ip = '127.0.0.1', $port = 2206): void
+    {
+    }
+
+    /**
+     * @param string $event
+     * @param callable $callback
+     */
+    public static function on($event, $callback): void
+    {
+    }
+
+    /**
+     * @param string|list<string> $events
+     */
+    public static function unsubscribe($events): void
+    {
+    }
+
+    /**
+     * @param string|list<string> $events
+     * @param mixed $data
+     * @param bool $is_loop
+     */
+    public static function publish($events, $data, $is_loop = false): void
+    {
+    }
+}

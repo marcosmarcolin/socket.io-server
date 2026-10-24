@@ -55,7 +55,7 @@ A change is done only when all of these hold:
 - Classes are `final` by default. Inheritance only where there's a documented extension point, such as adapters.
 - **No dynamic properties**, neither on our classes nor on Workerman objects. Per-connection state goes in a `WeakMap` or in `$connection->context`.
 - Magic only where the public API requires it and it's documented: `__get` for `broadcast` and `volatile`, for the read-only `connected`, `disconnected` and `rooms` of `Socket`, and for `$io->worker`, annotated with `@property-read`.
-- PHPStan at level `max`. No new `ignoreErrors` without a written justification.
+- PHPStan at level `max`. No new `ignoreErrors` without a written justification. Third-party docblocks PHPStan can't read are corrected with stubs in `phpstan-stubs/`, each explaining why.
 - Short comments, one line, only to explain why.
 - No `echo`/`print`. Errors become exceptions or `error` events.
 - No production dependencies besides Workerman. `workerman/channel` is optional (in `suggest`).
@@ -132,7 +132,9 @@ src/
     Adapter.php                 the extension point for other processes
     BroadcastOptions.php        rooms, except and volatile of a broadcast
     InMemoryAdapter.php         local rooms and broadcast; not final, the base of other adapters
-    ChannelAdapter.php          cross-process broadcast through workerman/channel
+    ChannelAdapter.php          cross-process broadcast through a PubSub; final
+    PubSub.php                  publish/subscribe between processes, faked in tests
+    WorkermanChannelPubSub.php  PubSub on workerman/channel: the only class touching the static Channel\Client
 ```
 
 ### Workerman 5 integration
@@ -313,6 +315,13 @@ Worker::runAll();
   - sid rooms are detected by their shape (24 hex characters) and go through the namespace's default channel instead of getting their own;
   - a channel is unsubscribed only once its room is empty in the process;
   - creating the adapter outside the event loop throws a clear error (the right place is `workerStart`).
+- **How a broadcast crosses processes:**
+  - `ChannelAdapter` delivers it to this process's sockets first, then publishes it already encoded, so no other process encodes it again;
+  - each adapter has a random id and ignores its own messages, since a publisher receives them too;
+  - the message is an array of scalars (`sender`, `parts` as `['text'|'binary', string]`, `rooms`, `except`, `volatile`), never objects. `unserialize()` then creates no class of ours, and the channel server needs none of our code. Malformed messages are ignored.
+- **One publish per broadcast.** A single room goes to its room channel. Several rooms, a sid room, or no room go once to the namespace channel, and each process filters by the rooms itself. phpsocket.io publishes to each room's channel, so a process with members in two of the rooms delivers twice; this fixes it.
+- **Only broadcasts cross processes.** `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the local process, as in `InMemoryAdapter`.
+- **Setup:** run a `Channel\Server` worker, and in `workerStart` call `$io->adapter(ChannelAdapter::factory($host, $port))`. `PubSub` is the seam that keeps the static `Channel\Client` out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
 - With several processes on the same port, clients must use `transports: ['websocket']`, because polling breaks across processes without sticky sessions. Document this in the README.
 
 ## Roadmap

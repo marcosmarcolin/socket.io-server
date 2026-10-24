@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marcolin\SocketIO\Adapter;
 
+use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\Nsp;
 use Marcolin\SocketIO\Parser\Packet;
 use Marcolin\SocketIO\Socket;
@@ -27,15 +28,24 @@ class InMemoryAdapter implements Adapter
     {
         foreach ($rooms as $room) {
             $this->sids[$socketId][$room] = true;
+            $created = ! isset($this->rooms[$room]);
             $this->rooms[$room][$socketId] = true;
+            if ($created) {
+                $this->roomCreated($room);
+            }
         }
     }
 
     public function del(string $socketId, string $room): void
     {
-        unset($this->sids[$socketId][$room], $this->rooms[$room][$socketId]);
-        if (($this->rooms[$room] ?? null) === []) {
+        unset($this->sids[$socketId][$room]);
+        if (! isset($this->rooms[$room][$socketId])) {
+            return;
+        }
+        unset($this->rooms[$room][$socketId]);
+        if ($this->rooms[$room] === []) {
             unset($this->rooms[$room]);
+            $this->roomDeleted($room);
         }
     }
 
@@ -54,12 +64,7 @@ class InMemoryAdapter implements Adapter
 
     public function broadcast(Packet $packet, BroadcastOptions $options): void
     {
-        $parts = $this->nsp->server->encoder()->encode(
-            new Packet($packet->type, $this->nsp->name, $packet->data, $packet->id),
-        );
-        foreach ($this->select($options) as $socket) {
-            $socket->client->write($parts, $options->volatile);
-        }
+        $this->deliver($this->encode($packet), $options);
     }
 
     public function sockets(array $rooms): array
@@ -95,6 +100,44 @@ class InMemoryAdapter implements Adapter
     {
         foreach ($this->select($options) as $socket) {
             $socket->disconnect($close);
+        }
+    }
+
+    /**
+     * Called when the first socket of this process joins a room.
+     */
+    protected function roomCreated(string $room): void
+    {
+    }
+
+    /**
+     * Called when the last socket of this process leaves a room.
+     */
+    protected function roomDeleted(string $room): void
+    {
+    }
+
+    /**
+     * Encodes a packet for this namespace, once for all its recipients.
+     *
+     * @return list<string|Binary>
+     */
+    protected function encode(Packet $packet): array
+    {
+        return $this->nsp->server->encoder()->encode(
+            new Packet($packet->type, $this->nsp->name, $packet->data, $packet->id),
+        );
+    }
+
+    /**
+     * Writes encoded parts to the sockets of this process that the options select.
+     *
+     * @param list<string|Binary> $parts
+     */
+    protected function deliver(array $parts, BroadcastOptions $options): void
+    {
+        foreach ($this->select($options) as $socket) {
+            $socket->client->write($parts, $options->volatile);
         }
     }
 
