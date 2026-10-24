@@ -345,4 +345,4 @@ Worker::runAll();
 7. [x] Integration with `socket.io-client@4` in CI (the multi-process scenario comes with step 8, since it needs `ChannelAdapter`).
 8. [x] `ChannelAdapter`, with a multi-process integration test and a scale check.
 9. [x] Complete README, examples, and a migration guide from phpsocket.io 3.x.
-10. [ ] First release (`v0.1.0` or `v1.0.0-beta.1`, to be decided).
+10. [ ] First release (`v0.1.0` or `v1.0.0-beta.1`, to be decided). Once the package is on Packagist, the READMEs switch to `composer require` and gain its badges (version, downloads, PHP version).
