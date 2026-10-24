@@ -1,5 +1,7 @@
 # socket.io-server
 
+[![CI](https://github.com/marcosmarcolin/socket.io-server/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/marcosmarcolin/socket.io-server/actions/workflows/ci.yml)
+
 **English** · [Português (Brasil)](README.pt-BR.md)
 
 A [Socket.IO](https://socket.io) v4 server for PHP, built on [Workerman](https://github.com/walkor/workerman).
