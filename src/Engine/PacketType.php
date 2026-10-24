@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MarcosMarcolin\SocketIO\Engine;
+namespace Marcolin\SocketIO\Engine;
 
 enum PacketType: int
 {

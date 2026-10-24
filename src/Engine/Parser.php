@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MarcosMarcolin\SocketIO\Engine;
+namespace Marcolin\SocketIO\Engine;
 
 /**
  * Engine.IO protocol v4 packet encoding.

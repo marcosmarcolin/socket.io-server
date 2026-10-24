@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MarcosMarcolin\SocketIO;
+namespace Marcolin\SocketIO;
 
 /**
  * Binary data, sent as a binary attachment instead of a JSON string.
