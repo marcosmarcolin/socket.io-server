@@ -1,0 +1,6 @@
+services:
+  php:
+    build: .
+    volumes:
+      - .:/app
+    command: sh -c "composer install --no-interaction && vendor/bin/phpunit"
