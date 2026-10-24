@@ -21,7 +21,8 @@ Para o `socket.io-client` v1 e v2, use o [workerman/phpsocket.io](https://github
 | Parser de pacotes Engine.IO | Pronto |
 | Sessão Engine.IO: heartbeat, buffer de escrita, transportes polling e WebSocket, upgrade | Pronto |
 | Servidor Engine.IO: validação de requests, sessões, CORS | Pronto |
-| Servidor Engine.IO no Workerman, validado pela suíte oficial do Engine.IO v4 | Próxima |
+| Integração com o Workerman: uma porta para HTTP e WebSocket, timers, adaptadores de conexão | Pronto |
+| A suíte oficial do Engine.IO v4 rodando no CI | Próxima |
 | Parser Socket.IO, namespaces, salas, acks e broadcast | Planejado |
 | Broadcast entre processos com `workerman/channel` | Planejado |
 

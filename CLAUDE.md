@@ -123,13 +123,23 @@ src/
 
 ### Workerman 5 integration
 
-- **One port for HTTP and WebSocket.** `Protocol\HttpOrWebSocket` inspects the first request's headers:
-  - with `Upgrade: websocket`, it switches `$connection->protocol` to `Protocol\WebSocket` and delegates to it (`TcpConnection` re-reads `protocol` for every package);
-  - otherwise it delegates to `Workerman\Protocols\Http`.
+- **One port for HTTP and WebSocket.** `Protocol\HttpOrWebSocket` inspects the headers of each request on the connection, so a keep-alive connection can upgrade later:
+  - a `GET` with `Upgrade: websocket` switches `$connection->protocol` to `Protocol\WebSocket` and delegates to it (`TcpConnection` re-reads `protocol` for every package);
+  - anything else, including incomplete headers, goes to `Workerman\Protocols\Http`.
 - **Text or binary frames.** Workerman's `Websocket` doesn't tell `onMessage` whether a frame was text or binary. `Protocol\WebSocket` overrides `decode()`, which receives the raw frame, and records the opcode in a static `WeakMap`. Sending binary uses Workerman's own `websocketType` mechanism, inside that class only.
-- **Worker callbacks.** The WebSocket handshake arrives through the worker's `onWebSocketConnect`, HTTP requests and frames through `onMessage`, and connection closes through `onClose`.
+- **Worker callbacks.** `Engine\Workerman\ServerBinding::bind($worker)` takes over the worker's protocol and callbacks, on a `tcp://` worker, before `Worker::runAll()`:
+  - `onConnect` caps `maxPackageSize` at `maxPayload` plus Workerman's 16 KB header limit;
+  - `onMessage` turns HTTP requests into a `WorkermanHttpExchange` for `Server::handleRequest()`, and hands WebSocket frames to the connection's `WorkermanWebSocketConnection`;
+  - `onWebSocketConnect` runs `Server::verifyWebSocket()` before the 101 and answers an invalid request with a plain HTTP 400 and the error message, as the reference does;
+  - `onWebSocketConnected` (Workerman 5.2) runs after the 101, sets `maxPackageSize` to `maxPayload` plus the frame header, and calls `Server::handleWebSocket()`, so the `open` packet goes out at once;
+  - `onClose` reports the close to the WebSocket, or aborts an unanswered HTTP request.
+- **Per-connection state** lives in `WeakMap`s keyed by `TcpConnection`. A `WorkermanHttpExchange` copies its request up front, because Workerman recycles `Request` objects and a poll is answered later.
+- **Exceptions never leave a callback.** `ServerBinding` closes the connection (after a 500 if the request had no answer yet) and passes the exception to its error handler, which defaults to `Worker::log`.
+- **Closing a WebSocket** sends a close frame with code 1000, then closes the TCP connection.
 - **Workerman 5 pitfalls:**
-  - An exception inside `onWebSocketConnect` calls `Worker::stopAll(250)` and **kills the worker**. Never throw there: reject by closing the connection.
+  - An exception inside `onWebSocketConnect` or `onWebSocketConnected` calls `Worker::stopAll(250)` and **kills the worker**. Never throw there: reject by closing the connection.
+  - Workerman calls `onWebSocketConnected` even when `onWebSocketConnect` already closed the connection.
+  - Workerman caches decoded packages by their raw bytes and may deliver a cached object without decoding again. Never keep state that depends on `decode()` running for every package, except the opcode, which is part of those bytes.
   - Workerman's files use `strict_types`, so `input()` must return an `int`.
   - Exceptions in `onMessage` are caught by Workerman and don't kill the worker. Handle them anyway.
 
