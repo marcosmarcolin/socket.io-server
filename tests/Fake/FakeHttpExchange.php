@@ -24,12 +24,41 @@ final class FakeHttpExchange implements HttpExchange
 
     /**
      * @param array<string, string> $headers
+     * @param array<string, string> $query
      */
     public function __construct(
         private readonly string $method,
         private readonly string $body = '',
         private readonly array $headers = [],
+        private readonly string $path = '/engine.io/',
+        private readonly array $query = [],
     ) {
+    }
+
+    /**
+     * @param array<string, string> $headers
+     */
+    public static function request(string $method, string $url, string $body = '', array $headers = []): self
+    {
+        $path = parse_url($url, PHP_URL_PATH);
+
+        return new self($method, $body, $headers, is_string($path) ? $path : '/', self::parseQuery($url));
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public static function parseQuery(string $url): array
+    {
+        parse_str((string) parse_url($url, PHP_URL_QUERY), $parsed);
+        $query = [];
+        foreach ($parsed as $name => $value) {
+            if (is_string($value)) {
+                $query[(string) $name] = $value;
+            }
+        }
+
+        return $query;
     }
 
     public static function get(): self
@@ -48,6 +77,16 @@ final class FakeHttpExchange implements HttpExchange
     public function method(): string
     {
         return $this->method;
+    }
+
+    public function path(): string
+    {
+        return $this->path;
+    }
+
+    public function query(string $name): ?string
+    {
+        return $this->query[$name] ?? null;
     }
 
     public function header(string $name): ?string
