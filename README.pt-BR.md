@@ -29,7 +29,8 @@ Para o `socket.io-client` v1 e v2, use o [workerman/phpsocket.io](https://github
 | A suíte oficial do Socket.IO v5 rodando no CI (32 de 32 passando) | Pronto |
 | Testes de integração com o `socket.io-client` 4.8.4 oficial: polling, WebSocket, upgrade, namespaces, salas, acks, binário | Pronto |
 | Broadcast entre processos: `ChannelAdapter` sobre o `workerman/channel` | Pronto |
-| Testes de integração com vários processos e verificação de escala | Próxima |
+| Testes de integração com vários processos e verificação de escala (200 clientes, 4.000 entregas) | Pronto |
+| Exemplos e guia de migração do phpsocket.io | Próxima |
 
 ## Uso
 
@@ -89,7 +90,44 @@ Rode com `php server.php start`. Para escolher o endereço, o número de process
 
 Objetos JSON chegam como arrays PHP. Para enviar um objeto vazio, use `new stdClass()`. Para enviar dados binários, envolva-os em `Marcolin\SocketIO\Binary`.
 
-Por enquanto, rode um único processo: o broadcast entre processos chega com o `ChannelAdapter`. Com vários processos na mesma porta, os clientes também vão precisar de `transports: ['websocket']`, porque o polling exige sticky sessions.
+## Vários processos
+
+O broadcast chega aos outros processos pelo `ChannelAdapter` e por um servidor [workerman/channel](https://github.com/walkor/channel):
+
+```sh
+composer require workerman/channel
+```
+
+```php
+<?php
+
+use Channel\Server as ChannelServer;
+use Marcolin\SocketIO\Adapter\ChannelAdapter;
+use Marcolin\SocketIO\SocketIO;
+use Workerman\Worker;
+
+require __DIR__ . '/vendor/autoload.php';
+
+// The channel server, in a process of its own.
+new ChannelServer('127.0.0.1', 2206);
+
+$io = new SocketIO(options: ['cors' => ['origin' => ['https://example.com']]]);
+
+// The adapter connects to the channel server, which needs each process's event loop.
+$io->on('workerStart', function () use ($io): void {
+    $io->adapter(ChannelAdapter::factory('127.0.0.1', 2206));
+});
+
+$worker = new Worker('tcp://0.0.0.0:3000');
+$worker->count = 4;
+$worker->reusePort = true;
+$io->attach($worker);
+
+Worker::runAll();
+```
+
+- Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem.
+- Só o broadcast atravessa processos (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` e `disconnectSockets` agem no processo atual.
 
 ## Desenvolvimento
 
@@ -102,6 +140,7 @@ docker compose run --rm php composer lint      # phpcs (PSR-12) e PHPStan (níve
 tests/Compliance/engine-io.sh                  # a suíte oficial do Engine.IO v4
 tests/Compliance/socket-io.sh                  # a suíte oficial do Socket.IO v5
 tests/Integration/run.sh                       # o socket.io-client oficial contra este servidor
+tests/Integration/run.sh multi-process         # o mesmo com dois processos e um servidor de canal
 ```
 
 ### Varredura de segredos

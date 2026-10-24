@@ -29,7 +29,8 @@ For `socket.io-client` v1 and v2, use [workerman/phpsocket.io](https://github.co
 | The official Socket.IO v5 test suite running in CI (32 of 32 passing) | Done |
 | Integration tests with the official `socket.io-client` 4.8.4: polling, WebSocket, upgrade, namespaces, rooms, acks, binary | Done |
 | Cross-process broadcast: `ChannelAdapter` on `workerman/channel` | Done |
-| Multi-process integration tests and a scale check | Next |
+| Multi-process integration tests and a scale check (200 clients, 4,000 deliveries) | Done |
+| Examples and a migration guide from phpsocket.io | Next |
 
 ## Usage
 
@@ -89,7 +90,44 @@ Run it with `php server.php start`. To pick the address, the number of processes
 
 JSON objects arrive as PHP arrays. To send an empty object, use `new stdClass()`. To send binary data, wrap it in `Marcolin\SocketIO\Binary`.
 
-For now, run a single worker process: broadcasting across processes comes with `ChannelAdapter`. With several processes on one port, clients will also need `transports: ['websocket']`, since polling needs sticky sessions.
+## Several processes
+
+Broadcasts reach the other processes through `ChannelAdapter` and a [workerman/channel](https://github.com/walkor/channel) server:
+
+```sh
+composer require workerman/channel
+```
+
+```php
+<?php
+
+use Channel\Server as ChannelServer;
+use Marcolin\SocketIO\Adapter\ChannelAdapter;
+use Marcolin\SocketIO\SocketIO;
+use Workerman\Worker;
+
+require __DIR__ . '/vendor/autoload.php';
+
+// The channel server, in a process of its own.
+new ChannelServer('127.0.0.1', 2206);
+
+$io = new SocketIO(options: ['cors' => ['origin' => ['https://example.com']]]);
+
+// The adapter connects to the channel server, which needs each process's event loop.
+$io->on('workerStart', function () use ($io): void {
+    $io->adapter(ChannelAdapter::factory('127.0.0.1', 2206));
+});
+
+$worker = new Worker('tcp://0.0.0.0:3000');
+$worker->count = 4;
+$worker->reusePort = true;
+$io->attach($worker);
+
+Worker::runAll();
+```
+
+- Clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee.
+- Only broadcasts cross processes (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the current process.
 
 ## Development
 
@@ -102,6 +140,7 @@ docker compose run --rm php composer lint      # phpcs (PSR-12) and PHPStan (lev
 tests/Compliance/engine-io.sh                  # the official Engine.IO v4 test suite
 tests/Compliance/socket-io.sh                  # the official Socket.IO v5 test suite
 tests/Integration/run.sh                       # the official socket.io-client against this server
+tests/Integration/run.sh multi-process         # the same over two processes and a channel server
 ```
 
 ### Secret scanning

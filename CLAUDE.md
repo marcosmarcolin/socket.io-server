@@ -37,7 +37,7 @@ A change is done only when all of these hold:
 3. **The protocol suites pass in CI**, once they exist:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers (`tests/Compliance/socket-io-server.php`, run by `tests/Compliance/socket-io.sh`).
-4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh`).
+4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh` and `tests/Integration/run.sh multi-process`).
 5. **The docs are current:** both READMEs, CLAUDE.md and examples match the behavior.
 
 ## Code rules
@@ -73,6 +73,7 @@ docker compose run --rm php composer lint
 tests/Compliance/engine-io.sh                  # official Engine.IO v4 suite, in Docker
 tests/Compliance/socket-io.sh                  # official Socket.IO v5 suite, in Docker
 tests/Integration/run.sh                       # the official socket.io-client against our server, in Docker
+tests/Integration/run.sh multi-process         # the same over two processes and a channel server
 ```
 
 The integration client (`tests/Integration/client/`) pins `socket.io-client` in `package.json`, and its `package-lock.json` is committed, so `npm ci` checks every package's integrity hash. Its tests use `node:test`, so the client is the only dependency. Each scenario runs over polling only, WebSocket only, and polling with the upgrade. To move to a newer client, regenerate the lockfile in Docker with `npm install --package-lock-only --ignore-scripts`, then read what changed.
@@ -323,6 +324,10 @@ Worker::runAll();
 - **Only broadcasts cross processes.** `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the local process, as in `InMemoryAdapter`.
 - **Setup:** run a `Channel\Server` worker, and in `workerStart` call `$io->adapter(ChannelAdapter::factory($host, $port))`. `PubSub` is the seam that keeps the static `Channel\Client` out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
 - With several processes on the same port, clients must use `transports: ['websocket']`, because polling breaks across processes without sticky sessions. Document this in the README.
+- **Multi-process tests** (`tests/Integration/multi-process-server.php`): two processes with `reusePort`, so the kernel spreads connections, plus a `Channel\Server`.
+  - The tests first make sure clients landed on both processes, and that a broadcast crosses (retrying while the workers connect to the channel server).
+  - They cover emits, rooms, several rooms at once, `except` and `broadcast` across processes.
+  - The **scale check** has 200 WebSocket clients get 20 broadcasts each: every client must get every message once and in order, and the time is printed. It catches loss and duplication, not performance.
 
 ## Roadmap
 
@@ -333,6 +338,6 @@ Worker::runAll();
 5. [x] Socket.IO parser (`Encoder`, `Decoder`, `Binary`).
 6. [x] `SocketIO`, `Nsp`, `Client`, `Socket`, `BroadcastOperator`, `InMemoryAdapter`, with the official Socket.IO v5 suite in CI.
 7. [x] Integration with `socket.io-client@4` in CI (the multi-process scenario comes with step 8, since it needs `ChannelAdapter`).
-8. [ ] `ChannelAdapter`, with a multi-process integration test and a scale check.
+8. [x] `ChannelAdapter`, with a multi-process integration test and a scale check.
 9. [ ] Complete README, examples, and a migration guide from phpsocket.io 3.x.
 10. [ ] First release (`v0.1.0` or `v1.0.0-beta.1`, to be decided).
