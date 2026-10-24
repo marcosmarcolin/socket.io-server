@@ -90,7 +90,8 @@ src/
   Engine/                       Engine.IO v4
     Server.php                  routes HTTP and WebSocket, handshake, sessions
     Socket.php                  session: state, heartbeat, upgrade, write buffer
-    ServerOptions.php           pingInterval, pingTimeout, maxPayload, path, CORS...
+    SocketState.php, CloseReason.php  session state; close reasons with the reference's strings
+    ServerOptions.php           pingInterval, pingTimeout, maxPayload, upgradeTimeout (path, CORS... in step 4)
     Transport/Transport.php     base transport (Emitter): packet, ready, drain, error, close
     Transport/Polling.php       pending GET, POST, noop on upgrade
     Transport/WebSocket.php     one packet per frame, text or binary
@@ -141,6 +142,10 @@ src/
 
 - **Handshake:** only via `GET` without `sid` (or WebSocket without `sid`). It answers an `open` packet with `sid`, `upgrades`, `pingInterval`, `pingTimeout` and `maxPayload`. `upgrades` is `["websocket"]` on polling and `[]` on WebSocket.
 - **Heartbeat:** the **server** sends `ping` every `pingInterval`. Without a `pong` within `pingTimeout`, the session closes with `ping timeout`.
+  - the next `ping` is scheduled `pingInterval` after the `pong`;
+  - any other packet received while waiting for the `pong` restarts the `pingTimeout` once per ping, as the reference does;
+  - a `ping` from the client closes the session with `transport error` (v4 heartbeats go from server to client only).
+- **Close reasons** (`CloseReason`): `ping timeout`, `transport close`, `transport error`, `parse error` (malformed packet) and `forced close` (closed by the server). A `close` packet over WebSocket closes the session with `transport close`.
 - **Polling:**
   - a `GET` waits until there are packets to send; a `POST` answers `ok`;
   - a second concurrent `GET` gets 400, the pending one gets `1` (close), and the session closes;
@@ -155,10 +160,10 @@ src/
 - **Upgrade:**
   1. a WebSocket arrives with the `sid` of a polling session;
   2. the client sends `2probe` and the server answers `3probe`;
-  3. the pending `GET`, or the next one, gets `6`;
+  3. the pending `GET`, or the next one, gets `6`. This is event-driven: the reference retries every 100 ms instead;
   4. on `5`, the WebSocket becomes the active transport and the buffer is flushed through it.
 
-  After the upgrade, HTTP requests or another WebSocket with the same `sid` are rejected. If the upgrade doesn't complete within `upgradeTimeout` (10 s), the WebSocket is closed.
+  After the upgrade, HTTP requests or another WebSocket with the same `sid` are rejected. A second WebSocket during an upgrade is closed too. If the upgrade doesn't complete within `upgradeTimeout` (10 s), or any packet other than `2probe` or `5` arrives on the new transport, the WebSocket is closed and the session stays on polling.
 - **Polling payload:** packets separated by `\x1e`; binary as `b` + base64. Over WebSocket, binary goes as a raw binary frame.
 - **CORS:** the `cors.origin` option (`'*'` by default, a list of origins, or `null` to disable), including the `OPTIONS` preflight.
 
@@ -241,7 +246,7 @@ Worker::runAll();
 
 1. [x] Scaffold: Composer, Docker, PHPUnit, PHPStan max, phpcs, CI.
 2. [x] Engine.IO parser (`Engine\Parser`).
-3. [ ] `Scheduler`, `Emitter`, `Engine\Socket` and transports, tested with a fake scheduler and fake connections.
+3. [x] `Scheduler`, `Emitter`, `Engine\Socket` and transports, tested with a fake scheduler and fake connections.
 4. [ ] `Engine\Server`, the Workerman protocols, `WorkermanScheduler` and the Workerman implementations of `HttpExchange` and `WebSocketConnection`, with the official Engine.IO v4 suite running in CI.
 5. [ ] Socket.IO parser (`Encoder`, `Decoder`, `Binary`).
 6. [ ] `SocketIO`, `Nsp`, `Client`, `Socket`, `BroadcastOperator`, `InMemoryAdapter`, with the official Socket.IO v5 suite in CI.
