@@ -4,17 +4,31 @@ declare(strict_types=1);
 
 namespace Marcolin\SocketIO\Engine\Workerman;
 
-use Workerman\Protocols\Http\Request;
+use Marcolin\SocketIO\Engine\Request;
+use Workerman\Connection\TcpConnection;
+use Workerman\Protocols\Http\Request as WorkermanRequest;
 
 /**
- * Query and header values of a Workerman request, as plain strings.
+ * Turns a Workerman request into an Engine.IO Request.
  */
 final class RequestValues
 {
+    public static function request(TcpConnection $connection, WorkermanRequest $request): Request
+    {
+        return new Request(
+            $request->path(),
+            self::query($request),
+            self::headers($request),
+            $request->uri(),
+            $connection->getRemoteIp(),
+            $connection->transport === 'ssl',
+        );
+    }
+
     /**
      * @return array<string, string>
      */
-    public static function query(Request $request): array
+    private static function query(WorkermanRequest $request): array
     {
         return self::strings($request->get());
     }
@@ -22,7 +36,7 @@ final class RequestValues
     /**
      * @return array<string, string> lower-case names
      */
-    public static function headers(Request $request): array
+    private static function headers(WorkermanRequest $request): array
     {
         return self::strings($request->header());
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Marcolin\SocketIO\Engine\Transport;
 
 use Closure;
+use Marcolin\SocketIO\Engine\Request;
 
 /**
  * One HTTP request, with its full body, and the way to answer it.
@@ -32,6 +33,11 @@ interface HttpExchange
     public function header(string $name): ?string;
 
     public function body(): string;
+
+    /**
+     * The whole request, without its body.
+     */
+    public function request(): Request;
 
     /**
      * Answers the request. Only the first call has an effect.

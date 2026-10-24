@@ -10,7 +10,7 @@ use Marcolin\SocketIO\Engine\Server;
 use Marcolin\SocketIO\Engine\ServerError;
 use Marcolin\SocketIO\Engine\ServerOptions;
 use Marcolin\SocketIO\Engine\Socket;
-use Marcolin\SocketIO\Engine\WebSocketRequest;
+use Marcolin\SocketIO\Engine\Request;
 use Marcolin\SocketIO\Tests\Fake\FakeHttpExchange;
 use Marcolin\SocketIO\Tests\Fake\FakeScheduler;
 use Marcolin\SocketIO\Tests\Fake\FakeWebSocketConnection;
@@ -297,7 +297,7 @@ final class ServerTest extends TestCase
     /**
      * @return iterable<string, array{string, ServerError}>
      */
-    public static function invalidWebSocketRequests(): iterable
+    public static function invalidRequests(): iterable
     {
         yield 'no EIO' => ['/engine.io/?transport=websocket', ServerError::UnsupportedProtocolVersion];
         yield 'EIO=abc' => ['/engine.io/?EIO=abc&transport=websocket', ServerError::UnsupportedProtocolVersion];
@@ -308,8 +308,8 @@ final class ServerTest extends TestCase
         yield 'other path' => ['/other/?EIO=4&transport=websocket', ServerError::BadRequest];
     }
 
-    #[DataProvider('invalidWebSocketRequests')]
-    public function testRejectsInvalidWebSocketRequests(string $url, ServerError $error): void
+    #[DataProvider('invalidRequests')]
+    public function testRejectsInvalidRequests(string $url, ServerError $error): void
     {
         $request = $this->webSocketRequest($url);
         $connection = new FakeWebSocketConnection();
@@ -391,7 +391,7 @@ final class ServerTest extends TestCase
      */
     private function request(string $method, string $url, string $body = '', array $headers = []): FakeHttpExchange
     {
-        $exchange = FakeHttpExchange::request($method, $url, $body, $headers);
+        $exchange = FakeHttpExchange::fromUrl($method, $url, $body, $headers);
         $this->server->handleRequest($exchange);
 
         return $exchange;
@@ -422,9 +422,9 @@ final class ServerTest extends TestCase
         return $connection;
     }
 
-    private function webSocketRequest(string $url): WebSocketRequest
+    private function webSocketRequest(string $url): Request
     {
-        return new WebSocketRequest((string) parse_url($url, PHP_URL_PATH), FakeHttpExchange::parseQuery($url));
+        return new Request((string) parse_url($url, PHP_URL_PATH), FakeHttpExchange::parseQuery($url));
     }
 
     private function assertRejected(FakeHttpExchange $exchange, ServerError $error): void

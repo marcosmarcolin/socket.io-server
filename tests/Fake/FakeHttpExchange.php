@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Marcolin\SocketIO\Tests\Fake;
 
 use Closure;
+use Marcolin\SocketIO\Engine\Request;
 use Marcolin\SocketIO\Engine\Transport\HttpExchange;
 
 /**
@@ -38,7 +39,7 @@ final class FakeHttpExchange implements HttpExchange
     /**
      * @param array<string, string> $headers
      */
-    public static function request(string $method, string $url, string $body = '', array $headers = []): self
+    public static function fromUrl(string $method, string $url, string $body = '', array $headers = []): self
     {
         $path = parse_url($url, PHP_URL_PATH);
 
@@ -103,6 +104,15 @@ final class FakeHttpExchange implements HttpExchange
     public function body(): string
     {
         return $this->body;
+    }
+
+    public function request(): Request
+    {
+        $query = http_build_query($this->query);
+
+        $uri = $this->path . ($query === '' ? '' : '?' . $query);
+
+        return new Request($this->path, $this->query, $this->headers, $uri, '127.0.0.1');
     }
 
     public function respond(int $status, string $body, array $headers = []): void
