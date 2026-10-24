@@ -15,7 +15,7 @@ final class InMemoryAdapterTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->adapter = new InMemoryAdapter((new SocketIO([], new FakeScheduler()))->sockets);
+        $this->adapter = new InMemoryAdapter((new SocketIO(scheduler: new FakeScheduler()))->sockets);
     }
 
     public function testTracksTheRoomsOfEachSocket(): void

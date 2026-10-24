@@ -29,10 +29,10 @@ final class NamespaceTest extends TestCase
     protected function setUp(): void
     {
         $this->io = new SocketIO(
-            [],
-            new FakeScheduler(),
-            new SequentialSessionIdGenerator(),
-            new SequentialSocketIdGenerator(),
+            options: [],
+            scheduler: new FakeScheduler(),
+            sessionIds: new SequentialSessionIdGenerator(),
+            socketIds: new SequentialSocketIdGenerator(),
         );
         $this->io->on('connection', function (Socket $socket): void {
             $this->connected[] = $socket;
@@ -223,12 +223,15 @@ final class NamespaceTest extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        new SocketIO(['connectTimeout' => 0], new FakeScheduler());
+        new SocketIO(options: ['connectTimeout' => 0], scheduler: new FakeScheduler());
     }
 
     public function testPassesTheOtherOptionsToEngineIo(): void
     {
-        $io = new SocketIO(['connectTimeout' => 5000, 'pingInterval' => 1234, 'path' => '/ws'], new FakeScheduler());
+        $io = new SocketIO(
+            options: ['connectTimeout' => 5000, 'pingInterval' => 1234, 'path' => '/ws'],
+            scheduler: new FakeScheduler(),
+        );
 
         self::assertSame(5000, $io->connectTimeout);
         self::assertSame(1234, $io->engine->options->pingInterval);
@@ -239,6 +242,6 @@ final class NamespaceTest extends TestCase
     {
         $this->expectException(InvalidArgumentException::class);
 
-        new SocketIO(['conectTimeout' => 5000], new FakeScheduler());
+        new SocketIO(options: ['conectTimeout' => 5000], scheduler: new FakeScheduler());
     }
 }

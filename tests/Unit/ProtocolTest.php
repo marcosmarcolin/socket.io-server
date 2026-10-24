@@ -29,10 +29,10 @@ final class ProtocolTest extends TestCase
     {
         $this->scheduler = new FakeScheduler();
         $this->io = new SocketIO(
-            ['pingInterval' => 300, 'pingTimeout' => 200, 'connectTimeout' => self::CONNECT_TIMEOUT],
-            $this->scheduler,
-            new SequentialSessionIdGenerator(),
-            new SequentialSocketIdGenerator(),
+            options: ['pingInterval' => 300, 'pingTimeout' => 200, 'connectTimeout' => self::CONNECT_TIMEOUT],
+            scheduler: $this->scheduler,
+            sessionIds: new SequentialSessionIdGenerator(),
+            socketIds: new SequentialSocketIdGenerator(),
         );
         $this->io->on('connection', static function (Socket $socket): void {
             $socket->emit('auth', (object) $socket->handshake['auth']);

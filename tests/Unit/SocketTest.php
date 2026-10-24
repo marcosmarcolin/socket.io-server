@@ -44,10 +44,10 @@ final class SocketTest extends TestCase
     {
         $this->scheduler = new FakeScheduler();
         $this->io = new SocketIO(
-            ['pingInterval' => 100_000, 'pingTimeout' => 100_000],
-            $this->scheduler,
-            new SequentialSessionIdGenerator(),
-            new SequentialSocketIdGenerator(),
+            options: ['pingInterval' => 100_000, 'pingTimeout' => 100_000],
+            scheduler: $this->scheduler,
+            sessionIds: new SequentialSessionIdGenerator(),
+            socketIds: new SequentialSocketIdGenerator(),
         );
         [$this->client, $this->socket] = $this->connect();
     }
@@ -75,7 +75,11 @@ final class SocketTest extends TestCase
 
     public function testDescribesTheHandshake(): void
     {
-        $io = new SocketIO([], $this->scheduler, new SequentialSessionIdGenerator(), new SequentialSocketIdGenerator());
+        $io = new SocketIO(
+            scheduler: $this->scheduler,
+            sessionIds: new SequentialSessionIdGenerator(),
+            socketIds: new SequentialSocketIdGenerator(),
+        );
         $client = new SocketIOClient($io, ['Origin' => 'https://a.test', 'X-Token' => 'abc'], 'room=lobby');
         $sockets = [];
         $io->on('connection', function (Socket $socket) use (&$sockets): void {
@@ -100,7 +104,11 @@ final class SocketTest extends TestCase
 
     public function testThePollingHandshakeRequestIsKept(): void
     {
-        $io = new SocketIO([], $this->scheduler, new SequentialSessionIdGenerator(), new SequentialSocketIdGenerator());
+        $io = new SocketIO(
+            scheduler: $this->scheduler,
+            sessionIds: new SequentialSessionIdGenerator(),
+            socketIds: new SequentialSocketIdGenerator(),
+        );
         $io->engine->handleRequest(FakeHttpExchange::fromUrl('GET', '/socket.io/?EIO=4&transport=polling&x=1'));
 
         $session = $io->engine->session('sid1');

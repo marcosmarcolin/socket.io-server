@@ -30,10 +30,10 @@ final class BroadcastTest extends TestCase
     protected function setUp(): void
     {
         $this->io = new SocketIO(
-            ['pingInterval' => 100_000, 'pingTimeout' => 100_000],
-            new FakeScheduler(),
-            new SequentialSessionIdGenerator(),
-            new SequentialSocketIdGenerator(),
+            options: ['pingInterval' => 100_000, 'pingTimeout' => 100_000],
+            scheduler: new FakeScheduler(),
+            sessionIds: new SequentialSessionIdGenerator(),
+            socketIds: new SequentialSocketIdGenerator(),
         );
         // Four sockets: 0 and 1 in room "a", 1 and 2 in room "b", 3 in no room.
         for ($i = 0; $i < 4; $i++) {

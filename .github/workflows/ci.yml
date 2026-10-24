@@ -37,6 +37,15 @@ jobs:
 
       - run: tests/Compliance/engine-io.sh
 
+  socket-io-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: docker compose run --rm php composer install --no-interaction
+
+      - run: tests/Compliance/socket-io.sh
+
   tests:
     runs-on: ubuntu-latest
     strategy:

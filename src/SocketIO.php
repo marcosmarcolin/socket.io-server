@@ -15,18 +15,21 @@ use Marcolin\SocketIO\Engine\Server;
 use Marcolin\SocketIO\Engine\ServerOptions;
 use Marcolin\SocketIO\Engine\SessionIdGenerator;
 use Marcolin\SocketIO\Engine\Socket as EngineSocket;
+use Marcolin\SocketIO\Engine\Workerman\ServerBinding;
 use Marcolin\SocketIO\Engine\Workerman\WorkermanScheduler;
 use Marcolin\SocketIO\Event\Emitter;
 use Marcolin\SocketIO\Parser\Encoder;
 use WeakMap;
+use Workerman\Worker;
 
 /**
  * The Socket.IO server.
  *
  * `connection` and `connect` listeners belong to the main namespace, as $io->sockets->on() would, and so do
- * the broadcast methods.
+ * the broadcast methods. The server's own events are `workerStart` and `workerStop` (Worker), once attached.
  *
  * @property-read BroadcastOperator $volatile broadcasts that skip sockets whose transport is busy
+ * @property-read Worker|null $worker the Workerman worker serving it, once attached
  */
 final class SocketIO extends Emitter
 {
@@ -51,10 +54,14 @@ final class SocketIO extends Emitter
     /** @var WeakMap<EngineSocket, Client> */
     private WeakMap $clients;
 
+    private ?Worker $attachedWorker = null;
+
     /**
+     * @param int|null $port listens on this port, on all IPv4 interfaces; without it, call attach() with a worker
      * @param array<string, mixed> $options connectTimeout, plus the Engine.IO options of ServerOptions::fromArray()
      */
     public function __construct(
+        ?int $port = null,
         array $options = [],
         private readonly Scheduler $scheduler = new WorkermanScheduler(),
         ?SessionIdGenerator $sessionIds = null,
@@ -80,6 +87,44 @@ final class SocketIO extends Emitter
         $this->engine->on('connection', function (EngineSocket $connection): void {
             $this->clients[$connection] = new Client($this, $connection);
         });
+
+        if ($port !== null) {
+            $this->attach(new Worker('tcp://0.0.0.0:' . $port));
+        }
+    }
+
+    /**
+     * Serves this server on a worker, which must use the tcp or ssl transport. The worker's protocol and connection
+     * callbacks are taken over; onWorkerStart and onWorkerStop are kept, and run before the server's events.
+     * Call it before Worker::runAll().
+     */
+    public function attach(Worker $worker): static
+    {
+        if ($this->attachedWorker !== null) {
+            throw new LogicException('The server is already attached to a worker');
+        }
+        if ($worker->transport !== 'tcp' && $worker->transport !== 'ssl') {
+            throw new InvalidArgumentException(sprintf('The worker must use tcp or ssl, not %s', $worker->transport));
+        }
+        $this->attachedWorker = $worker;
+        (new ServerBinding($this->engine))->bind($worker);
+
+        $onStart = $worker->onWorkerStart;
+        $worker->onWorkerStart = function (Worker $worker) use ($onStart): void {
+            if (is_callable($onStart)) {
+                $onStart($worker);
+            }
+            $this->dispatch('workerStart', $worker);
+        };
+        $onStop = $worker->onWorkerStop;
+        $worker->onWorkerStop = function (Worker $worker) use ($onStop): void {
+            if (is_callable($onStop)) {
+                $onStop($worker);
+            }
+            $this->dispatch('workerStop', $worker);
+        };
+
+        return $this;
     }
 
     /**
@@ -158,13 +203,13 @@ final class SocketIO extends Emitter
         return $this->emit('message', ...$args);
     }
 
-    public function __get(string $name): BroadcastOperator
+    public function __get(string $name): BroadcastOperator|Worker|null
     {
-        if ($name !== 'volatile') {
-            throw new LogicException(sprintf('Undefined property %s::$%s', self::class, $name));
-        }
-
-        return $this->sockets->volatile;
+        return match ($name) {
+            'volatile' => $this->sockets->volatile,
+            'worker' => $this->attachedWorker,
+            default => throw new LogicException(sprintf('Undefined property %s::$%s', self::class, $name)),
+        };
     }
 
     /**

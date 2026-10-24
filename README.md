@@ -4,7 +4,7 @@
 
 A [Socket.IO](https://socket.io) v4 server for PHP, built on [Workerman](https://github.com/walkor/workerman).
 
-> **Work in progress.** Not usable yet: the Engine.IO layer is being built, and there is no server to run yet.
+> **Work in progress.** The server works and passes the official Engine.IO and Socket.IO compliance suites, but it isn't published on Packagist yet and its API may still change.
 
 ## Scope
 
@@ -26,8 +26,70 @@ For `socket.io-client` v1 and v2, use [workerman/phpsocket.io](https://github.co
 | Socket.IO v5 parser: encoder, decoder, binary attachments | Done |
 | Socket.IO server: connection, namespaces, middlewares, events, acks, rooms | Done |
 | Broadcast to rooms and namespaces | Done |
-| The official Socket.IO v5 test suite running in CI | Next |
+| The official Socket.IO v5 test suite running in CI (32 of 32 passing) | Done |
+| Integration tests with the official `socket.io-client` | Next |
+| Cross-process broadcast with `workerman/channel` | Planned |
 | Multi-process broadcast with `workerman/channel` | Planned |
+
+## Usage
+
+```php
+<?php
+
+use Marcolin\SocketIO\ConnectionError;
+use Marcolin\SocketIO\Socket;
+use Marcolin\SocketIO\SocketIO;
+use Workerman\Worker;
+
+require __DIR__ . '/vendor/autoload.php';
+
+$io = new SocketIO(3000, [
+    'pingInterval' => 25000,
+    'pingTimeout' => 20000,
+    'cors' => ['origin' => ['https://example.com']],
+]);
+
+// Runs before each connection to "/".
+$io->use(function (Socket $socket, Closure $next): void {
+    $token = $socket->handshake['auth']['token'] ?? null;
+    $next($token === 'secret' ? null : new ConnectionError('unauthorized'));
+});
+
+$io->on('connection', function (Socket $socket) use ($io): void {
+    $socket->data['joinedAt'] = time();
+    $socket->join('lobby');
+    $socket->emit('hello', 'world');
+    $socket->broadcast->emit('joined', $socket->id);
+
+    // A Closure as the last argument is the client's acknowledgement callback.
+    $socket->on('chat', function (string $message, ?Closure $ack = null) use ($socket): void {
+        $socket->to('lobby')->emit('chat', $message);
+        if ($ack !== null) {
+            $ack('delivered');
+        }
+    });
+
+    $socket->timeout(5000)->emit('question', function (?Throwable $error, mixed $answer): void {
+        // $error is a TimeoutException when the client didn't answer in time.
+    });
+
+    $socket->on('disconnect', function (string $reason) use ($io, $socket): void {
+        $io->to('lobby')->emit('left', $socket->id, $reason);
+    });
+});
+
+$io->of('/admin')->on('connection', function (Socket $socket): void {
+    $socket->emit('welcome', ['role' => 'admin']);
+});
+
+Worker::runAll();
+```
+
+Run it with `php server.php start`. To pick the address, the number of processes or TLS, create the `Worker` yourself and call `$io->attach($worker)` before `Worker::runAll()`.
+
+JSON objects arrive as PHP arrays. To send an empty object, use `new stdClass()`. To send binary data, wrap it in `Marcolin\SocketIO\Binary`.
+
+For now, run a single worker process: broadcasting across processes comes with `ChannelAdapter`. With several processes on one port, clients will also need `transports: ['websocket']`, since polling needs sticky sessions.
 
 ## Development
 
@@ -38,6 +100,7 @@ docker compose run --rm php composer install
 docker compose run --rm php vendor/bin/phpunit
 docker compose run --rm php composer lint      # phpcs (PSR-12) and PHPStan (level max)
 tests/Compliance/engine-io.sh                  # the official Engine.IO v4 test suite
+tests/Compliance/socket-io.sh                  # the official Socket.IO v5 test suite
 ```
 
 ### Secret scanning
