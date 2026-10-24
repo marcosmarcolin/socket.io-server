@@ -4,9 +4,13 @@
   "type": "library",
   "license": "MIT",
   "keywords": ["socket.io", "websocket", "realtime", "workerman", "engine.io"],
+  "homepage": "https://github.com/marcosmarcolin/socket.io-server",
   "authors": [
     {
-      "name": "Marcos Marcolin"
+      "name": "Marcos Marcolin",
+      "email": "marcolindev@gmail.com",
+      "homepage": "https://www.marcosmarcolin.com.br",
+      "role": "Developer"
     }
   ],
   "require": {
