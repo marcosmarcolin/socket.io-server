@@ -23,6 +23,8 @@ use Throwable;
  * - `upgrading` (Transport): the client probed the new transport;
  * - `upgrade` (Transport): the new transport is now the active one;
  * - `close` (CloseReason, ?Throwable): the session is closed.
+ *
+ * $request is the request that opened the session.
  */
 final class Socket extends Emitter
 {
@@ -59,6 +61,7 @@ final class Socket extends Emitter
         Transport $transport,
         private readonly ServerOptions $options,
         private readonly Scheduler $scheduler,
+        public readonly Request $request = new Request('/'),
     ) {
         $this->setTransport($transport);
         $this->sendPacket(PacketType::Open, json_encode([

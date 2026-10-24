@@ -170,7 +170,7 @@ final class ServerBindingTest extends TestCase
         ], WebSocketFrames::parse($pair->read()));
     }
 
-    public function testAnInvalidWebSocketRequestGetsAnHttpError(): void
+    public function testAnInvalidRequestGetsAnHttpError(): void
     {
         $pair = $this->connect();
 

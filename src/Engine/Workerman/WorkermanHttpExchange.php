@@ -7,7 +7,8 @@ namespace Marcolin\SocketIO\Engine\Workerman;
 use Closure;
 use Marcolin\SocketIO\Engine\Transport\HttpExchange;
 use Workerman\Connection\TcpConnection;
-use Workerman\Protocols\Http\Request;
+use Marcolin\SocketIO\Engine\Request;
+use Workerman\Protocols\Http\Request as WorkermanRequest;
 use Workerman\Protocols\Http\Response;
 
 /**
@@ -19,13 +20,7 @@ final class WorkermanHttpExchange implements HttpExchange
 {
     private readonly string $method;
 
-    private readonly string $path;
-
-    /** @var array<string, string> */
-    private readonly array $query;
-
-    /** @var array<string, string> lower-case names */
-    private readonly array $headers;
+    private readonly Request $request;
 
     private readonly string $body;
 
@@ -34,12 +29,10 @@ final class WorkermanHttpExchange implements HttpExchange
     /** @var list<Closure(): void> */
     private array $abortCallbacks = [];
 
-    public function __construct(private readonly TcpConnection $connection, Request $request)
+    public function __construct(private readonly TcpConnection $connection, WorkermanRequest $request)
     {
         $this->method = $request->method();
-        $this->path = $request->path();
-        $this->query = RequestValues::query($request);
-        $this->headers = RequestValues::headers($request);
+        $this->request = RequestValues::request($connection, $request);
         $this->body = $request->rawBody();
     }
 
@@ -50,22 +43,27 @@ final class WorkermanHttpExchange implements HttpExchange
 
     public function path(): string
     {
-        return $this->path;
+        return $this->request->path;
     }
 
     public function query(string $name): ?string
     {
-        return $this->query[$name] ?? null;
+        return $this->request->query($name);
     }
 
     public function header(string $name): ?string
     {
-        return $this->headers[strtolower($name)] ?? null;
+        return $this->request->header($name);
     }
 
     public function body(): string
     {
         return $this->body;
+    }
+
+    public function request(): Request
+    {
+        return $this->request;
     }
 
     public function respond(int $status, string $body, array $headers = []): void

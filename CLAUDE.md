@@ -54,7 +54,7 @@ A change is done only when all of these hold:
   - network I/O stays behind small interfaces that tests can replace with fakes.
 - Classes are `final` by default. Inheritance only where there's a documented extension point, such as adapters.
 - **No dynamic properties**, neither on our classes nor on Workerman objects. Per-connection state goes in a `WeakMap` or in `$connection->context`.
-- Magic only where the public API requires it and it's documented: `__get` for `broadcast` and `volatile`, annotated with `@property-read`.
+- Magic only where the public API requires it and it's documented: `__get` for `broadcast` and `volatile`, and for the read-only `connected`, `disconnected` and `rooms` of `Socket`, annotated with `@property-read`.
 - PHPStan at level `max`. No new `ignoreErrors` without a written justification.
 - Short comments, one line, only to explain why.
 - No `echo`/`print`. Errors become exceptions or `error` events.
@@ -97,7 +97,7 @@ src/
     Server.php                  validates requests, handshake, sessions, routing; no Workerman code
     ServerError.php             HTTP error codes and messages
     Cors.php, CorsHttpExchange.php  CORS headers, added to every polling answer
-    WebSocketRequest.php        the request that opens a WebSocket
+    Request.php                 an HTTP request: the session's handshake, or the one opening a WebSocket
     SessionIdGenerator.php, RandomSessionIdGenerator.php  20-character base64url session ids
     Socket.php                  session: state, heartbeat, upgrade, write buffer
     SocketState.php, CloseReason.php  session state; close reasons with the reference's strings
@@ -113,16 +113,20 @@ src/
     Parser.php, Packet.php, PacketType.php, InvalidPacketException.php
     Scheduler.php
   SocketIO.php                  Socket.IO server (public API)
-  Nsp.php                       namespace
+  Nsp.php                       namespace: middlewares, connected sockets
   Socket.php                    user-facing socket
+  SocketEmitter.php             timeout()/volatile/compress() on a socket: immutable, emits only
   Client.php                    one Engine.IO connection and its per-namespace sockets
+  DisconnectReason.php, ConnectionError.php, TimeoutException.php
+  SocketIdGenerator.php, RandomSocketIdGenerator.php
   BroadcastOperator.php         to/in/except/compress/volatile/emit, immutable
   Parser/                       socket.io-parser (protocol v5)
     Encoder.php                 Packet → list<string|Binary>: the text part, then one Binary per attachment
     Decoder.php                 one per connection: add(string|Binary): ?Packet, reset()
     Packet.php, PacketType.php, InvalidPacketException.php
   Adapter/
-    InMemoryAdapter.php         local rooms and broadcast
+    Adapter.php                 the extension point for other processes
+    InMemoryAdapter.php         local rooms and broadcast; not final, the base of other adapters
     ChannelAdapter.php          cross-process broadcast through workerman/channel
 ```
 
@@ -208,6 +212,15 @@ src/
 - **No implicit connection:** the client must send `CONNECT` for each namespace, including `/`. Without a `CONNECT` within `connectTimeout` (45 s), the connection closes.
 - **Answering `CONNECT`:** success answers `CONNECT` with `{"sid":"<id>"}`. An unknown namespace answers `CONNECT_ERROR` with `{"message":"Invalid namespace"}`, and a middleware error answers `CONNECT_ERROR` with `{"message":...,"data":...}`.
 - **`CONNECT` payload:** becomes `$socket->handshake['auth']`.
+- **Handshake:** `$socket->handshake` has the reference's keys: `headers` (lower-case names), `time`, `address`, `xdomain`, `secure`, `issued` (ms), `url`, `query` and `auth`. `$socket->request` is the `Engine\Request` that opened the Engine.IO session.
+- **Middlewares** (`$io->use()`, `$nsp->use()`) run in order before `connection`. Each lets the socket in with `$next()` or refuses it with `$next($error)`, and may call `$next` later. Only the first call counts.
+  - A `ConnectionError` sends its `data` too.
+  - An exception thrown before `$next` refuses the socket; one thrown after it (from a `connection` listener, say) propagates.
+  - If the connection closed while a middleware worked, the socket is dropped.
+- **Dispatch is synchronous.** The reference defers some steps with `process.nextTick`; here, packets and middleware results are handled at once. An exception from a user listener propagates up to `ServerBinding`, which closes the connection and reports it.
+- **One socket per namespace and connection:** a second `CONNECT` to a joined namespace, or a packet for a namespace the connection didn't join, closes the connection. After leaving a namespace (either side), the client can connect to it again with a new id.
+- **Flags without hidden state:** `timeout()`, `volatile` and `compress()` on a `Socket` return an immutable `SocketEmitter`; the socket itself keeps no flags. `compress()` exists for API compatibility and has no effect: the server doesn't compress. `volatile` drops the emit when the transport can't take it right now.
+- **Disconnect reasons** (`DisconnectReason`, given to listeners as strings): the Engine.IO close reasons, plus `server namespace disconnect`, `client namespace disconnect` and `forced server close`. `disconnecting` fires while the socket still has its rooms, `disconnect` after it left them.
 - **Ids:** a socket id differs from its Engine.IO session id and differs per namespace. Format: 24 lowercase hex characters, which `ChannelAdapter` relies on to recognize sid rooms.
 - **Strict parser validation** (any violation throws `Parser\InvalidPacketException`, which closes the connection), with the reference's error messages:
   - the type must be 0 to 6;
@@ -228,6 +241,8 @@ src/
 - **Encoder validation:** the encoder throws `InvalidArgumentException` for a packet that can't be sent: a namespace that doesn't start with `/` or contains `,`, a negative ack id, data of the wrong shape for the type, a `BINARY_*` type given directly (the encoder picks it), data nested more than 512 levels or circular, or data JSON can't encode.
 - **JSON:** incoming data is decoded to PHP arrays. PHP can't tell an empty `{}` from `[]`, so send an empty object with `new stdClass()` or `(object) []`. The decoder tells objects from arrays by the payload's first character. The encoder matches `JSON.stringify`: slashes, Unicode and line terminators are not escaped.
 - **Acks:** if the last argument of `emit` is a `Closure`, it becomes the ack callback. Received events with an id get an ack `Closure` as their last argument, which answers only once. Acks while broadcasting throw.
+  - Ack ids are counted per namespace, as in the reference.
+  - With `timeout()`, the callback gets `null` and the answer, or a `TimeoutException` ("operation has timed out"). In that case, its other required parameters get `null`, so `function (?Throwable $err, $answer)` works.
 - **Reserved names** (`Packet::RESERVED_EVENTS`): `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` and `removeListener` can't be emitted to the client; doing so throws. A received event with one of these names is invalid, as in the reference.
 
 ## Public API (target)

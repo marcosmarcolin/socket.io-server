@@ -91,7 +91,7 @@ final class Server extends Emitter
         }
 
         $polling = new Polling($this->scheduler, maxPayload: $this->options->maxPayload);
-        $socket = $this->open($polling);
+        $socket = $this->open($polling, $exchange->request());
         $polling->handleRequest($exchange);
         $this->dispatch('connection', $socket);
     }
@@ -101,7 +101,7 @@ final class Server extends Emitter
      *
      * @return ServerError|null null when the connection can be accepted
      */
-    public function verifyWebSocket(WebSocketRequest $request): ?ServerError
+    public function verifyWebSocket(Request $request): ?ServerError
     {
         if (! $this->handles($request->path)) {
             return ServerError::BadRequest;
@@ -120,7 +120,7 @@ final class Server extends Emitter
     /**
      * Takes an accepted WebSocket connection: a new session, or an upgrade of a polling one.
      */
-    public function handleWebSocket(WebSocketRequest $request, WebSocketConnection $connection): void
+    public function handleWebSocket(Request $request, WebSocketConnection $connection): void
     {
         // The session may have closed since verifyWebSocket().
         if ($this->verifyWebSocket($request) !== null) {
@@ -137,7 +137,7 @@ final class Server extends Emitter
             return;
         }
 
-        $this->dispatch('connection', $this->open($transport));
+        $this->dispatch('connection', $this->open($transport, $request));
     }
 
     public function session(string $sid): ?Socket
@@ -206,10 +206,10 @@ final class Server extends Emitter
         $exchange->respond($error->httpStatus(), $error->body(), ['Content-Type' => 'application/json']);
     }
 
-    private function open(Transport $transport): Socket
+    private function open(Transport $transport, Request $request): Socket
     {
         $id = $this->ids->generate();
-        $socket = new Socket($id, $transport, $this->options, $this->scheduler);
+        $socket = new Socket($id, $transport, $this->options, $this->scheduler, $request);
         $this->sessions[$id] = $socket;
         $socket->once('close', function () use ($id): void {
             unset($this->sessions[$id]);

@@ -43,6 +43,11 @@ final class CorsHttpExchange implements HttpExchange
         return $this->exchange->body();
     }
 
+    public function request(): Request
+    {
+        return $this->exchange->request();
+    }
+
     public function respond(int $status, string $body, array $headers = []): void
     {
         $this->exchange->respond($status, $body, $headers + $this->cors->headers($this->exchange->header('Origin')));

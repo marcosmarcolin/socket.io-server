@@ -9,7 +9,6 @@ use Marcolin\SocketIO\Engine\Protocol\HttpOrWebSocket;
 use Marcolin\SocketIO\Engine\Protocol\WebSocket;
 use Marcolin\SocketIO\Engine\Server;
 use Marcolin\SocketIO\Engine\ServerError;
-use Marcolin\SocketIO\Engine\WebSocketRequest;
 use Throwable;
 use WeakMap;
 use Workerman\Connection\TcpConnection;
@@ -104,7 +103,7 @@ final class ServerBinding
     public function onWebSocketConnect(TcpConnection $connection, Request $request): void
     {
         $this->guard($connection, function () use ($connection, $request): void {
-            $error = $this->server->verifyWebSocket(self::webSocketRequest($request));
+            $error = $this->server->verifyWebSocket(RequestValues::request($connection, $request));
             if ($error !== null) {
                 self::reject($connection, $error);
             }
@@ -120,8 +119,8 @@ final class ServerBinding
 
         $webSocket = new WorkermanWebSocketConnection($connection);
         $this->webSockets[$connection] = $webSocket;
-        $this->guard($connection, function () use ($request, $webSocket): void {
-            $this->server->handleWebSocket(self::webSocketRequest($request), $webSocket);
+        $this->guard($connection, function () use ($connection, $request, $webSocket): void {
+            $this->server->handleWebSocket(RequestValues::request($connection, $request), $webSocket);
         });
     }
 
@@ -168,10 +167,5 @@ final class ServerBinding
             . 'Content-Length: ' . strlen($message) . "\r\n\r\n" . $message,
             true,
         );
-    }
-
-    private static function webSocketRequest(Request $request): WebSocketRequest
-    {
-        return new WebSocketRequest($request->path(), RequestValues::query($request), RequestValues::headers($request));
     }
 }
