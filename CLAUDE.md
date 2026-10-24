@@ -38,7 +38,7 @@ A change is done only when all of these hold:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers (`tests/Compliance/socket-io-server.php`, run by `tests/Compliance/socket-io.sh`).
 4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh` and `tests/Integration/run.sh multi-process`).
-5. **The docs are current:** both READMEs, CLAUDE.md and examples match the behavior.
+5. **The docs are current:** both READMEs, CLAUDE.md and examples match the behavior. Each example has a test with the official client (`tests/Integration/client/examples/`) that CI runs, so an example that stops working fails the build.
 
 ## Code rules
 
@@ -74,11 +74,16 @@ tests/Compliance/engine-io.sh                  # official Engine.IO v4 suite, in
 tests/Compliance/socket-io.sh                  # official Socket.IO v5 suite, in Docker
 tests/Integration/run.sh                       # the official socket.io-client against our server, in Docker
 tests/Integration/run.sh multi-process         # the same over two processes and a channel server
+tests/Integration/run.sh examples              # every example in examples/, each against its test
 ```
 
 The integration client (`tests/Integration/client/`) pins `socket.io-client` in `package.json`, and its `package-lock.json` is committed, so `npm ci` checks every package's integrity hash. Its tests use `node:test`, so the client is the only dependency. Each scenario runs over polling only, WebSocket only, and polling with the upgrade. To move to a newer client, regenerate the lockfile in Docker with `npm install --package-lock-only --ignore-scripts`, then read what changed.
 
 Both scripts share `tests/Compliance/suite.sh`, which downloads the suite at a pinned commit of `socketio/socket.io` into `.cache/`, checks each file against a SHA-256 checksum, and runs it with a pinned Node image that shares the server container's network. To move to a newer suite, update the commit and the checksums together, after reading what changed.
+
+## Examples
+
+`examples/<name>/` holds a `start.php` (Socket.IO on port 3000, its page on port 3001 through a plain Workerman HTTP worker) and an `index.html` that loads `socket.io-client` 4.8.4 from `cdn.socket.io` with its SRI hash. Examples are code: phpcs and PHPStan check them, they follow the code rules, and `tests/Integration/client/examples/<name>.test.js` checks each one. Run one with `tests/Integration/run.sh example <name>`.
 
 ## Workflow
 

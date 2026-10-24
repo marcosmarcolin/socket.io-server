@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rooms</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    #log { list-style: none; padding: .5rem; border: 1px solid #ddd; border-radius: 6px; min-height: 200px; }
+    #log li { padding: .2rem 0; }
+    form { display: flex; gap: .5rem; margin: .5rem 0; flex-wrap: wrap; }
+    input { flex: 1; padding: .5rem; font: inherit; }
+    button { padding: .5rem 1rem; font: inherit; }
+    .muted { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Rooms</h1>
+  <p class="muted">Open this page in two tabs, join the same room, and message it.</p>
+  <form id="join"><input id="room" value="php" required><button>Join</button><button type="button" id="leave">Leave</button></form>
+  <form id="send"><input id="text" placeholder="Message to the room" required><button>Send</button></form>
+  <ul id="log"></ul>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const url = `http://${location.hostname}:3000`;
+    function log(text) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      document.getElementById("log").append(item);
+    }
+    function onSubmit(id, handler) {
+      document.getElementById(id).addEventListener("submit", (event) => {
+        event.preventDefault();
+        handler();
+      });
+    }
+    const value = (id) => document.getElementById(id).value;
+    const socket = io(url);
+    socket.on("connect", () => log(`connected as ${socket.id}`));
+    onSubmit("join", async () => log(`your rooms: ${(await socket.emitWithAck("join room", value("room"))).join(", ")}`));
+    document.getElementById("leave").addEventListener("click", async () => {
+      log(`your rooms: ${(await socket.emitWithAck("leave room", value("room"))).join(", ")}`);
+    });
+    onSubmit("send", () => socket.emit("room message", value("room"), value("text")));
+    socket.on("room message", ({ room, from, text }) => log(`[${room}] ${from}: ${text}`));
+    socket.on("members", ({ room, members }) => log(`[${room}] members: ${members.length}`));
+  </script>
+</body>
+</html>

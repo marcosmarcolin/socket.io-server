@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Binary data</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    #log { list-style: none; padding: .5rem; border: 1px solid #ddd; border-radius: 6px; min-height: 200px; }
+    #log li { padding: .2rem 0; }
+    form { display: flex; gap: .5rem; margin: .5rem 0; flex-wrap: wrap; }
+    input { flex: 1; padding: .5rem; font: inherit; }
+    button { padding: .5rem 1rem; font: inherit; }
+    .muted { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Binary data</h1>
+  <form id="upload"><input type="file" id="file" required><button>Upload</button></form>
+  <form id="download"><input id="size" type="number" value="1024" min="1"><button>Download random bytes</button></form>
+  <ul id="log"></ul>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const url = `http://${location.hostname}:3000`;
+    function log(text) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      document.getElementById("log").append(item);
+    }
+    function onSubmit(id, handler) {
+      document.getElementById(id).addEventListener("submit", (event) => {
+        event.preventDefault();
+        handler();
+      });
+    }
+    const value = (id) => document.getElementById(id).value;
+    const socket = io(url);
+    onSubmit("upload", async () => {
+      const file = document.getElementById("file").files[0];
+      const result = await socket.emitWithAck("upload", { name: file.name, data: await file.arrayBuffer() });
+      log(`server got ${result.name}: ${result.size} bytes, sha256 ${result.sha256}`);
+    });
+    onSubmit("download", async () => {
+      const { name, data } = await socket.emitWithAck("download", Number(value("size")));
+      log(`downloaded ${name}: ${data.byteLength} bytes`);
+    });
+  </script>
+</body>
+</html>

@@ -30,7 +30,8 @@ Para o `socket.io-client` v1 e v2, use o [workerman/phpsocket.io](https://github
 | Testes de integração com o `socket.io-client` 4.8.4 oficial: polling, WebSocket, upgrade, namespaces, salas, acks, binário | Pronto |
 | Broadcast entre processos: `ChannelAdapter` sobre o `workerman/channel` | Pronto |
 | Testes de integração com vários processos e verificação de escala (200 clientes, 4.000 entregas) | Pronto |
-| Exemplos e guia de migração do phpsocket.io | Próxima |
+| Exemplos: chat, salas, acknowledgements, namespaces, dados binários, vários processos | Pronto |
+| README completo com referência da API, e guia de migração do phpsocket.io | Próxima |
 
 ## Uso
 
@@ -129,6 +130,19 @@ Worker::runAll();
 - Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem.
 - Só o broadcast atravessa processos (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` e `disconnectSockets` agem no processo atual.
 
+## Exemplos
+
+Cada um roda com `php examples/<nome>/start.php start`; depois abra http://localhost:3001.
+
+| Exemplo | Mostra |
+|---|---|
+| [chat](examples/chat) | uma sala de chat: nomes, indicador de digitação, avisos de entrada e saída |
+| [rooms](examples/rooms) | `join`, `leave`, mensagens para uma sala, lista de membros ao vivo |
+| [acks](examples/acks) | acknowledgements nos dois sentidos, e o `timeout()` do servidor |
+| [namespaces](examples/namespaces) | `/public` e `/admin`, um middleware com token, `ConnectionError` |
+| [binary](examples/binary) | upload e download de arquivo com `Binary` |
+| [multi-process](examples/multi-process) | quatro processos e `ChannelAdapter` |
+
 ## Desenvolvimento
 
 Tudo roda no Docker; não é preciso ter PHP nem Composer na máquina.
@@ -141,6 +155,7 @@ tests/Compliance/engine-io.sh                  # a suíte oficial do Engine.IO v
 tests/Compliance/socket-io.sh                  # a suíte oficial do Socket.IO v5
 tests/Integration/run.sh                       # o socket.io-client oficial contra este servidor
 tests/Integration/run.sh multi-process         # o mesmo com dois processos e um servidor de canal
+tests/Integration/run.sh examples              # todos os exemplos, cada um contra o seu teste
 ```
 
 ### Varredura de segredos

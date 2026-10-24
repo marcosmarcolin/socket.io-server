@@ -2,6 +2,7 @@
 <ruleset name="socket.io-server">
     <file>src</file>
     <file>tests</file>
+    <file>examples</file>
     <arg name="colors"/>
     <arg value="sp"/>
     <rule ref="PSR12"/>
