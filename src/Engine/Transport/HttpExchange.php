@@ -17,6 +17,16 @@ interface HttpExchange
     public function method(): string;
 
     /**
+     * The request path, without the query string.
+     */
+    public function path(): string;
+
+    /**
+     * A query string parameter.
+     */
+    public function query(string $name): ?string;
+
+    /**
      * A request header, looked up case-insensitively.
      */
     public function header(string $name): ?string;

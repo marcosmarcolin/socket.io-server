@@ -30,10 +30,12 @@ final class Polling extends Transport
 
     /**
      * @param int $closeTimeout milliseconds to wait for a GET that carries the close packet
+     * @param int $maxPayload largest POST body accepted, in bytes
      */
     public function __construct(
         private readonly Scheduler $scheduler,
         private readonly int $closeTimeout = 30_000,
+        private readonly int $maxPayload = 1_000_000,
     ) {
     }
 
@@ -150,6 +152,13 @@ final class Polling extends Transport
         if (str_starts_with(strtolower($exchange->header('Content-Type') ?? ''), 'application/octet-stream')) {
             $exchange->respond(400, '', self::HEADERS);
             $this->onError(new TransportException('invalid content'));
+
+            return;
+        }
+
+        // As in the reference, a too large body is refused but the session goes on.
+        if (strlen($exchange->body()) > $this->maxPayload) {
+            $exchange->respond(413, '', self::HEADERS);
 
             return;
         }

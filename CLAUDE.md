@@ -91,18 +91,24 @@ src/
   Binary.php                    binary value (attachments and binary frames)
   Event/Emitter.php             on/once/off/listeners plus a protected dispatch
   Engine/                       Engine.IO v4
-    Server.php                  routes HTTP and WebSocket, handshake, sessions
+    Server.php                  validates requests, handshake, sessions, routing; no Workerman code
+    ServerError.php             HTTP error codes and messages
+    Cors.php, CorsHttpExchange.php  CORS headers, added to every polling answer
+    WebSocketRequest.php        the request that opens a WebSocket
+    SessionIdGenerator.php, RandomSessionIdGenerator.php  20-character base64url session ids
     Socket.php                  session: state, heartbeat, upgrade, write buffer
     SocketState.php, CloseReason.php  session state; close reasons with the reference's strings
-    ServerOptions.php           pingInterval, pingTimeout, maxPayload, upgradeTimeout (path, CORS... in step 4)
+    ServerOptions.php           pingInterval, pingTimeout, maxPayload, upgradeTimeout, path, cors; fromArray()
     Transport/Transport.php     base transport (Emitter): packet, ready, drain, error, close
     Transport/Polling.php       pending GET, POST, noop on upgrade
     Transport/WebSocket.php     one packet per frame, text or binary
     Transport/HttpExchange.php, Transport/WebSocketConnection.php  I/O interfaces, faked in tests
     Protocol/HttpOrWebSocket.php  ProtocolInterface: Workerman HTTP, or switch to WebSocket
     Protocol/WebSocket.php      extends Workerman\Protocols\Websocket, exposes the opcode
+    Workerman/                  Workerman implementations of Scheduler, HttpExchange and WebSocketConnection,
+                                and the wiring of a Worker's callbacks to Server
     Parser.php, Packet.php, PacketType.php, InvalidPacketException.php
-    Scheduler.php, WorkermanScheduler.php
+    Scheduler.php
   SocketIO.php                  Socket.IO server (public API)
   Nsp.php                       namespace
   Socket.php                    user-facing socket
@@ -131,8 +137,8 @@ src/
 
 ### Engine.IO
 
-- **Default path:** `/socket.io/`. Required query: `EIO=4`, `transport=polling|websocket`, and `sid` after the handshake.
-- **HTTP errors** return 400 with a JSON body `{"code":N,"message":"..."}`, using Node's codes:
+- **Default path:** `/socket.io/`, normalized with a trailing slash; `/socket.io` matches too. Other paths get 404 (the reference's standalone server answers 501). Required query: `EIO=4`, `transport=polling|websocket`, and `sid` after the handshake.
+- **HTTP errors** return 400 (403 for code 4, as the reference does) with `Content-Type: application/json` and a body `{"code":N,"message":"..."}`, using Node's codes:
 
   | Code | Message |
   |---|---|
@@ -143,7 +149,15 @@ src/
   | 4 | Forbidden |
   | 5 | Unsupported protocol version |
 
-- **Handshake:** only via `GET` without `sid` (or WebSocket without `sid`). It answers an `open` packet with `sid`, `upgrades`, `pingInterval`, `pingTimeout` and `maxPayload`. `upgrades` is `["websocket"]` on polling and `[]` on WebSocket.
+- **Request validation**, in the reference's order:
+  - a missing or unknown `transport` is code 0;
+  - an `Origin` header with invalid characters is code 3;
+  - with a `sid`: an unknown session is code 1; over HTTP, a `transport` other than the session's current one is code 3 (this rejects HTTP after the upgrade); `EIO` other than `4` is code 3;
+  - without a `sid`: a method other than `GET` is code 2; `transport=websocket` over HTTP, or `transport=polling` on a WebSocket, is code 3; `EIO` other than `4`, or missing, is code 5.
+
+  A WebSocket request is validated before the handshake is answered (`Server::verifyWebSocket()`) and again when the connection is handed over, in case the session closed in between.
+- **Handshake:** only via `GET` without `sid` (or WebSocket without `sid`). It answers an `open` packet with `sid`, `upgrades`, `pingInterval`, `pingTimeout` and `maxPayload`. `upgrades` is `["websocket"]` on polling and `[]` on WebSocket. The session id is 15 random bytes in base64url (20 characters), like the reference's `base64id`. A closed session leaves the registry at once, so later requests with its `sid` get code 1.
+- **`maxPayload`:** a polling `POST` body larger than it gets 413 and the session goes on, as in the reference.
 - **Heartbeat:** the **server** sends `ping` every `pingInterval`. Without a `pong` within `pingTimeout`, the session closes with `ping timeout`.
   - the next `ping` is scheduled `pingInterval` after the `pong`;
   - any other packet received while waiting for the `pong` restarts the `pingTimeout` once per ping, as the reference does;
@@ -169,6 +183,10 @@ src/
   After the upgrade, HTTP requests or another WebSocket with the same `sid` are rejected. A second WebSocket during an upgrade is closed too. If the upgrade doesn't complete within `upgradeTimeout` (10 s), or any packet other than `2probe` or `5` arrives on the new transport, the WebSocket is closed and the session stays on polling.
 - **Polling payload:** packets separated by `\x1e`; binary as `b` + base64. Over WebSocket, binary goes as a raw binary frame.
 - **CORS:** the `cors.origin` option (`'*'` by default, a list of origins, or `null` to disable), including the `OPTIONS` preflight.
+  - The headers go on every polling answer, errors included.
+  - With a list, a listed origin is echoed with `Vary: Origin`, and any other origin gets no `Access-Control-Allow-Origin`, so the browser blocks it.
+  - The preflight answers 204 with `GET, POST, OPTIONS` and echoes `Access-Control-Request-Headers`.
+  - `credentials` is not supported yet. With CORS disabled, `OPTIONS` is an ordinary request and gets code 2.
 
 ### Socket.IO
 

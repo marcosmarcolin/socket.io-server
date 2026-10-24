@@ -118,6 +118,21 @@ final class PollingTest extends TestCase
         self::assertInstanceOf(InvalidPacketException::class, $this->recorder->errors[0] ?? null);
     }
 
+    public function testATooLargeBodyIsRefusedButTheSessionGoesOn(): void
+    {
+        $polling = new Polling($this->scheduler, maxPayload: 6);
+        $recorder = new TransportRecorder($polling);
+        $tooLarge = FakeHttpExchange::post('4hello!');
+        $fits = FakeHttpExchange::post('4hello');
+
+        $polling->handleRequest($tooLarge);
+        $polling->handleRequest($fits);
+
+        self::assertSame(413, $tooLarge->status);
+        self::assertSame(200, $fits->status);
+        self::assertSame(['packet'], $recorder->events);
+    }
+
     public function testABinaryBodyIsRejected(): void
     {
         $post = FakeHttpExchange::post("\x01\x02", ['content-type' => 'Application/Octet-Stream; charset=binary']);

@@ -20,6 +20,7 @@ For `socket.io-client` v1 and v2, use [workerman/phpsocket.io](https://github.co
 |---|---|
 | Engine.IO packet parser | Done |
 | Engine.IO session: heartbeat, write buffer, polling and WebSocket transports, upgrade | Done |
+| Engine.IO server: request validation, sessions, CORS | Done |
 | Engine.IO server on Workerman, checked by the official Engine.IO v4 test suite | Next |
 | Socket.IO parser, namespaces, rooms, acks and broadcast | Planned |
 | Multi-process broadcast with `workerman/channel` | Planned |
