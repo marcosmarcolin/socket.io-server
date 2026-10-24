@@ -27,8 +27,8 @@ Para o `socket.io-client` v1 e v2, use o [workerman/phpsocket.io](https://github
 | Servidor Socket.IO: conexão, namespaces, middlewares, eventos, acks, salas | Pronto |
 | Broadcast para salas e namespaces | Pronto |
 | A suíte oficial do Socket.IO v5 rodando no CI (32 de 32 passando) | Pronto |
-| Testes de integração com o `socket.io-client` oficial | Próxima |
-| Broadcast entre processos com `workerman/channel` | Planejado |
+| Testes de integração com o `socket.io-client` 4.8.4 oficial: polling, WebSocket, upgrade, namespaces, salas, acks, binário | Pronto |
+| Broadcast entre processos com `workerman/channel` | Próxima |
 | Broadcast entre processos com `workerman/channel` | Planejado |
 
 ## Uso
@@ -101,6 +101,7 @@ docker compose run --rm php vendor/bin/phpunit
 docker compose run --rm php composer lint      # phpcs (PSR-12) e PHPStan (nível max)
 tests/Compliance/engine-io.sh                  # a suíte oficial do Engine.IO v4
 tests/Compliance/socket-io.sh                  # a suíte oficial do Socket.IO v5
+tests/Integration/run.sh                       # o socket.io-client oficial contra este servidor
 ```
 
 ### Varredura de segredos
