@@ -25,8 +25,8 @@ Para o `socket.io-client` v1 e v2, use o [workerman/phpsocket.io](https://github
 | A suíte oficial do Engine.IO v4 rodando no CI (25 de 25 passando) | Pronto |
 | Parser Socket.IO v5: encoder, decoder, anexos binários | Pronto |
 | Servidor Socket.IO: conexão, namespaces, middlewares, eventos, acks, salas | Pronto |
-| Broadcast para salas e namespaces | Próxima |
-| A suíte oficial do Socket.IO v5 rodando no CI | Planejado |
+| Broadcast para salas e namespaces | Pronto |
+| A suíte oficial do Socket.IO v5 rodando no CI | Próxima |
 | Broadcast entre processos com `workerman/channel` | Planejado |
 
 ## Desenvolvimento
