@@ -37,7 +37,7 @@ A change is done only when all of these hold:
 3. **The protocol suites pass in CI**, once they exist:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers (`tests/Compliance/socket-io-server.php`, run by `tests/Compliance/socket-io.sh`).
-4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process.
+4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh`).
 5. **The docs are current:** both READMEs, CLAUDE.md and examples match the behavior.
 
 ## Code rules
@@ -72,7 +72,10 @@ docker compose run --rm php vendor/bin/phpunit
 docker compose run --rm php composer lint
 tests/Compliance/engine-io.sh                  # official Engine.IO v4 suite, in Docker
 tests/Compliance/socket-io.sh                  # official Socket.IO v5 suite, in Docker
+tests/Integration/run.sh                       # the official socket.io-client against our server, in Docker
 ```
+
+The integration client (`tests/Integration/client/`) pins `socket.io-client` in `package.json`, and its `package-lock.json` is committed, so `npm ci` checks every package's integrity hash. Its tests use `node:test`, so the client is the only dependency. Each scenario runs over polling only, WebSocket only, and polling with the upgrade. To move to a newer client, regenerate the lockfile in Docker with `npm install --package-lock-only --ignore-scripts`, then read what changed.
 
 Both scripts share `tests/Compliance/suite.sh`, which downloads the suite at a pinned commit of `socketio/socket.io` into `.cache/`, checks each file against a SHA-256 checksum, and runs it with a pinned Node image that shares the server container's network. To move to a newer suite, update the commit and the checksums together, after reading what changed.
 
@@ -320,7 +323,7 @@ Worker::runAll();
 4. [x] `Engine\Server`, the Workerman protocols, `WorkermanScheduler` and the Workerman implementations of `HttpExchange` and `WebSocketConnection`, with the official Engine.IO v4 suite running in CI.
 5. [x] Socket.IO parser (`Encoder`, `Decoder`, `Binary`).
 6. [x] `SocketIO`, `Nsp`, `Client`, `Socket`, `BroadcastOperator`, `InMemoryAdapter`, with the official Socket.IO v5 suite in CI.
-7. [ ] Integration with `socket.io-client@4` in CI.
+7. [x] Integration with `socket.io-client@4` in CI (the multi-process scenario comes with step 8, since it needs `ChannelAdapter`).
 8. [ ] `ChannelAdapter`, with a multi-process integration test and a scale check.
 9. [ ] Complete README, examples, and a migration guide from phpsocket.io 3.x.
 10. [ ] First release (`v0.1.0` or `v1.0.0-beta.1`, to be decided).

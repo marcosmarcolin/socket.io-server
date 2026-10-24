@@ -27,8 +27,8 @@ For `socket.io-client` v1 and v2, use [workerman/phpsocket.io](https://github.co
 | Socket.IO server: connection, namespaces, middlewares, events, acks, rooms | Done |
 | Broadcast to rooms and namespaces | Done |
 | The official Socket.IO v5 test suite running in CI (32 of 32 passing) | Done |
-| Integration tests with the official `socket.io-client` | Next |
-| Cross-process broadcast with `workerman/channel` | Planned |
+| Integration tests with the official `socket.io-client` 4.8.4: polling, WebSocket, upgrade, namespaces, rooms, acks, binary | Done |
+| Cross-process broadcast with `workerman/channel` | Next |
 | Multi-process broadcast with `workerman/channel` | Planned |
 
 ## Usage
@@ -101,6 +101,7 @@ docker compose run --rm php vendor/bin/phpunit
 docker compose run --rm php composer lint      # phpcs (PSR-12) and PHPStan (level max)
 tests/Compliance/engine-io.sh                  # the official Engine.IO v4 test suite
 tests/Compliance/socket-io.sh                  # the official Socket.IO v5 test suite
+tests/Integration/run.sh                       # the official socket.io-client against this server
 ```
 
 ### Secret scanning
