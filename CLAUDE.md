@@ -1,6 +1,6 @@
 # socket.io-server
 
-A **Socket.IO v4** server for PHP, built on **Workerman 5**. Composer package `marcosmarcolin/socket.io-server`, namespace `MarcosMarcolin\SocketIO\`.
+A **Socket.IO v4** server for PHP, built on **Workerman 5**. Composer package `marcosmarcolin/socket.io-server`, namespace `Marcolin\SocketIO\`.
 
 This file is the specification of how the package works. Behavior changes start here.
 
@@ -183,7 +183,7 @@ src/
 It keeps phpsocket.io's shape, to ease migration, plus the v4 features.
 
 ```php
-use MarcosMarcolin\SocketIO\SocketIO;
+use Marcolin\SocketIO\SocketIO;
 use Workerman\Worker;
 
 $io = new SocketIO(3000, [

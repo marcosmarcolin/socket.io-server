@@ -25,12 +25,12 @@
   },
   "autoload": {
     "psr-4": {
-      "MarcosMarcolin\\SocketIO\\": "src/"
+      "Marcolin\\SocketIO\\": "src/"
     }
   },
   "autoload-dev": {
     "psr-4": {
-      "MarcosMarcolin\\SocketIO\\Tests\\": "tests/"
+      "Marcolin\\SocketIO\\Tests\\": "tests/"
     }
   },
   "scripts": {

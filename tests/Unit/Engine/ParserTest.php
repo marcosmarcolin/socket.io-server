@@ -2,12 +2,12 @@
 
 declare(strict_types=1);
 
-namespace MarcosMarcolin\SocketIO\Tests\Unit\Engine;
+namespace Marcolin\SocketIO\Tests\Unit\Engine;
 
-use MarcosMarcolin\SocketIO\Engine\InvalidPacketException;
-use MarcosMarcolin\SocketIO\Engine\Packet;
-use MarcosMarcolin\SocketIO\Engine\PacketType;
-use MarcosMarcolin\SocketIO\Engine\Parser;
+use Marcolin\SocketIO\Engine\InvalidPacketException;
+use Marcolin\SocketIO\Engine\Packet;
+use Marcolin\SocketIO\Engine\PacketType;
+use Marcolin\SocketIO\Engine\Parser;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
