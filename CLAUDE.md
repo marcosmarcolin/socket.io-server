@@ -38,7 +38,7 @@ A change is done only when all of these hold:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers (`tests/Compliance/socket-io-server.php`, run by `tests/Compliance/socket-io.sh`).
 4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh` and `tests/Integration/run.sh multi-process`).
-5. **The docs are current:** both READMEs, CLAUDE.md and examples match the behavior. Each example has a test with the official client (`tests/Integration/client/examples/`) that CI runs, so an example that stops working fails the build.
+5. **The docs are current:** both READMEs (with the API reference), the migration guide in `docs/`, CLAUDE.md and examples match the behavior. Each example has a test with the official client (`tests/Integration/client/examples/`) that CI runs, so an example that stops working fails the build.
 
 ## Code rules
 
@@ -59,8 +59,8 @@ A change is done only when all of these hold:
 - Short comments, one line, only to explain why.
 - No `echo`/`print`. Errors become exceptions or `error` events.
 - No production dependencies besides Workerman. `workerman/channel` is optional (in `suggest`).
-- Everything in English: code, comments, docs, commits, PRs. The one exception is `README.pt-BR.md`, the Brazilian Portuguese translation of `README.md`.
-- **Two READMEs, always in sync.** `README.md` (English) is the reference. Every change to it goes to `README.pt-BR.md` in the same PR, and neither one has content the other lacks.
+- Everything in English: code, comments, docs, commits, PRs. The exceptions are the Brazilian Portuguese translations of the user documentation: `README.pt-BR.md` and `docs/*.pt-BR.md`.
+- **User docs in two languages, always in sync.** `README.md` and `docs/*.md` (English) are the reference. Every change to one goes to its `.pt-BR.md` translation in the same PR, and neither has content the other lacks. Code blocks are identical in both, except the comments of shell commands.
 
 ## Verification
 
@@ -344,5 +344,5 @@ Worker::runAll();
 6. [x] `SocketIO`, `Nsp`, `Client`, `Socket`, `BroadcastOperator`, `InMemoryAdapter`, with the official Socket.IO v5 suite in CI.
 7. [x] Integration with `socket.io-client@4` in CI (the multi-process scenario comes with step 8, since it needs `ChannelAdapter`).
 8. [x] `ChannelAdapter`, with a multi-process integration test and a scale check.
-9. [ ] Complete README, examples, and a migration guide from phpsocket.io 3.x.
+9. [x] Complete README, examples, and a migration guide from phpsocket.io 3.x.
 10. [ ] First release (`v0.1.0` or `v1.0.0-beta.1`, to be decided).
