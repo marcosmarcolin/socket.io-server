@@ -28,6 +28,15 @@ jobs:
 
       - run: .githooks/gitleaks history
 
+  engine-io-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: docker compose run --rm php composer install --no-interaction
+
+      - run: tests/Compliance/engine-io.sh
+
   tests:
     runs-on: ubuntu-latest
     strategy:

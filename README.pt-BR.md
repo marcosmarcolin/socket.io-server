@@ -22,8 +22,8 @@ Para o `socket.io-client` v1 e v2, use o [workerman/phpsocket.io](https://github
 | Sessão Engine.IO: heartbeat, buffer de escrita, transportes polling e WebSocket, upgrade | Pronto |
 | Servidor Engine.IO: validação de requests, sessões, CORS | Pronto |
 | Integração com o Workerman: uma porta para HTTP e WebSocket, timers, adaptadores de conexão | Pronto |
-| A suíte oficial do Engine.IO v4 rodando no CI | Próxima |
-| Parser Socket.IO, namespaces, salas, acks e broadcast | Planejado |
+| A suíte oficial do Engine.IO v4 rodando no CI (25 de 25 passando) | Pronto |
+| Parser Socket.IO, namespaces, salas, acks e broadcast | Próxima |
 | Broadcast entre processos com `workerman/channel` | Planejado |
 
 ## Desenvolvimento
@@ -34,6 +34,7 @@ Tudo roda no Docker; não é preciso ter PHP nem Composer na máquina.
 docker compose run --rm php composer install
 docker compose run --rm php vendor/bin/phpunit
 docker compose run --rm php composer lint      # phpcs (PSR-12) e PHPStan (nível max)
+tests/Compliance/engine-io.sh                  # a suíte oficial do Engine.IO v4
 ```
 
 ### Varredura de segredos

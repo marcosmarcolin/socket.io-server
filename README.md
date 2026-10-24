@@ -22,8 +22,8 @@ For `socket.io-client` v1 and v2, use [workerman/phpsocket.io](https://github.co
 | Engine.IO session: heartbeat, write buffer, polling and WebSocket transports, upgrade | Done |
 | Engine.IO server: request validation, sessions, CORS | Done |
 | Workerman integration: one port for HTTP and WebSocket, timers, connection adapters | Done |
-| The official Engine.IO v4 test suite running in CI | Next |
-| Socket.IO parser, namespaces, rooms, acks and broadcast | Planned |
+| The official Engine.IO v4 test suite running in CI (25 of 25 passing) | Done |
+| Socket.IO parser, namespaces, rooms, acks and broadcast | Next |
 | Multi-process broadcast with `workerman/channel` | Planned |
 
 ## Development
@@ -34,6 +34,7 @@ Everything runs in Docker; PHP and Composer are not needed on the host.
 docker compose run --rm php composer install
 docker compose run --rm php vendor/bin/phpunit
 docker compose run --rm php composer lint      # phpcs (PSR-12) and PHPStan (level max)
+tests/Compliance/engine-io.sh                  # the official Engine.IO v4 test suite
 ```
 
 ### Secret scanning

@@ -35,7 +35,7 @@ A change is done only when all of these hold:
 1. **It is tested.** New behavior comes with tests, and a bug fix comes with a test that fails without the fix. No untested code is merged.
 2. **The quality tools pass:** PHPUnit, phpcs (PSR-12) and PHPStan at level `max`, locally in Docker and in CI.
 3. **The protocol suites pass in CI**, once they exist:
-   - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back;
+   - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers.
 4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process.
 5. **The docs are current:** both READMEs, CLAUDE.md and examples match the behavior.
@@ -70,7 +70,10 @@ Never run PHP, Composer, PHPUnit, phpcs or PHPStan on the host. Always use Docke
 docker compose run --rm php composer install
 docker compose run --rm php vendor/bin/phpunit
 docker compose run --rm php composer lint
+tests/Compliance/engine-io.sh                  # official Engine.IO v4 suite, in Docker
 ```
+
+The compliance script downloads the suite at a pinned commit of `socketio/socket.io` into `.cache/`, checks each file against a SHA-256 checksum, and runs it with a pinned Node image that shares the server container's network. To move to a newer suite, update the commit and the checksums together, after reading what changed.
 
 ## Workflow
 
@@ -278,7 +281,7 @@ Worker::runAll();
 1. [x] Scaffold: Composer, Docker, PHPUnit, PHPStan max, phpcs, CI.
 2. [x] Engine.IO parser (`Engine\Parser`).
 3. [x] `Scheduler`, `Emitter`, `Engine\Socket` and transports, tested with a fake scheduler and fake connections.
-4. [ ] `Engine\Server`, the Workerman protocols, `WorkermanScheduler` and the Workerman implementations of `HttpExchange` and `WebSocketConnection`, with the official Engine.IO v4 suite running in CI.
+4. [x] `Engine\Server`, the Workerman protocols, `WorkermanScheduler` and the Workerman implementations of `HttpExchange` and `WebSocketConnection`, with the official Engine.IO v4 suite running in CI.
 5. [ ] Socket.IO parser (`Encoder`, `Decoder`, `Binary`).
 6. [ ] `SocketIO`, `Nsp`, `Client`, `Socket`, `BroadcastOperator`, `InMemoryAdapter`, with the official Socket.IO v5 suite in CI.
 7. [ ] Integration with `socket.io-client@4` in CI.
