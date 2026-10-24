@@ -118,7 +118,9 @@ src/
   Client.php                    one Engine.IO connection and its per-namespace sockets
   BroadcastOperator.php         to/in/except/compress/volatile/emit, immutable
   Parser/                       socket.io-parser (protocol v5)
-    Encoder.php, Decoder.php, Packet.php, PacketType.php
+    Encoder.php                 Packet → list<string|Binary>: the text part, then one Binary per attachment
+    Decoder.php                 one per connection: add(string|Binary): ?Packet, reset()
+    Packet.php, PacketType.php, InvalidPacketException.php
   Adapter/
     InMemoryAdapter.php         local rooms and broadcast
     ChannelAdapter.php          cross-process broadcast through workerman/channel
@@ -207,21 +209,26 @@ src/
 - **Answering `CONNECT`:** success answers `CONNECT` with `{"sid":"<id>"}`. An unknown namespace answers `CONNECT_ERROR` with `{"message":"Invalid namespace"}`, and a middleware error answers `CONNECT_ERROR` with `{"message":...,"data":...}`.
 - **`CONNECT` payload:** becomes `$socket->handshake['auth']`.
 - **Ids:** a socket id differs from its Engine.IO session id and differs per namespace. Format: 24 lowercase hex characters, which `ChannelAdapter` relies on to recognize sid rooms.
-- **Strict parser validation** (any violation closes the connection):
+- **Strict parser validation** (any violation throws `Parser\InvalidPacketException`, which closes the connection), with the reference's error messages:
   - the type must be 0 to 6;
-  - binary types require `N-`;
+  - binary types require `N-`, with `N` from 1 to `maxAttachments` (10 by default, as in the reference);
   - the namespace runs until `,`;
-  - an ack id is digits only;
-  - a `CONNECT` payload must be an object;
-  - an `EVENT` must be a non-empty array whose name is a string or number;
+  - an ack id is digits only (leading zeros allowed) and must fit in an `int`;
+  - a `CONNECT` payload is optional and must be an object;
+  - an `EVENT` must be a non-empty array whose name is a number, or a string that is not a reserved name;
   - an `ACK` must be an array;
-  - a `DISCONNECT` has no payload.
+  - a `CONNECT_ERROR` payload must be a string or an object;
+  - a `DISCONNECT` has no payload;
+  - the `EVENT` and `ACK` payloads are mandatory, as the spec says (the reference accepts them missing);
+  - a placeholder must point at a received attachment, and text can't arrive while attachments are expected, nor an attachment without a pending binary packet.
 - **Binary:**
   - incoming attachments arrive as `Binary` and placeholders are rebuilt;
-  - outgoing, any `Binary` in the data turns the packet into `BINARY_EVENT`/`BINARY_ACK` with placeholders.
-- **JSON:** incoming data is decoded to PHP arrays. PHP can't tell an empty `{}` from `[]`, so send an empty object with `new stdClass()` or `(object) []`.
+  - outgoing, any `Binary` in the data, at any depth, turns an `EVENT`/`ACK` into `BINARY_EVENT`/`BINARY_ACK` with placeholders. `JsonSerializable` objects are expanded with `jsonSerialize()`, like `toJSON()` in the reference, and other objects by their public properties;
+  - `Binary` in any other packet type throws.
+- **Encoder validation:** the encoder throws `InvalidArgumentException` for a packet that can't be sent: a namespace that doesn't start with `/` or contains `,`, a negative ack id, data of the wrong shape for the type, a `BINARY_*` type given directly (the encoder picks it), data nested more than 512 levels or circular, or data JSON can't encode.
+- **JSON:** incoming data is decoded to PHP arrays. PHP can't tell an empty `{}` from `[]`, so send an empty object with `new stdClass()` or `(object) []`. The decoder tells objects from arrays by the payload's first character. The encoder matches `JSON.stringify`: slashes, Unicode and line terminators are not escaped.
 - **Acks:** if the last argument of `emit` is a `Closure`, it becomes the ack callback. Received events with an id get an ack `Closure` as their last argument, which answers only once. Acks while broadcasting throw.
-- **Reserved names:** `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` and `removeListener` can't be emitted to the client; doing so throws.
+- **Reserved names** (`Packet::RESERVED_EVENTS`): `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` and `removeListener` can't be emitted to the client; doing so throws. A received event with one of these names is invalid, as in the reference.
 
 ## Public API (target)
 
@@ -282,7 +289,7 @@ Worker::runAll();
 2. [x] Engine.IO parser (`Engine\Parser`).
 3. [x] `Scheduler`, `Emitter`, `Engine\Socket` and transports, tested with a fake scheduler and fake connections.
 4. [x] `Engine\Server`, the Workerman protocols, `WorkermanScheduler` and the Workerman implementations of `HttpExchange` and `WebSocketConnection`, with the official Engine.IO v4 suite running in CI.
-5. [ ] Socket.IO parser (`Encoder`, `Decoder`, `Binary`).
+5. [x] Socket.IO parser (`Encoder`, `Decoder`, `Binary`).
 6. [ ] `SocketIO`, `Nsp`, `Client`, `Socket`, `BroadcastOperator`, `InMemoryAdapter`, with the official Socket.IO v5 suite in CI.
 7. [ ] Integration with `socket.io-client@4` in CI.
 8. [ ] `ChannelAdapter`, with a multi-process integration test and a scale check.
