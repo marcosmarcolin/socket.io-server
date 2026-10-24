@@ -2,10 +2,6 @@
   "name": "socket-io-server-integration",
   "private": true,
   "type": "module",
-  "scripts": {
-    "test": "node --test --test-concurrency=1 integration.test.js",
-    "test:multi-process": "node --test multi-process.test.js"
-  },
   "dependencies": {
     "socket.io-client": "4.8.4"
   }

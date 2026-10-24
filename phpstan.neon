@@ -3,6 +3,7 @@ parameters:
     paths:
         - src
         - tests
+        - examples
     # Third-party docblocks PHPStan can't read; see each stub.
     stubFiles:
         - phpstan-stubs/ChannelClient.stub

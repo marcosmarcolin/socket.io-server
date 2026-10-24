@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acknowledgements</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    #log { list-style: none; padding: .5rem; border: 1px solid #ddd; border-radius: 6px; min-height: 200px; }
+    #log li { padding: .2rem 0; }
+    form { display: flex; gap: .5rem; margin: .5rem 0; flex-wrap: wrap; }
+    input { flex: 1; padding: .5rem; font: inherit; }
+    button { padding: .5rem 1rem; font: inherit; }
+    .muted { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Acknowledgements</h1>
+  <form id="sum"><input id="numbers" value="1, 2, 3"><button>Ask the server for the sum</button></form>
+  <form id="ask"><label><input type="checkbox" id="answer" checked> answer the server</label><button>Let the server ask me</button></form>
+  <ul id="log"></ul>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const url = `http://${location.hostname}:3000`;
+    function log(text) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      document.getElementById("log").append(item);
+    }
+    function onSubmit(id, handler) {
+      document.getElementById(id).addEventListener("submit", (event) => {
+        event.preventDefault();
+        handler();
+      });
+    }
+    const value = (id) => document.getElementById(id).value;
+    const socket = io(url);
+    onSubmit("sum", async () => {
+      const numbers = value("numbers").split(",").map(Number);
+      log(`sum: ${await socket.emitWithAck("sum", numbers)}`);
+    });
+    // The server waits 2 seconds for this answer.
+    socket.on("question", (question, ack) => {
+      log(`server asks: ${question}`);
+      if (document.getElementById("answer").checked) ack("blue");
+    });
+    onSubmit("ask", () => socket.emit("ask me", 2000));
+    socket.on("result", (result) => log(result.error ? `server gave up: ${result.error}` : `server got: ${result.answer}`));
+  </script>
+</body>
+</html>

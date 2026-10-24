@@ -30,7 +30,8 @@ For `socket.io-client` v1 and v2, use [workerman/phpsocket.io](https://github.co
 | Integration tests with the official `socket.io-client` 4.8.4: polling, WebSocket, upgrade, namespaces, rooms, acks, binary | Done |
 | Cross-process broadcast: `ChannelAdapter` on `workerman/channel` | Done |
 | Multi-process integration tests and a scale check (200 clients, 4,000 deliveries) | Done |
-| Examples and a migration guide from phpsocket.io | Next |
+| Examples: chat, rooms, acknowledgements, namespaces, binary data, several processes | Done |
+| Complete README with an API reference, and a migration guide from phpsocket.io | Next |
 
 ## Usage
 
@@ -129,6 +130,19 @@ Worker::runAll();
 - Clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee.
 - Only broadcasts cross processes (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the current process.
 
+## Examples
+
+Each one runs with `php examples/<name>/start.php start`; then open http://localhost:3001.
+
+| Example | Shows |
+|---|---|
+| [chat](examples/chat) | a chat room: names, typing indicator, join and leave notices |
+| [rooms](examples/rooms) | `join`, `leave`, messages to a room, live member lists |
+| [acks](examples/acks) | acknowledgements both ways, and the server's `timeout()` |
+| [namespaces](examples/namespaces) | `/public` and `/admin`, a middleware with a token, `ConnectionError` |
+| [binary](examples/binary) | file upload and download with `Binary` |
+| [multi-process](examples/multi-process) | four processes and `ChannelAdapter` |
+
 ## Development
 
 Everything runs in Docker; PHP and Composer are not needed on the host.
@@ -141,6 +155,7 @@ tests/Compliance/engine-io.sh                  # the official Engine.IO v4 test 
 tests/Compliance/socket-io.sh                  # the official Socket.IO v5 test suite
 tests/Integration/run.sh                       # the official socket.io-client against this server
 tests/Integration/run.sh multi-process         # the same over two processes and a channel server
+tests/Integration/run.sh examples              # every example, each against its test
 ```
 
 ### Secret scanning

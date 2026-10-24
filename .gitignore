@@ -4,4 +4,4 @@
 /node_modules/
 /.idea/
 /.cache/
-/workerman.log
+workerman.log

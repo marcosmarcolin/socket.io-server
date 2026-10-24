@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Several processes</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    #log { list-style: none; padding: .5rem; border: 1px solid #ddd; border-radius: 6px; min-height: 200px; }
+    #log li { padding: .2rem 0; }
+    form { display: flex; gap: .5rem; margin: .5rem 0; flex-wrap: wrap; }
+    input { flex: 1; padding: .5rem; font: inherit; }
+    button { padding: .5rem 1rem; font: inherit; }
+    .muted { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Several processes</h1>
+  <p class="muted">Open this page in a few tabs: they land on different processes, and messages reach them all.</p>
+  <form id="send"><input id="text" placeholder="Message to everyone" required><button>Send</button></form>
+  <ul id="log"></ul>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const url = `http://${location.hostname}:3000`;
+    function log(text) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      document.getElementById("log").append(item);
+    }
+    function onSubmit(id, handler) {
+      document.getElementById(id).addEventListener("submit", (event) => {
+        event.preventDefault();
+        handler();
+      });
+    }
+    const value = (id) => document.getElementById(id).value;
+    // Several processes share the port, so polling would need sticky sessions: use WebSocket only.
+    const socket = io(url, { transports: ["websocket"] });
+    socket.on("process", (pid) => log(`connected to process ${pid}`));
+    onSubmit("send", () => socket.emit("chat message", value("text")));
+    socket.on("chat message", ({ text, via }) => log(`${text} (sent by process ${via})`));
+  </script>
+</body>
+</html>

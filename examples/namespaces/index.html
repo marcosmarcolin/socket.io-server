@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Namespaces</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    #log { list-style: none; padding: .5rem; border: 1px solid #ddd; border-radius: 6px; min-height: 200px; }
+    #log li { padding: .2rem 0; }
+    form { display: flex; gap: .5rem; margin: .5rem 0; flex-wrap: wrap; }
+    input { flex: 1; padding: .5rem; font: inherit; }
+    button { padding: .5rem 1rem; font: inherit; }
+    .muted { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Namespaces</h1>
+  <form id="say"><input id="text" placeholder="Message to /public" required><button>Send</button></form>
+  <form id="admin"><input id="token" placeholder="Admin token (secret)"><input id="announcement" placeholder="Announcement"><button>Announce as admin</button></form>
+  <ul id="log"></ul>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const url = `http://${location.hostname}:3000`;
+    function log(text) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      document.getElementById("log").append(item);
+    }
+    function onSubmit(id, handler) {
+      document.getElementById(id).addEventListener("submit", (event) => {
+        event.preventDefault();
+        handler();
+      });
+    }
+    const value = (id) => document.getElementById(id).value;
+    const publicSocket = io(`${url}/public`);
+    publicSocket.on("message", (text) => log(`/public: ${text}`));
+    publicSocket.on("announcement", (text) => log(`announcement: ${text}`));
+    onSubmit("say", () => publicSocket.emit("message", value("text")));
+    onSubmit("admin", () => {
+      const admin = io(`${url}/admin`, { auth: { token: value("token") }, forceNew: true });
+      admin.on("connect_error", (error) => log(`/admin refused: ${error.message} (${error.data?.hint ?? ""})`));
+      admin.on("connect", async () => {
+        log(`reached ${await admin.emitWithAck("announce", value("announcement"))} public client(s)`);
+        admin.disconnect();
+      });
+    });
+  </script>
+</body>
+</html>
