@@ -28,8 +28,8 @@ Para o `socket.io-client` v1 e v2, use o [workerman/phpsocket.io](https://github
 | Broadcast para salas e namespaces | Pronto |
 | A suíte oficial do Socket.IO v5 rodando no CI (32 de 32 passando) | Pronto |
 | Testes de integração com o `socket.io-client` 4.8.4 oficial: polling, WebSocket, upgrade, namespaces, salas, acks, binário | Pronto |
-| Broadcast entre processos com `workerman/channel` | Próxima |
-| Broadcast entre processos com `workerman/channel` | Planejado |
+| Broadcast entre processos: `ChannelAdapter` sobre o `workerman/channel` | Pronto |
+| Testes de integração com vários processos e verificação de escala | Próxima |
 
 ## Uso
 

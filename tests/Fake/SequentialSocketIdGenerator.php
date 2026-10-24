@@ -11,7 +11,12 @@ use Marcolin\SocketIO\SocketIdGenerator;
  */
 final class SequentialSocketIdGenerator implements SocketIdGenerator
 {
-    private int $next = 1;
+    private int $next;
+
+    public function __construct(int $first = 1)
+    {
+        $this->next = $first;
+    }
 
     public function generate(): string
     {
