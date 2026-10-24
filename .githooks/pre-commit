@@ -1,0 +1,3 @@
+#!/bin/sh
+# Blocks commits that add secrets. Enable once per clone: git config core.hooksPath .githooks
+exec "$(dirname "$0")/gitleaks" staged

@@ -1,0 +1,38 @@
+#!/bin/sh
+# Scans for secrets with gitleaks in Docker.
+#   .githooks/gitleaks staged    staged changes (pre-commit hook)
+#   .githooks/gitleaks history   every commit (CI)
+set -eu
+
+GITLEAKS_IMAGE="ghcr.io/gitleaks/gitleaks:v8.30.1"
+
+case "${1:-}" in
+    staged) mode="--pre-commit --staged" ;;
+    history) mode="" ;;
+    *) echo "usage: $0 staged|history" >&2; exit 2 ;;
+esac
+
+if ! docker info >/dev/null 2>&1; then
+    echo "gitleaks: Docker is not running, so nothing can be scanned for secrets. Start Docker and retry." >&2
+    exit 1
+fi
+
+root=$(git rev-parse --show-toplevel)
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT
+
+# safe.directory: the repository belongs to another user inside the container.
+# shellcheck disable=SC2086
+if ! docker run --rm -v "$root:/repo" \
+    -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
+    "$GITLEAKS_IMAGE" git $mode --redact --no-banner --verbose /repo >"$log" 2>&1; then
+    cat "$log" >&2
+    exit 1
+fi
+cat "$log"
+
+# gitleaks exits 0 when git fails mid-scan, so any error means the scan is incomplete.
+if grep -q 'ERR' "$log"; then
+    echo "gitleaks: the scan did not finish; treating it as a failure." >&2
+    exit 1
+fi

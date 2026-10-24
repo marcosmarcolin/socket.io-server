@@ -38,7 +38,7 @@ A change is done only when all of these hold:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back;
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers.
 4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process.
-5. **The docs are current:** README, CLAUDE.md and examples match the behavior.
+5. **The docs are current:** both READMEs, CLAUDE.md and examples match the behavior.
 
 ## Code rules
 
@@ -59,7 +59,8 @@ A change is done only when all of these hold:
 - Short comments, one line, only to explain why.
 - No `echo`/`print`. Errors become exceptions or `error` events.
 - No production dependencies besides Workerman. `workerman/channel` is optional (in `suggest`).
-- Everything in English: code, comments, docs, commits, PRs.
+- Everything in English: code, comments, docs, commits, PRs. The one exception is `README.pt-BR.md`, the Brazilian Portuguese translation of `README.md`.
+- **Two READMEs, always in sync.** `README.md` (English) is the reference. Every change to it goes to `README.pt-BR.md` in the same PR, and neither one has content the other lacks.
 
 ## Verification
 
@@ -72,6 +73,8 @@ docker compose run --rm php composer lint
 ```
 
 ## Workflow
+
+- **Secrets never get committed.** After cloning, run `git config core.hooksPath .githooks`: the pre-commit hook runs gitleaks in Docker on the staged changes, and it blocks the commit if Docker isn't running. The CI `secrets` job scans the whole history. Both go through `.githooks/gitleaks`, which pins the image version and fails when gitleaks logs an error, because gitleaks exits 0 when git fails mid-scan.
 
 - **Every commit follows [Conventional Commits](https://www.conventionalcommits.org/):** `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`, `ci:`, and `!` or a `BREAKING CHANGE:` footer for breaking changes.
 - Commits are signed (GPG) and authored as `marcolindev@gmail.com`; this is configured in the repo's local git config.
