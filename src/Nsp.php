@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Marcolin\SocketIO;
 
 use Closure;
+use LogicException;
 use Marcolin\SocketIO\Adapter\Adapter;
 use Marcolin\SocketIO\Event\Emitter;
 use Throwable;
@@ -13,6 +14,10 @@ use Throwable;
  * A namespace.
  *
  * Events: `connection` and `connect` (Socket), when a socket joined, after the middlewares let it in.
+ *
+ * The broadcast methods act on the sockets of this process.
+ *
+ * @property-read BroadcastOperator $volatile broadcasts that skip sockets whose transport is busy
  */
 final class Nsp extends Emitter
 {
@@ -50,6 +55,106 @@ final class Nsp extends Emitter
     public function adapter(): Adapter
     {
         return $this->adapter;
+    }
+
+    /**
+     * @param string|list<string> $rooms
+     */
+    public function to(string|array $rooms): BroadcastOperator
+    {
+        return $this->operator()->to($rooms);
+    }
+
+    /**
+     * @param string|list<string> $rooms
+     */
+    public function in(string|array $rooms): BroadcastOperator
+    {
+        return $this->operator()->in($rooms);
+    }
+
+    /**
+     * @param string|list<string> $rooms
+     */
+    public function except(string|array $rooms): BroadcastOperator
+    {
+        return $this->operator()->except($rooms);
+    }
+
+    /**
+     * Kept for API compatibility: the server doesn't compress, so this has no effect.
+     */
+    public function compress(bool $compress): BroadcastOperator
+    {
+        return $this->operator()->compress($compress);
+    }
+
+    /**
+     * Sends an event to every socket of the namespace, in this process.
+     */
+    public function emit(string $event, mixed ...$args): static
+    {
+        $this->operator()->emit($event, ...$args);
+
+        return $this;
+    }
+
+    /**
+     * Sends a `message` event to every socket of the namespace.
+     */
+    public function send(mixed ...$args): static
+    {
+        return $this->emit('message', ...$args);
+    }
+
+    /**
+     * The ids of the namespace's sockets.
+     *
+     * @return list<string>
+     */
+    public function allSockets(): array
+    {
+        return $this->operator()->allSockets();
+    }
+
+    /**
+     * @return list<Socket>
+     */
+    public function fetchSockets(): array
+    {
+        return $this->operator()->fetchSockets();
+    }
+
+    /**
+     * Makes every socket of the namespace join the rooms; use to() first to pick some.
+     *
+     * @param string|list<string> $rooms
+     */
+    public function socketsJoin(string|array $rooms): void
+    {
+        $this->operator()->socketsJoin($rooms);
+    }
+
+    /**
+     * @param string|list<string> $rooms
+     */
+    public function socketsLeave(string|array $rooms): void
+    {
+        $this->operator()->socketsLeave($rooms);
+    }
+
+    public function disconnectSockets(bool $close = false): void
+    {
+        $this->operator()->disconnectSockets($close);
+    }
+
+    public function __get(string $name): BroadcastOperator
+    {
+        if ($name !== 'volatile') {
+            throw new LogicException(sprintf('Undefined property %s::$%s', self::class, $name));
+        }
+
+        return $this->operator()->volatile;
     }
 
     /**
@@ -122,6 +227,11 @@ final class Nsp extends Emitter
     public function nextAckId(): int
     {
         return $this->nextAckId++;
+    }
+
+    private function operator(): BroadcastOperator
+    {
+        return new BroadcastOperator($this->adapter);
     }
 
     /**

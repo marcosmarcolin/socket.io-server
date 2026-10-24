@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Marcolin\SocketIO\Adapter;
 
 use Marcolin\SocketIO\Nsp;
+use Marcolin\SocketIO\Parser\Packet;
+use Marcolin\SocketIO\Socket;
 
 /**
  * Rooms of the current process. Not final: other adapters extend it to reach other processes.
@@ -48,5 +50,87 @@ class InMemoryAdapter implements Adapter
     public function socketRooms(string $socketId): array
     {
         return array_map('strval', array_keys($this->sids[$socketId] ?? []));
+    }
+
+    public function broadcast(Packet $packet, BroadcastOptions $options): void
+    {
+        $parts = $this->nsp->server->encoder()->encode(
+            new Packet($packet->type, $this->nsp->name, $packet->data, $packet->id),
+        );
+        foreach ($this->select($options) as $socket) {
+            $socket->client->write($parts, $options->volatile);
+        }
+    }
+
+    public function sockets(array $rooms): array
+    {
+        return array_map(
+            static fn (Socket $socket): string => $socket->id,
+            $this->select(new BroadcastOptions($rooms)),
+        );
+    }
+
+    public function fetchSockets(BroadcastOptions $options): array
+    {
+        return $this->select($options);
+    }
+
+    public function addSockets(BroadcastOptions $options, array $rooms): void
+    {
+        foreach ($this->select($options) as $socket) {
+            $socket->join($rooms);
+        }
+    }
+
+    public function delSockets(BroadcastOptions $options, array $rooms): void
+    {
+        foreach ($this->select($options) as $socket) {
+            foreach ($rooms as $room) {
+                $socket->leave($room);
+            }
+        }
+    }
+
+    public function disconnectSockets(BroadcastOptions $options, bool $close): void
+    {
+        foreach ($this->select($options) as $socket) {
+            $socket->disconnect($close);
+        }
+    }
+
+    /**
+     * The connected sockets of this process that the options select, each once, in room order.
+     *
+     * The list is built before anyone acts on it, so callers may change rooms or disconnect sockets.
+     *
+     * @return list<Socket>
+     */
+    protected function select(BroadcastOptions $options): array
+    {
+        $connected = $this->nsp->sockets();
+        $excluded = [];
+        foreach ($options->except as $room) {
+            $excluded += $this->rooms[$room] ?? [];
+        }
+
+        if ($options->rooms === []) {
+            $ids = array_keys($this->sids);
+        } else {
+            $ids = [];
+            foreach ($options->rooms as $room) {
+                $ids = [...$ids, ...array_keys($this->rooms[$room] ?? [])];
+            }
+        }
+
+        $selected = [];
+        foreach ($ids as $id) {
+            $id = (string) $id;
+            // A socket in several rooms keeps its first place.
+            if (! isset($excluded[$id]) && isset($connected[$id])) {
+                $selected[$id] = $connected[$id];
+            }
+        }
+
+        return array_values($selected);
     }
 }

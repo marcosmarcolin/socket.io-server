@@ -24,6 +24,7 @@ use Throwable;
  * - `error` (Throwable), for a packet that broke the protocol, just before the connection closes.
  *
  * @property-read SocketEmitter $volatile emits that are dropped when the transport can't take them right now
+ * @property-read BroadcastOperator $broadcast every other socket of the namespace
  * @property-read bool $connected
  * @property-read bool $disconnected
  * @property-read list<string> $rooms
@@ -89,6 +90,7 @@ final class Socket extends Emitter
     {
         return match ($name) {
             'volatile' => new SocketEmitter($this, volatile: true),
+            'broadcast' => $this->broadcastOperator(),
             'connected' => $this->isConnected,
             'disconnected' => ! $this->isConnected,
             'rooms' => $this->nsp->adapter()->socketRooms($this->id),
@@ -131,6 +133,34 @@ final class Socket extends Emitter
     public function compress(bool $compress): SocketEmitter
     {
         return (new SocketEmitter($this))->compress($compress);
+    }
+
+    /**
+     * Targets the sockets in these rooms, except this one.
+     *
+     * @param string|list<string> $rooms
+     */
+    public function to(string|array $rooms): BroadcastOperator
+    {
+        return $this->broadcastOperator()->to($rooms);
+    }
+
+    /**
+     * @param string|list<string> $rooms
+     */
+    public function in(string|array $rooms): BroadcastOperator
+    {
+        return $this->to($rooms);
+    }
+
+    /**
+     * Targets every other socket of the namespace, minus the sockets in these rooms.
+     *
+     * @param string|list<string> $rooms
+     */
+    public function except(string|array $rooms): BroadcastOperator
+    {
+        return $this->broadcastOperator()->except($rooms);
     }
 
     /**
@@ -264,6 +294,11 @@ final class Socket extends Emitter
             $data['data'] = $error->data;
         }
         $this->packet(new Packet(PacketType::ConnectError, $this->nsp->name, $data));
+    }
+
+    private function broadcastOperator(): BroadcastOperator
+    {
+        return new BroadcastOperator($this->nsp->adapter(), [], [$this->id]);
     }
 
     private function packet(Packet $packet, bool $volatile = false): void

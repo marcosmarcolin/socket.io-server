@@ -119,13 +119,14 @@ src/
   Client.php                    one Engine.IO connection and its per-namespace sockets
   DisconnectReason.php, ConnectionError.php, TimeoutException.php
   SocketIdGenerator.php, RandomSocketIdGenerator.php
-  BroadcastOperator.php         to/in/except/compress/volatile/emit, immutable
+  BroadcastOperator.php         to/in/except/compress/volatile/emit and the socket helpers, immutable
   Parser/                       socket.io-parser (protocol v5)
     Encoder.php                 Packet → list<string|Binary>: the text part, then one Binary per attachment
     Decoder.php                 one per connection: add(string|Binary): ?Packet, reset()
     Packet.php, PacketType.php, InvalidPacketException.php
   Adapter/
     Adapter.php                 the extension point for other processes
+    BroadcastOptions.php        rooms, except and volatile of a broadcast
     InMemoryAdapter.php         local rooms and broadcast; not final, the base of other adapters
     ChannelAdapter.php          cross-process broadcast through workerman/channel
 ```
@@ -287,6 +288,14 @@ Worker::runAll();
 - `Nsp`: `on('connection')`, `use()`, `to/in/except`, `emit`, `fetchSockets()`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
 - `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `join`, `leave`, `to/in/except`, `broadcast`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
 - The broadcast helpers act on the local process only; cross-process delivery goes through the adapter.
+- **Broadcast** (`InMemoryAdapter`), as in the reference:
+  - `to()` targets the sockets in any of the rooms, each once; with no room, every socket of the namespace;
+  - `except()` leaves out the sockets in any of its rooms;
+  - `$socket->broadcast`, `$socket->to()` and `$socket->except()` leave the socket itself out;
+  - only connected sockets are reached, not those still in their middlewares;
+  - the packet is encoded once for all sockets;
+  - `allSockets()` ignores `except()`, as in the reference, and `fetchSockets()` applies it;
+  - `volatile` skips sockets whose transport is busy.
 
 ## Multiple processes
 

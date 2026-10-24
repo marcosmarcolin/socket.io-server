@@ -6,6 +6,7 @@ namespace Marcolin\SocketIO;
 
 use Closure;
 use InvalidArgumentException;
+use LogicException;
 use Marcolin\SocketIO\Adapter\Adapter;
 use Marcolin\SocketIO\Adapter\InMemoryAdapter;
 use Marcolin\SocketIO\Engine\RandomSessionIdGenerator;
@@ -22,7 +23,10 @@ use WeakMap;
 /**
  * The Socket.IO server.
  *
- * `connection` and `connect` listeners belong to the main namespace, as $io->sockets->on() would.
+ * `connection` and `connect` listeners belong to the main namespace, as $io->sockets->on() would, and so do
+ * the broadcast methods.
+ *
+ * @property-read BroadcastOperator $volatile broadcasts that skip sockets whose transport is busy
  */
 final class SocketIO extends Emitter
 {
@@ -102,6 +106,65 @@ final class SocketIO extends Emitter
         }
 
         return parent::on($event, $listener);
+    }
+
+    /**
+     * @param string|list<string> $rooms
+     */
+    public function to(string|array $rooms): BroadcastOperator
+    {
+        return $this->sockets->to($rooms);
+    }
+
+    /**
+     * @param string|list<string> $rooms
+     */
+    public function in(string|array $rooms): BroadcastOperator
+    {
+        return $this->sockets->in($rooms);
+    }
+
+    /**
+     * @param string|list<string> $rooms
+     */
+    public function except(string|array $rooms): BroadcastOperator
+    {
+        return $this->sockets->except($rooms);
+    }
+
+    /**
+     * Kept for API compatibility: the server doesn't compress, so this has no effect.
+     */
+    public function compress(bool $compress): BroadcastOperator
+    {
+        return $this->sockets->compress($compress);
+    }
+
+    /**
+     * Sends an event to every socket of the main namespace, in this process.
+     */
+    public function emit(string $event, mixed ...$args): static
+    {
+        $this->sockets->emit($event, ...$args);
+
+        return $this;
+    }
+
+    /**
+     * Sends a `message` event to every socket of the main namespace.
+     */
+    public function send(mixed ...$args): static
+    {
+        return $this->emit('message', ...$args);
+    }
+
+    public function __get(string $name): BroadcastOperator
+    {
+        if ($name !== 'volatile') {
+            throw new LogicException(sprintf('Undefined property %s::$%s', self::class, $name));
+        }
+
+        return $this->sockets->volatile;
     }
 
     /**

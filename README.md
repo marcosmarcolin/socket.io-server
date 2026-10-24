@@ -25,8 +25,8 @@ For `socket.io-client` v1 and v2, use [workerman/phpsocket.io](https://github.co
 | The official Engine.IO v4 test suite running in CI (25 of 25 passing) | Done |
 | Socket.IO v5 parser: encoder, decoder, binary attachments | Done |
 | Socket.IO server: connection, namespaces, middlewares, events, acks, rooms | Done |
-| Broadcast to rooms and namespaces | Next |
-| The official Socket.IO v5 test suite running in CI | Planned |
+| Broadcast to rooms and namespaces | Done |
+| The official Socket.IO v5 test suite running in CI | Next |
 | Multi-process broadcast with `workerman/channel` | Planned |
 
 ## Development
