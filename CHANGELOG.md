@@ -4,7 +4,9 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
-The first release. Its version number is chosen when it is tagged.
+## [0.1.0] - 2026-10-25
+
+The first release.
 
 ### Added
 
@@ -38,4 +40,5 @@ The first release. Its version number is chosen when it is tagged.
 - Across processes, only broadcasts travel; the socket helpers (`fetchSockets`, `socketsJoin`...) act on the current process.
 - With several processes on one port, clients must use `transports: ['websocket']`.
 
-[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/commits/main
+[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/marcosmarcolin/socket.io-server/releases/tag/v0.1.0

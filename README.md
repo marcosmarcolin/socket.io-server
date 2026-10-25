@@ -1,6 +1,9 @@
 # socket.io-server
 
 [![CI](https://github.com/marcosmarcolin/socket.io-server/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/marcosmarcolin/socket.io-server/actions/workflows/ci.yml)
+[![Latest version](https://img.shields.io/packagist/v/marcosmarcolin/socket.io-server)](https://packagist.org/packages/marcosmarcolin/socket.io-server)
+[![Downloads](https://img.shields.io/packagist/dt/marcosmarcolin/socket.io-server)](https://packagist.org/packages/marcosmarcolin/socket.io-server)
+[![PHP version](https://img.shields.io/packagist/dependency-v/marcosmarcolin/socket.io-server/php)](https://packagist.org/packages/marcosmarcolin/socket.io-server)
 
 **English** · [Português (Brasil)](README.pt-BR.md)
 
@@ -8,7 +11,7 @@ A [Socket.IO](https://socket.io) v4 server for PHP, built on [Workerman](https:/
 
 It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and apps use the official `socket.io-client` v3 or v4. It passes the official Engine.IO and Socket.IO compliance suites, and CI runs it against the official client.
 
-> **Work in progress.** It isn't published on Packagist yet, and the API may still change before the first release.
+> **Version 0.x.** The API may still change between minor versions until 1.0; each change is listed in the [changelog](CHANGELOG.md).
 
 ## Contents
 
@@ -39,13 +42,8 @@ Out of scope: WebTransport, JSONP polling, custom parsers (msgpack), dynamic nam
 
 ## Installation
 
-The package isn't on Packagist yet. Until the first release, install it from the Git repository:
-
-```json
-{
-    "repositories": [{"type": "vcs", "url": "https://github.com/marcosmarcolin/socket.io-server"}],
-    "require": {"marcosmarcolin/socket.io-server": "dev-main"}
-}
+```sh
+composer require marcosmarcolin/socket.io-server
 ```
 
 ## Quick start
@@ -387,7 +385,7 @@ Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 | Multi-process integration tests and a scale check (200 clients, 4,000 deliveries) | Done |
 | Examples: chat, rooms, acknowledgements, namespaces, binary data, several processes | Done |
 | Complete README with an API reference, and a migration guide from phpsocket.io | Done |
-| First release | Next |
+| First release, 0.1.0 | Done |
 
 ## Development
 
