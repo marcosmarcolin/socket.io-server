@@ -105,6 +105,7 @@ Two independent layers, as in the Node reference implementation. The Engine laye
 src/
   Binary.php                    binary value (attachments and binary frames)
   Event/Emitter.php             on/once/off/listeners plus a protected dispatch
+  Event/AnyListeners.php        the catch-all listeners of onAny() and onAnyOutgoing()
   Engine/                       Engine.IO v4
     Server.php                  validates requests, handshake, sessions, routing; no Workerman code
     ServerError.php             HTTP error codes and messages
@@ -273,6 +274,11 @@ src/
     - the adapter's `broadcastWithAck()` reports how many sockets it reached, and each answer counts once, with its first argument;
     - the callback gets `null` and the answers in arrival order once all arrived (at once with `[]` when none was reached), or a `TimeoutException` and the answers so far, after which every socket of the namespace forgets the id;
     - a `volatile` packet dropped for a busy transport still counts, so the wait ends with the timeout.
+- **Catch-all listeners**, as in the reference:
+  - `onAny`/`prependAny`/`offAny`/`listenersAny` get each received event of a connected socket as `(string $event, ...$args)`, with the ack `Closure` last, before the event's own listeners; those are skipped if an `onAny` listener disconnected the socket. Numeric event names arrive as strings, as with `on()`.
+  - `onAnyOutgoing` and its family get each event sent to the socket, without the ack callback, before it is written: from `emit()`/`send()`, and from the adapter for every socket a broadcast reaches (with or without ack).
+  - The adapter asks for the event's data only when a reached socket has an outgoing listener, once per broadcast. `ChannelAdapter` decodes another process's parts for it then; parts that aren't one event notify nobody.
+  - Listeners added or removed while listeners run take effect from the next event.
 - **Reserved names** (`Packet::RESERVED_EVENTS`): `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` and `removeListener` can't be emitted to the client; doing so throws. A received event with one of these names is invalid, as in the reference.
 
 ## Public API (target)
@@ -322,7 +328,7 @@ Worker::runAll();
 
   Sockets still in their middlewares never connect. It is not called on `workerStop`: the reference has no such hook, and Workerman closes the connections itself.
 - `Nsp`: `on('connection')`, `use()`, `to/in/except`, `timeout`, `emit`, `fetchSockets()`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
-- `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `join`, `leave`, `to/in/except`, `broadcast`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
+- `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `onAny`, `prependAny`, `offAny`, `listenersAny`, `onAnyOutgoing`, `prependAnyOutgoing`, `offAnyOutgoing`, `listenersAnyOutgoing`, `join`, `leave`, `to/in/except`, `broadcast`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
 - The broadcast helpers act on the local process only; cross-process delivery goes through the adapter.
 - **Broadcast** (`InMemoryAdapter`), as in the reference:
   - `to()` targets the sockets in any of the rooms, each once; with no room, every socket of the namespace;

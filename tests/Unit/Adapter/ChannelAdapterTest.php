@@ -228,6 +228,58 @@ final class ChannelAdapterTest extends TestCase
         self::assertSame(['2["a"]'], $a1->received());
     }
 
+    public function testOutgoingListenersSeeBroadcastsFromOtherProcesses(): void
+    {
+        [, $a1] = $this->connect('A');
+        [, $b1] = $this->connect('B');
+        $seen = [];
+        foreach (['A' => $a1, 'B' => $b1] as $process => $socket) {
+            $socket->onAnyOutgoing(static function (mixed ...$args) use (&$seen, $process): void {
+                $seen[] = [$process, ...$args];
+            });
+        }
+
+        $this->processes['A']->emit('file', ['data' => new Binary("\x00\xff")], 1);
+
+        self::assertEquals([
+            ['A', 'file', ['data' => new Binary("\x00\xff")], 1],
+            ['B', 'file', ['data' => new Binary("\x00\xff")], 1],
+        ], $seen);
+    }
+
+    /**
+     * @return iterable<string, array{list<array{string, string}>}>
+     */
+    public static function partsThatAreNotAnEvent(): iterable
+    {
+        yield 'an acknowledgement' => [[['text', '30["a"]']]];
+        yield 'an invalid packet' => [[['text', '3["a"]']]];
+        yield 'an attachment never announced' => [[['binary', "\x01"]]];
+    }
+
+    /**
+     * @param list<array{string, string}> $parts
+     */
+    #[DataProvider('partsThatAreNotAnEvent')]
+    public function testOutgoingListenersIgnoreRemotePartsThatAreNotAnEvent(array $parts): void
+    {
+        [, $a1] = $this->connect('A');
+        $seen = 0;
+        $a1->onAnyOutgoing(static function () use (&$seen): void {
+            ++$seen;
+        });
+
+        $this->broker->publish('socket.io#/#', [
+            'sender' => 'x',
+            'parts' => $parts,
+            'rooms' => [],
+            'except' => [],
+            'volatile' => false,
+        ]);
+
+        self::assertSame(0, $seen);
+    }
+
     public function testRefusesABroadcastWithAcknowledgement(): void
     {
         $this->connect('A');
