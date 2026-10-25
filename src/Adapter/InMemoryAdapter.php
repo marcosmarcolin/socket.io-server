@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Marcolin\SocketIO\Adapter;
 
+use Closure;
+use LogicException;
 use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\Nsp;
 use Marcolin\SocketIO\Parser\Packet;
@@ -65,6 +67,24 @@ class InMemoryAdapter implements Adapter
     public function broadcast(Packet $packet, BroadcastOptions $options): void
     {
         $this->deliver($this->encode($packet), $options);
+    }
+
+    public function broadcastWithAck(
+        Packet $packet,
+        BroadcastOptions $options,
+        Closure $clientCount,
+        Closure $ack,
+    ): void {
+        $id = $packet->id ?? throw new LogicException('A broadcast with an acknowledgement needs a packet id');
+        $parts = $this->encode($packet);
+        $count = 0;
+        foreach ($this->select($options) as $socket) {
+            // A volatile packet the transport drops still counts, so the wait ends with the timeout.
+            ++$count;
+            $socket->expectAck($id, $ack);
+            $socket->client->write($parts, $options->volatile);
+        }
+        $clientCount($count);
     }
 
     public function sockets(array $rooms): array

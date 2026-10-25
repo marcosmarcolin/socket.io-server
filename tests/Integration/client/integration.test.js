@@ -163,6 +163,36 @@ for (const mode of Object.keys(MODES)) {
       assert.equal(error.message, "Invalid namespace");
     });
 
+    test("collects the acknowledgements of a broadcast", TIMEOUT, async () => {
+      const room = `poll-${mode}`;
+      const [a, b, asker] = await Promise.all([connected(mode), connected(mode), connected(mode)]);
+      await a.emitWithAck("join", room);
+      await b.emitWithAck("join", room);
+      a.on("vote", (votedRoom, ack) => ack(`a in ${votedRoom}`));
+      b.on("vote", (votedRoom, ack) => setTimeout(() => ack(`b in ${votedRoom}`, "ignored"), 50));
+
+      asker.emit("poll-room", room, 2000);
+      const [error, votes] = await next(asker, "votes");
+
+      assert.equal(error, null);
+      assert.deepEqual(votes, [`a in ${room}`, `b in ${room}`]);
+    });
+
+    test("times out a broadcast with the acknowledgements so far", TIMEOUT, async () => {
+      const room = `silent-poll-${mode}`;
+      const [a, b, asker] = await Promise.all([connected(mode), connected(mode), connected(mode)]);
+      await a.emitWithAck("join", room);
+      await b.emitWithAck("join", room);
+      a.on("vote", (votedRoom, ack) => ack("a"));
+      b.on("vote", () => {});
+
+      asker.emit("poll-room", room, 300);
+      const [error, votes] = await next(asker, "votes");
+
+      assert.equal(error, "operation has timed out");
+      assert.deepEqual(votes, ["a"]);
+    });
+
     test("broadcasts to rooms, to everyone else, and except rooms", TIMEOUT, async () => {
       const room = `room-${mode}`;
       const a = await connected(mode);

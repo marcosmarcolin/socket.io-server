@@ -208,7 +208,7 @@ Um middleware faz o mesmo papel um passo depois, com a sessão já aberta: ele p
 | `use(fn (Socket $socket, Closure $next))` | Um middleware em `/`. |
 | `adapter(fn (Nsp $nsp): Adapter)` | Como os namespaces guardam as salas e fazem broadcast, por exemplo `ChannelAdapter::factory()`. |
 | `close()` | Desliga o servidor: cada socket sai com `server shutting down`, as conexões fecham, e o worker para de aceitar novas neste processo. |
-| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()` | Broadcast em `/`, como num namespace. |
+| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcast em `/`, como num namespace. |
 
 ### Namespaces: `Nsp`
 
@@ -216,7 +216,7 @@ Um middleware faz o mesmo papel um passo depois, com a sessão já aberta: ele p
 |---|---|
 | `on('connection', fn (Socket $socket))` | Um socket entrou, depois que os middlewares o deixaram passar. `connect` é o mesmo. |
 | `use(fn (Socket $socket, Closure $next))` | Roda antes de cada conexão, em ordem. Chame `$next()` para deixar o socket entrar, ou `$next($error)` para recusá-lo; `$next` pode ser chamado depois, de um callback assíncrono. Um `ConnectionError` também envia o seu `data`. Uma exceção lançada antes do `$next` recusa o socket. |
-| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()` | Broadcast para o namespace. |
+| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcast para o namespace. Veja [Acknowledgements](#acknowledgements) para o `timeout()`. |
 | `sockets(): array<string, Socket>` | Os sockets conectados, por id. |
 | `allSockets(): list<string>` | Os ids deles. |
 | `fetchSockets(): list<Socket>`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets(bool $close = false)` | Agem nos sockets selecionados; use `to()` e `except()` antes para selecionar. |
@@ -256,7 +256,19 @@ $socket->on('sum', function (array $numbers, Closure $ack): void {
 });
 ```
 
-Broadcasts não aceitam acknowledgements: passar um `Closure` lança exceção.
+Um broadcast aceita um callback de acknowledgement depois de `timeout()`. O callback recebe uma resposta por socket alcançado, na ordem em que chegam: o primeiro argumento do acknowledgement de cada cliente.
+
+```php
+$io->to('room1')->timeout(5000)->emit('vote', function (?Throwable $error, array $answers): void {
+    // $error is null once every socket answered,
+    // or a TimeoutException, with the answers that arrived in time.
+});
+```
+
+- Sem `timeout()`, passar um `Closure` lança exceção, já que um socket que nunca responde deixaria o callback esperando para sempre.
+- Sem nenhum socket a alcançar, o callback roda na hora com `[]`.
+- Com `volatile`, um socket pulado por ter o transporte ocupado continua contando, então a espera termina no timeout.
+- Funciona dentro de um processo: o `ChannelAdapter` lança exceção.
 
 ### Broadcast: `BroadcastOperator`
 
@@ -336,6 +348,7 @@ Worker::runAll();
 
 - Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem. Definir `'transports' => ['websocket']` também no servidor recusa o polling de vez.
 - Só o broadcast atravessa processos (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` e `disconnectSockets` agem no processo atual.
+- Broadcasts com acknowledgement (`timeout()->emit(..., $callback)`) ainda não atravessam processos: o `ChannelAdapter` lança exceção.
 
 ## Exemplos
 

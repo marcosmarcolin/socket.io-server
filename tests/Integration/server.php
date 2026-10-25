@@ -66,6 +66,17 @@ $io->on('connection', static function (Socket $socket) use ($io): void {
         $io->except($room)->emit('except-message', $message);
     });
 
+    // Asks a room and sends back the answers, or the timeout and the answers so far.
+    $socket->on('poll-room', static function (string $room, int $timeout) use ($io, $socket): void {
+        $io->to($room)->timeout($timeout)->emit(
+            'vote',
+            $room,
+            static function (?Throwable $error, array $votes) use ($socket): void {
+                $socket->emit('votes', $error?->getMessage(), $votes);
+            },
+        );
+    });
+
     $socket->on('disconnect-me', static function () use ($socket): void {
         $socket->disconnect();
     });

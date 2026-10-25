@@ -208,7 +208,7 @@ A middleware does the same job one step later, after the session opens: it may w
 | `use(fn (Socket $socket, Closure $next))` | A middleware on `/`. |
 | `adapter(fn (Nsp $nsp): Adapter)` | How namespaces keep rooms and broadcast, such as `ChannelAdapter::factory()`. |
 | `close()` | Shuts the server down: every socket leaves with `server shutting down`, the connections close, and the worker stops accepting new ones in this process. |
-| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()` | Broadcasting on `/`, as on a namespace. |
+| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcasting on `/`, as on a namespace. |
 
 ### Namespaces: `Nsp`
 
@@ -216,7 +216,7 @@ A middleware does the same job one step later, after the session opens: it may w
 |---|---|
 | `on('connection', fn (Socket $socket))` | A socket joined, after the middlewares let it in. `connect` is the same. |
 | `use(fn (Socket $socket, Closure $next))` | Runs before each connection, in order. Call `$next()` to let the socket in, or `$next($error)` to refuse it; `$next` may be called later, from an asynchronous callback. A `ConnectionError` also sends its `data`. An exception thrown before `$next` refuses the socket. |
-| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()` | Broadcasting to the namespace. |
+| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcasting to the namespace. See [Acknowledgements](#acknowledgements) for `timeout()`. |
 | `sockets(): array<string, Socket>` | The connected sockets, by id. |
 | `allSockets(): list<string>` | Their ids. |
 | `fetchSockets(): list<Socket>`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets(bool $close = false)` | Act on the selected sockets; use `to()` and `except()` first to select. |
@@ -256,7 +256,19 @@ $socket->on('sum', function (array $numbers, Closure $ack): void {
 });
 ```
 
-Broadcasts can't take acknowledgements: passing a `Closure` throws.
+A broadcast takes an acknowledgement callback after `timeout()`. The callback gets one answer per socket it reached, in the order they arrive: the first argument of each client's acknowledgement.
+
+```php
+$io->to('room1')->timeout(5000)->emit('vote', function (?Throwable $error, array $answers): void {
+    // $error is null once every socket answered,
+    // or a TimeoutException, with the answers that arrived in time.
+});
+```
+
+- Without `timeout()`, passing a `Closure` throws, since a socket that never answers would keep the callback waiting forever.
+- With no socket to reach, the callback runs at once with `[]`.
+- With `volatile`, a socket skipped because its transport was busy still counts, so the wait ends with the timeout.
+- It works within one process: `ChannelAdapter` throws.
 
 ### Broadcasting: `BroadcastOperator`
 
@@ -336,6 +348,7 @@ Worker::runAll();
 
 - Clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee. Setting `'transports' => ['websocket']` on the server too refuses polling outright.
 - Only broadcasts cross processes (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the current process.
+- Broadcasts with an acknowledgement (`timeout()->emit(..., $callback)`) don't cross processes yet: `ChannelAdapter` throws.
 
 ## Examples
 

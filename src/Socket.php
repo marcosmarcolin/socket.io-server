@@ -223,6 +223,26 @@ final class Socket extends Emitter
     }
 
     /**
+     * Waits for the client's answer to a packet sent with this id, as a broadcast with acknowledgement does.
+     *
+     * @internal used by the adapters
+     */
+    public function expectAck(int $id, Closure $ack): void
+    {
+        $this->acks[$id] = $ack;
+    }
+
+    /**
+     * Stops waiting for the answer to a packet, once a broadcast with acknowledgement timed out.
+     *
+     * @internal
+     */
+    public function forgetAck(int $id): void
+    {
+        unset($this->acks[$id]);
+    }
+
+    /**
      * Joins the socket's own room and confirms the connection to the client.
      *
      * @internal
@@ -298,7 +318,7 @@ final class Socket extends Emitter
 
     private function broadcastOperator(): BroadcastOperator
     {
-        return new BroadcastOperator($this->nsp->adapter(), [], [$this->id]);
+        return new BroadcastOperator($this->nsp, [], [$this->id]);
     }
 
     private function packet(Packet $packet, bool $volatile = false): void

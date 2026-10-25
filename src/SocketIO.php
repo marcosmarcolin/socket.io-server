@@ -203,6 +203,14 @@ final class SocketIO extends Emitter
     }
 
     /**
+     * Lets emit() take an acknowledgement callback; see BroadcastOperator::timeout().
+     */
+    public function timeout(int $milliseconds): BroadcastOperator
+    {
+        return $this->sockets->timeout($milliseconds);
+    }
+
+    /**
      * Sends an event to every socket of the main namespace, in this process.
      */
     public function emit(string $event, mixed ...$args): static

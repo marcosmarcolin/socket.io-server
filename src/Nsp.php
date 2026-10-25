@@ -90,6 +90,14 @@ final class Nsp extends Emitter
     }
 
     /**
+     * Lets emit() take an acknowledgement callback; see BroadcastOperator::timeout().
+     */
+    public function timeout(int $milliseconds): BroadcastOperator
+    {
+        return $this->operator()->timeout($milliseconds);
+    }
+
+    /**
      * Sends an event to every socket of the namespace, in this process.
      */
     public function emit(string $event, mixed ...$args): static
@@ -231,7 +239,7 @@ final class Nsp extends Emitter
 
     private function operator(): BroadcastOperator
     {
-        return new BroadcastOperator($this->adapter);
+        return new BroadcastOperator($this);
     }
 
     /**

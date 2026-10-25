@@ -7,7 +7,6 @@ namespace Marcolin\SocketIO;
 use Closure;
 use InvalidArgumentException;
 use LogicException;
-use Marcolin\SocketIO\Adapter\Adapter;
 use Marcolin\SocketIO\Adapter\BroadcastOptions;
 use Marcolin\SocketIO\Parser\Packet;
 use Marcolin\SocketIO\Parser\PacketType;
@@ -24,12 +23,14 @@ final class BroadcastOperator
     /**
      * @param list<string> $rooms
      * @param list<string> $except
+     * @param int|null $timeout how long an acknowledged broadcast waits for the answers, in milliseconds
      */
     public function __construct(
-        private readonly Adapter $adapter,
+        private readonly Nsp $nsp,
         private readonly array $rooms = [],
         private readonly array $except = [],
         private readonly bool $volatile = false,
+        private readonly ?int $timeout = null,
     ) {
     }
 
@@ -39,7 +40,7 @@ final class BroadcastOperator
             throw new LogicException(sprintf('Undefined property %s::$%s', self::class, $name));
         }
 
-        return new self($this->adapter, $this->rooms, $this->except, true);
+        return new self($this->nsp, $this->rooms, $this->except, true, $this->timeout);
     }
 
     /**
@@ -49,7 +50,13 @@ final class BroadcastOperator
      */
     public function to(string|array $rooms): self
     {
-        return new self($this->adapter, self::merge($this->rooms, $rooms), $this->except, $this->volatile);
+        return new self(
+            $this->nsp,
+            self::merge($this->rooms, $rooms),
+            $this->except,
+            $this->volatile,
+            $this->timeout,
+        );
     }
 
     /**
@@ -67,7 +74,28 @@ final class BroadcastOperator
      */
     public function except(string|array $rooms): self
     {
-        return new self($this->adapter, $this->rooms, self::merge($this->except, $rooms), $this->volatile);
+        return new self(
+            $this->nsp,
+            $this->rooms,
+            self::merge($this->except, $rooms),
+            $this->volatile,
+            $this->timeout,
+        );
+    }
+
+    /**
+     * Lets emit() take an acknowledgement callback, which gets the answers of every selected socket.
+     *
+     * The callback gets null and the answers once all arrived, or a TimeoutException and the answers so far after
+     * this many milliseconds.
+     */
+    public function timeout(int $milliseconds): self
+    {
+        if ($milliseconds < 0) {
+            throw new InvalidArgumentException('The timeout can\'t be negative');
+        }
+
+        return new self($this->nsp, $this->rooms, $this->except, $this->volatile, $milliseconds);
     }
 
     /**
@@ -81,8 +109,11 @@ final class BroadcastOperator
     /**
      * Sends an event to every selected socket.
      *
+     * After timeout(), a Closure as the last argument gets the answers: one per socket, the first argument of
+     * each client's acknowledgement, in the order they arrive.
+     *
      * @throws InvalidArgumentException for a reserved event name, or data that can't be sent
-     * @throws LogicException for an acknowledgement callback, which broadcasts don't support
+     * @throws LogicException for an acknowledgement callback without timeout()
      */
     public function emit(string $event, mixed ...$args): self
     {
@@ -90,11 +121,24 @@ final class BroadcastOperator
             throw new InvalidArgumentException(sprintf('"%s" is a reserved event name', $event));
         }
         $args = array_values($args);
-        if ($args !== [] && $args[array_key_last($args)] instanceof Closure) {
-            throw new LogicException('Acknowledgements are not supported when broadcasting');
-        }
+        $ack = $args === [] ? null : $args[array_key_last($args)];
+        if (! $ack instanceof Closure) {
+            $this->nsp->adapter()->broadcast(new Packet(PacketType::Event, '/', [$event, ...$args]), $this->options());
 
-        $this->adapter->broadcast(new Packet(PacketType::Event, '/', [$event, ...$args]), $this->options());
+            return $this;
+        }
+        // Without a timeout, a socket that never answers would keep the callback waiting forever.
+        if ($this->timeout === null) {
+            throw new LogicException(
+                'An acknowledgement callback needs timeout() when broadcasting, like $io->timeout(5000)->emit(...)',
+            );
+        }
+        array_pop($args);
+        $this->emitWithAck(
+            new Packet(PacketType::Event, '/', [$event, ...$args], $this->nsp->nextAckId()),
+            $ack,
+            $this->timeout,
+        );
 
         return $this;
     }
@@ -114,7 +158,7 @@ final class BroadcastOperator
      */
     public function allSockets(): array
     {
-        return $this->adapter->sockets($this->rooms);
+        return $this->nsp->adapter()->sockets($this->rooms);
     }
 
     /**
@@ -122,7 +166,7 @@ final class BroadcastOperator
      */
     public function fetchSockets(): array
     {
-        return $this->adapter->fetchSockets($this->options());
+        return $this->nsp->adapter()->fetchSockets($this->options());
     }
 
     /**
@@ -130,7 +174,7 @@ final class BroadcastOperator
      */
     public function socketsJoin(string|array $rooms): void
     {
-        $this->adapter->addSockets($this->options(), is_string($rooms) ? [$rooms] : $rooms);
+        $this->nsp->adapter()->addSockets($this->options(), is_string($rooms) ? [$rooms] : $rooms);
     }
 
     /**
@@ -138,7 +182,7 @@ final class BroadcastOperator
      */
     public function socketsLeave(string|array $rooms): void
     {
-        $this->adapter->delSockets($this->options(), is_string($rooms) ? [$rooms] : $rooms);
+        $this->nsp->adapter()->delSockets($this->options(), is_string($rooms) ? [$rooms] : $rooms);
     }
 
     /**
@@ -146,7 +190,23 @@ final class BroadcastOperator
      */
     public function disconnectSockets(bool $close = false): void
     {
-        $this->adapter->disconnectSockets($this->options(), $close);
+        $this->nsp->adapter()->disconnectSockets($this->options(), $close);
+    }
+
+    private function emitWithAck(Packet $packet, Closure $ack, int $timeout): void
+    {
+        $id = (int) $packet->id;
+        $collector = new AckCollector($ack, $this->nsp->server->scheduler(), $timeout, function () use ($id): void {
+            foreach ($this->nsp->sockets() as $socket) {
+                $socket->forgetAck($id);
+            }
+        });
+        $this->nsp->adapter()->broadcastWithAck(
+            $packet,
+            $this->options(),
+            $collector->expect(...),
+            $collector->answer(...),
+        );
     }
 
     private function options(): BroadcastOptions

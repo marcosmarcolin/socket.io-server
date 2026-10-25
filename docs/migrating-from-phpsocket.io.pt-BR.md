@@ -51,7 +51,7 @@ O `workerman/channel` continua sendo o jeito de rodar vários processos, e conti
 | `$socket->conn->remoteAddress` | `$socket->handshake['address']` ou `$socket->request->remoteAddress` |
 | `$nsp->clients(function ($sids) {...})` | `$nsp->allSockets()` devolve os ids; `$nsp->to('room')->allSockets()` para uma sala |
 | `$nsp->sockets` (array) | `$nsp->sockets()` |
-| acknowledgements em broadcast lançam exceção | continuam lançando |
+| acknowledgements em broadcast lançam exceção | funcionam depois de `timeout()`, e o callback recebe todas as respostas: `$io->timeout(5000)->emit('x', function (?Throwable $error, array $answers) {})`; sem `timeout()` continuam lançando |
 
 ## 4. O que há de novo
 
