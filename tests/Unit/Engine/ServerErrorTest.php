@@ -30,9 +30,4 @@ final class ServerErrorTest extends TestCase
             self::assertSame($error === ServerError::Forbidden ? 403 : 400, $error->httpStatus());
         }
     }
-
-    public function testBodyIsTheJsonErrorObject(): void
-    {
-        self::assertSame('{"code":1,"message":"Session ID unknown"}', ServerError::UnknownSid->body());
-    }
 }

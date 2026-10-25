@@ -18,6 +18,7 @@ It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and 
 - [The client side](#the-client-side)
 - [Server options](#server-options)
   - [Cookies across origins](#cookies-across-origins)
+  - [Refusing a connection before the handshake](#refusing-a-connection-before-the-handshake)
 - [API](#api)
 - [Data: JSON and binary](#data-json-and-binary)
 - [TLS](#tls)
@@ -131,6 +132,7 @@ With several server processes on one port, add `transports: ["websocket"]` (see 
 | `path` | `'/socket.io/'` | The URL path; the client's `path` option must match. |
 | `transports` | `['polling', 'websocket']` | The transports clients may use. With `['websocket']`, polling requests are refused, so clients need `transports: ['websocket']` too (otherwise they get `xhr poll error`). With `['polling']`, no upgrade is offered. |
 | `cors` | `['origin' => '*']` | `origin` is `'*'`, a list of allowed origins, a `Closure` that decides per request, or `null` to send no CORS headers. `credentials` (`false` by default) lets browsers send cookies. |
+| `allowRequest` | `null` | A `Closure` that accepts or refuses each handshake before the session opens. See [Refusing a connection before the handshake](#refusing-a-connection-before-the-handshake). |
 
 Unknown options and wrong types throw `InvalidArgumentException`.
 
@@ -171,6 +173,24 @@ $io->use(function (Socket $socket, Closure $next): void {
     $next($sameHost ? null : new ConnectionError('forbidden origin'));
 });
 ```
+
+### Refusing a connection before the handshake
+
+`allowRequest` gets the `Engine\Request` of each handshake, over polling or WebSocket, before any session opens. It returns `true` to accept. `false` or a message refuses with code 4 (`Forbidden`): HTTP 403 with `{"code":4,"message":"..."}` over polling, HTTP 400 with the message over WebSocket. The client gets `connect_error`.
+
+```php
+use Marcolin\SocketIO\Engine\Request;
+
+$io = new SocketIO(3000, [
+    'allowRequest' => function (Request $request) use ($sessions): bool|string {
+        return $sessions->isValid($request->header('cookie') ?? '') ? true : 'invalid session';
+    },
+]);
+```
+
+It runs synchronously in the event loop, so keep it fast: a slow check holds up every connection of the process. An exception closes the connection (with a 500 over polling) and goes to the worker's log.
+
+A middleware does the same job one step later, after the session opens: it may wait for asynchronous work, and its `ConnectionError` reaches the client with a message and data over every transport. With `allowRequest`, the client reads the message only over polling, in `err.context.responseText`; over WebSocket it sees `websocket error`.
 
 ## API
 

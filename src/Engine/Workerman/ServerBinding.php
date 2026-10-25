@@ -8,7 +8,7 @@ use Closure;
 use Marcolin\SocketIO\Engine\Protocol\HttpOrWebSocket;
 use Marcolin\SocketIO\Engine\Protocol\WebSocket;
 use Marcolin\SocketIO\Engine\Server;
-use Marcolin\SocketIO\Engine\ServerError;
+use Marcolin\SocketIO\Engine\Rejection;
 use Throwable;
 use WeakMap;
 use Workerman\Connection\TcpConnection;
@@ -103,18 +103,21 @@ final class ServerBinding
     public function onWebSocketConnect(TcpConnection $connection, Request $request): void
     {
         $this->guard($connection, function () use ($connection, $request): void {
-            $error = $this->server->verifyWebSocket(RequestValues::request($connection, $request));
-            if ($error !== null) {
-                self::reject($connection, $error);
+            $rejection = $this->server->verifyWebSocket(RequestValues::request($connection, $request));
+            if ($rejection !== null) {
+                self::reject($connection, $rejection);
             }
         });
     }
 
     /**
-     * Workerman calls this even after onWebSocketConnect rejected the request; the Server checks it again.
+     * Workerman calls this even after onWebSocketConnect rejected the request, so a closed connection is skipped.
      */
     public function onWebSocketConnected(TcpConnection $connection, Request $request): void
     {
+        if ($connection->getStatus() !== TcpConnection::STATUS_ESTABLISHED) {
+            return;
+        }
         $connection->maxPackageSize = $this->server->options->maxPayload + self::FRAME_HEADER_ALLOWANCE;
 
         $webSocket = new WorkermanWebSocketConnection($connection);
@@ -159,9 +162,9 @@ final class ServerBinding
     /**
      * Answers a WebSocket handshake with an HTTP error, as the reference does.
      */
-    private static function reject(TcpConnection $connection, ServerError $error): void
+    private static function reject(TcpConnection $connection, Rejection $rejection): void
     {
-        $message = $error->message();
+        $message = $rejection->message;
         $connection->close(
             "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Type: text/html\r\n"
             . 'Content-Length: ' . strlen($message) . "\r\n\r\n" . $message,

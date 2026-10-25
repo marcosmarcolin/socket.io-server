@@ -32,12 +32,4 @@ enum ServerError: int
     {
         return $this === self::Forbidden ? 403 : 400;
     }
-
-    /**
-     * The JSON body of an HTTP error response.
-     */
-    public function body(): string
-    {
-        return json_encode(['code' => $this->value, 'message' => $this->message()], JSON_THROW_ON_ERROR);
-    }
 }

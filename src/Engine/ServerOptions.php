@@ -22,6 +22,8 @@ final class ServerOptions
     /**
      * @param Cors|null $cors null disables CORS
      * @param list<string> $transports the transports clients may use: "polling", "websocket", or both
+     * @param (Closure(Request $request): (bool|string))|null $allowRequest decides each handshake: true lets it in,
+     *        false or a message refuses it with code 4 (Forbidden)
      */
     public function __construct(
         public readonly int $pingInterval = 25_000,
@@ -31,6 +33,7 @@ final class ServerOptions
         string $path = '/socket.io/',
         public readonly ?Cors $cors = new Cors(),
         public readonly array $transports = self::TRANSPORTS,
+        public readonly ?Closure $allowRequest = null,
     ) {
         self::assertPositive('pingInterval', $pingInterval);
         self::assertPositive('pingTimeout', $pingTimeout);
@@ -55,7 +58,7 @@ final class ServerOptions
      */
     public static function fromArray(array $options): self
     {
-        $known = [...self::INT_OPTIONS, 'path', 'cors', 'transports'];
+        $known = [...self::INT_OPTIONS, 'path', 'cors', 'transports', 'allowRequest'];
         foreach (array_keys($options) as $key) {
             if (! in_array($key, $known, true)) {
                 throw new InvalidArgumentException(sprintf('Unknown Engine.IO option "%s"', $key));
@@ -87,11 +90,17 @@ final class ServerOptions
                 : throw new InvalidArgumentException('Each transport must be "polling" or "websocket"');
         }
 
+        $allowRequest = $options['allowRequest'] ?? null;
+        if ($allowRequest !== null && ! $allowRequest instanceof Closure) {
+            throw new InvalidArgumentException('The "allowRequest" option must be a Closure');
+        }
+
         return new self(
             ...$ints,
             path: $path,
             cors: self::corsFromArray($options['cors'] ?? []),
             transports: $names,
+            allowRequest: $allowRequest,
         );
     }
 

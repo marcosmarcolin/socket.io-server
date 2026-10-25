@@ -57,16 +57,9 @@ final class Server extends Emitter
             }
         }
 
-        $error = $this->verify(
-            $exchange->query('transport'),
-            $exchange->query('sid'),
-            $exchange->query('EIO'),
-            $exchange->header('Origin'),
-            $exchange->method(),
-            false,
-        );
-        if ($error !== null) {
-            $this->reject($exchange, $error);
+        $rejection = $this->verify($exchange->request(), $exchange->method(), false, true);
+        if ($rejection !== null) {
+            $this->reject($exchange, $rejection);
 
             return;
         }
@@ -76,7 +69,7 @@ final class Server extends Emitter
             $transport = $this->sessions[$sid]->transport();
             // verify() matched the transport name, so this is a safety net.
             if (! $transport instanceof Polling) {
-                $this->reject($exchange, ServerError::BadRequest);
+                $this->reject($exchange, new Rejection(ServerError::BadRequest));
 
                 return;
             }
@@ -94,22 +87,11 @@ final class Server extends Emitter
     /**
      * Checks a WebSocket request before the handshake is answered.
      *
-     * @return ServerError|null null when the connection can be accepted
+     * @return Rejection|null null when the connection can be accepted
      */
-    public function verifyWebSocket(Request $request): ?ServerError
+    public function verifyWebSocket(Request $request): ?Rejection
     {
-        if (! $this->handles($request->path)) {
-            return ServerError::BadRequest;
-        }
-
-        return $this->verify(
-            $request->query('transport'),
-            $request->query('sid'),
-            $request->query('EIO'),
-            $request->header('Origin'),
-            'GET',
-            true,
-        );
+        return $this->verifyWebSocketRequest($request, true);
     }
 
     /**
@@ -117,8 +99,8 @@ final class Server extends Emitter
      */
     public function handleWebSocket(Request $request, WebSocketConnection $connection): void
     {
-        // The session may have closed since verifyWebSocket().
-        if ($this->verifyWebSocket($request) !== null) {
+        // The session may have closed since verifyWebSocket(); allowRequest already answered, so it isn't asked again.
+        if ($this->verifyWebSocketRequest($request, false) !== null) {
             $connection->close();
 
             return;
@@ -155,51 +137,80 @@ final class Server extends Emitter
         }
     }
 
-    private function verify(
-        ?string $transport,
-        ?string $sid,
-        ?string $protocol,
-        ?string $origin,
-        string $method,
-        bool $upgrade,
-    ): ?ServerError {
-        // A transport the options leave out is as unknown as a misspelled one, as in the reference.
-        if ($transport === null || ! in_array($transport, $this->options->transports, true)) {
-            return ServerError::UnknownTransport;
-        }
-        // The header would break the response, as in Node's checkInvalidHeaderChar().
-        if ($origin !== null && preg_match('/[^\t\x20-\x7e\x80-\xff]/', $origin) === 1) {
-            return ServerError::BadRequest;
+    private function verifyWebSocketRequest(Request $request, bool $askApplication): ?Rejection
+    {
+        if (! $this->handles($request->path)) {
+            return new Rejection(ServerError::BadRequest);
         }
 
+        return $this->verify($request, 'GET', true, $askApplication);
+    }
+
+    /**
+     * Validates a request in the reference's order.
+     *
+     * @param bool $askApplication whether a handshake goes through the allowRequest option
+     */
+    private function verify(Request $request, string $method, bool $upgrade, bool $askApplication): ?Rejection
+    {
+        $transport = $request->query('transport');
+        // A transport the options leave out is as unknown as a misspelled one, as in the reference.
+        if ($transport === null || ! in_array($transport, $this->options->transports, true)) {
+            return new Rejection(ServerError::UnknownTransport);
+        }
+        // The header would break the response, as in Node's checkInvalidHeaderChar().
+        $origin = $request->header('Origin');
+        if ($origin !== null && preg_match('/[^\t\x20-\x7e\x80-\xff]/', $origin) === 1) {
+            return new Rejection(ServerError::BadRequest);
+        }
+        $protocol = $request->query('EIO');
+
+        $sid = $request->query('sid');
         if ($sid !== null) {
             $socket = $this->sessions[$sid] ?? null;
             if ($socket === null) {
-                return ServerError::UnknownSid;
+                return new Rejection(ServerError::UnknownSid);
             }
             if ($upgrade ? $transport !== 'websocket' : $socket->transport()->name() !== $transport) {
-                return ServerError::BadRequest;
+                return new Rejection(ServerError::BadRequest);
             }
 
-            return $protocol === '4' ? null : ServerError::BadRequest;
+            return $protocol === '4' ? null : new Rejection(ServerError::BadRequest);
         }
 
         if ($method !== 'GET') {
-            return ServerError::BadHandshakeMethod;
+            return new Rejection(ServerError::BadHandshakeMethod);
         }
-        if ($transport === 'websocket' && ! $upgrade) {
-            return ServerError::BadRequest;
+        if (($transport === 'websocket') !== $upgrade) {
+            return new Rejection(ServerError::BadRequest);
         }
-        if ($transport === 'polling' && $upgrade) {
-            return ServerError::BadRequest;
+        // The reference asks the application before it checks the protocol version.
+        $rejection = $askApplication ? $this->askApplication($request) : null;
+        if ($rejection !== null) {
+            return $rejection;
         }
 
-        return $protocol === '4' ? null : ServerError::UnsupportedProtocolVersion;
+        return $protocol === '4' ? null : new Rejection(ServerError::UnsupportedProtocolVersion);
     }
 
-    private function reject(HttpExchange $exchange, ServerError $error): void
+    private function askApplication(Request $request): ?Rejection
     {
-        $exchange->respond($error->httpStatus(), $error->body(), ['Content-Type' => 'application/json']);
+        $allowRequest = $this->options->allowRequest;
+        if ($allowRequest === null) {
+            return null;
+        }
+        $answer = $allowRequest($request);
+        if ($answer === true) {
+            return null;
+        }
+
+        // An empty message falls back to the default one, as in the reference.
+        return new Rejection(ServerError::Forbidden, is_string($answer) && $answer !== '' ? $answer : null);
+    }
+
+    private function reject(HttpExchange $exchange, Rejection $rejection): void
+    {
+        $exchange->respond($rejection->httpStatus(), $rejection->body(), ['Content-Type' => 'application/json']);
     }
 
     private function open(Transport $transport, Request $request): Socket

@@ -24,6 +24,7 @@ final class ServerOptionsTest extends TestCase
         self::assertSame('/socket.io/', $options->path);
         self::assertSame(['polling', 'websocket'], $options->transports);
         self::assertEquals(new Cors('*'), $options->cors);
+        self::assertNull($options->allowRequest);
     }
 
     public function testNormalizesThePathWithATrailingSlash(): void
@@ -96,6 +97,14 @@ final class ServerOptionsTest extends TestCase
         new ServerOptions(transports: $transports);
     }
 
+    public function testArrayFormTakesAllowRequest(): void
+    {
+        $allowRequest = static fn (Request $request): bool => true;
+
+        self::assertSame($allowRequest, ServerOptions::fromArray(['allowRequest' => $allowRequest])->allowRequest);
+        self::assertNull(ServerOptions::fromArray(['allowRequest' => null])->allowRequest);
+    }
+
     public function testArrayFormTakesCredentialsAndAClosure(): void
     {
         $sameHost = static fn (string $origin, Request $request): bool => true;
@@ -119,6 +128,7 @@ final class ServerOptionsTest extends TestCase
         yield 'cors type' => [['cors' => '*'], '"cors" option must be an array'];
         yield 'transports not a list' => [['transports' => 'websocket'], '"transports" option must be a list'];
         yield 'transport not a string' => [['transports' => [1]], 'Each transport must be'];
+        yield 'allowRequest not a Closure' => [['allowRequest' => 'strlen'], '"allowRequest" option must be a Closure'];
         yield 'cors key' => [['cors' => ['methods' => ['GET']]], 'Unknown CORS option "methods"'];
         $starError = 'reject the CORS origin "*" with credentials';
         yield 'credentials not a bool' => [
