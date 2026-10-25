@@ -131,7 +131,8 @@ src/
   Client.php                    one Engine.IO connection and its per-namespace sockets
   DisconnectReason.php, ConnectionError.php, TimeoutException.php
   SocketIdGenerator.php, RandomSocketIdGenerator.php
-  BroadcastOperator.php         to/in/except/compress/volatile/emit and the socket helpers, immutable
+  BroadcastOperator.php         to/in/except/compress/volatile/timeout/emit and the socket helpers, immutable
+  AckCollector.php              the answers to one broadcast with acknowledgement, until all arrive or the timeout
   Parser/                       socket.io-parser (protocol v5)
     Encoder.php                 Packet → list<string|Binary>: the text part, then one Binary per attachment
     Decoder.php                 one per connection: add(string|Binary): ?Packet, reset()
@@ -262,9 +263,15 @@ src/
   - `Binary` in any other packet type throws.
 - **Encoder validation:** the encoder throws `InvalidArgumentException` for a packet that can't be sent: a namespace that doesn't start with `/` or contains `,`, a negative ack id, data of the wrong shape for the type, a `BINARY_*` type given directly (the encoder picks it), data nested more than 512 levels or circular, or data JSON can't encode.
 - **JSON:** incoming data is decoded to PHP arrays. PHP can't tell an empty `{}` from `[]`, so send an empty object with `new stdClass()` or `(object) []`. The decoder tells objects from arrays by the payload's first character. The encoder matches `JSON.stringify`: slashes, Unicode and line terminators are not escaped.
-- **Acks:** if the last argument of `emit` is a `Closure`, it becomes the ack callback. Received events with an id get an ack `Closure` as their last argument, which answers only once. Acks while broadcasting throw.
+- **Acks:** if the last argument of `emit` is a `Closure`, it becomes the ack callback. Received events with an id get an ack `Closure` as their last argument, which answers only once.
   - Ack ids are counted per namespace, as in the reference.
   - With `timeout()`, the callback gets `null` and the answer, or a `TimeoutException` ("operation has timed out"). In that case, its other required parameters get `null`, so `function (?Throwable $err, $answer)` works.
+  - **Broadcast acks**, as the reference's `BroadcastOperator::emit()`:
+    - a broadcast takes a callback only after `timeout()`; without it, it throws (the reference fires at once);
+    - one ack id from the namespace's counter serves every socket reached;
+    - the adapter's `broadcastWithAck()` reports how many sockets it reached, and each answer counts once, with its first argument;
+    - the callback gets `null` and the answers in arrival order once all arrived (at once with `[]` when none was reached), or a `TimeoutException` and the answers so far, after which every socket of the namespace forgets the id;
+    - a `volatile` packet dropped for a busy transport still counts, so the wait ends with the timeout.
 - **Reserved names** (`Packet::RESERVED_EVENTS`): `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` and `removeListener` can't be emitted to the client; doing so throws. A received event with one of these names is invalid, as in the reference.
 
 ## Public API (target)
@@ -305,7 +312,7 @@ $io->on('connection', function (Socket $socket) use ($io): void {
 Worker::runAll();
 ```
 
-- `SocketIO`: `of()`, `on()` (including `workerStart`/`workerStop`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- `SocketIO`: `of()`, `on()` (including `workerStart`/`workerStop`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
 - **`close()`**, as the reference's:
   1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
   2. each adapter's `close()` runs (`ChannelAdapter` unsubscribes from its channels);
@@ -313,7 +320,7 @@ Worker::runAll();
   4. the attached worker stops accepting connections in this process (`unlisten()`, as `httpServer.close()`).
 
   Sockets still in their middlewares never connect. It is not called on `workerStop`: the reference has no such hook, and Workerman closes the connections itself.
-- `Nsp`: `on('connection')`, `use()`, `to/in/except`, `emit`, `fetchSockets()`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
+- `Nsp`: `on('connection')`, `use()`, `to/in/except`, `timeout`, `emit`, `fetchSockets()`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
 - `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `join`, `leave`, `to/in/except`, `broadcast`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
 - The broadcast helpers act on the local process only; cross-process delivery goes through the adapter.
 - **Broadcast** (`InMemoryAdapter`), as in the reference:
@@ -338,7 +345,7 @@ Worker::runAll();
   - each adapter has a random id and ignores its own messages, since a publisher receives them too;
   - the message is an array of scalars (`sender`, `parts` as `['text'|'binary', string]`, `rooms`, `except`, `volatile`), never objects. `unserialize()` then creates no class of ours, and the channel server needs none of our code. Malformed messages are ignored.
 - **One publish per broadcast.** A single room goes to its room channel. Several rooms, a sid room, or no room go once to the namespace channel, and each process filters by the rooms itself. phpsocket.io publishes to each room's channel, so a process with members in two of the rooms delivers twice; this fixes it.
-- **Only broadcasts cross processes.** `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the local process, as in `InMemoryAdapter`.
+- **Only broadcasts cross processes.** `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the local process, as in `InMemoryAdapter`. Broadcasts with an ack throw in `ChannelAdapter`: collecting answers across processes needs the reference's `ClusterAdapter` protocol (client counts per process and a known server count), not built yet.
 - **Setup:** run a `Channel\Server` worker, and in `workerStart` call `$io->adapter(ChannelAdapter::factory($host, $port))`. `PubSub` is the seam that keeps the static `Channel\Client` out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
 - With several processes on the same port, clients must use `transports: ['websocket']`, because polling breaks across processes without sticky sessions. Document this in the README.
 - **Multi-process tests** (`tests/Integration/multi-process-server.php`): two processes with `reusePort`, so the kernel spreads connections, plus a `Channel\Server`.

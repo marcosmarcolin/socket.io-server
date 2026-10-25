@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marcolin\SocketIO\Adapter;
 
+use Closure;
 use Marcolin\SocketIO\Parser\Packet;
 use Marcolin\SocketIO\Socket;
 
@@ -34,6 +35,19 @@ interface Adapter
      * Sends a packet to the sockets the options select. The adapter sets the namespace and encodes it once.
      */
     public function broadcast(Packet $packet, BroadcastOptions $options): void;
+
+    /**
+     * Sends a packet with an acknowledgement id to the sockets the options select, and waits for their answers.
+     *
+     * @param Closure(int): void $clientCount gets how many sockets this process reached
+     * @param Closure(mixed...): void $ack gets each socket's answer
+     */
+    public function broadcastWithAck(
+        Packet $packet,
+        BroadcastOptions $options,
+        Closure $clientCount,
+        Closure $ack,
+    ): void;
 
     /**
      * The ids of the sockets in any of these rooms, or of all sockets.

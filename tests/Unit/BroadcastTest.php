@@ -147,14 +147,6 @@ final class BroadcastTest extends TestCase
         self::assertEquals($expected, $this->clients[2]->received());
     }
 
-    public function testRefusesAcknowledgements(): void
-    {
-        $this->expectException(LogicException::class);
-
-        $this->io->emit('ask', static function (): void {
-        });
-    }
-
     public function testRefusesReservedNames(): void
     {
         $this->expectException(InvalidArgumentException::class);

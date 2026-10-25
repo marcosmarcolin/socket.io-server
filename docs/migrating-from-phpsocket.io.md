@@ -51,7 +51,7 @@ On the client side, follow [Socket.IO's migration from 2.x to 3.0](https://socke
 | `$socket->conn->remoteAddress` | `$socket->handshake['address']` or `$socket->request->remoteAddress` |
 | `$nsp->clients(function ($sids) {...})` | `$nsp->allSockets()` returns the ids; `$nsp->to('room')->allSockets()` for a room |
 | `$nsp->sockets` (array) | `$nsp->sockets()` |
-| acknowledgements while broadcasting throw | they still throw |
+| acknowledgements while broadcasting throw | they work after `timeout()`, and the callback gets every answer: `$io->timeout(5000)->emit('x', function (?Throwable $error, array $answers) {})`; without `timeout()` they still throw |
 
 ## 4. What is new
 

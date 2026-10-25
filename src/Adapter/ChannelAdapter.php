@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Marcolin\SocketIO\Adapter;
 
 use Closure;
+use LogicException;
 use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\Nsp;
 use Marcolin\SocketIO\Parser\Packet;
@@ -49,6 +50,18 @@ final class ChannelAdapter extends InMemoryAdapter
         $pubSub = new WorkermanChannelPubSub($host, $port);
 
         return static fn (Nsp $nsp): Adapter => new self($nsp, $pubSub);
+    }
+
+    /**
+     * Not supported across processes yet: the answers of other processes' sockets wouldn't come back.
+     */
+    public function broadcastWithAck(
+        Packet $packet,
+        BroadcastOptions $options,
+        Closure $clientCount,
+        Closure $ack,
+    ): void {
+        throw new LogicException('ChannelAdapter doesn\'t support broadcasting with an acknowledgement yet');
     }
 
     public function broadcast(Packet $packet, BroadcastOptions $options): void
