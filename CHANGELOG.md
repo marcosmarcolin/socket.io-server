@@ -4,10 +4,16 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-25
+
 ### Added
 
 - **`onAny()` and `onAnyOutgoing()`** on `Socket`, with `prependAny()`, `offAny()`, `listenersAny()` and their outgoing counterparts, as in the reference. Outgoing listeners see emits and broadcasts, including broadcasts from other processes through `ChannelAdapter`.
 - **The `allowUpgrades` option** (`true` by default): with `false`, the handshake offers no upgrade, as in the reference.
+
+### Changed
+
+- For adapters that extend `InMemoryAdapter`: the protected `deliver()` takes a third argument, a `Closure` returning the event's name and arguments, which it calls only for sockets with `onAnyOutgoing()` listeners.
 
 ## [0.1.0] - 2026-10-25
 
@@ -45,5 +51,6 @@ The first release.
 - Across processes, only broadcasts travel; the socket helpers (`fetchSockets`, `socketsJoin`...) act on the current process.
 - With several processes on one port, clients must use `transports: ['websocket']`.
 
-[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/marcosmarcolin/socket.io-server/releases/tag/v0.1.0
