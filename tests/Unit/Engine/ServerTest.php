@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marcolin\SocketIO\Tests\Unit\Engine;
 
+use Closure;
 use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\Engine\Cors;
 use Marcolin\SocketIO\Engine\Server;
@@ -17,6 +18,7 @@ use Marcolin\SocketIO\Tests\Fake\FakeWebSocketConnection;
 use Marcolin\SocketIO\Tests\Fake\SequentialSessionIdGenerator;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 
 /**
  * Includes the official Engine.IO v4 suite scenarios that depend on the server, with its options.
@@ -325,16 +327,145 @@ final class ServerTest extends TestCase
         self::assertSame([], $open['upgrades']);
         self::assertSame(
             ServerError::UnknownTransport,
-            $this->server->verifyWebSocket($this->webSocketRequest('/engine.io/?EIO=4&transport=websocket')),
+            $this->server->verifyWebSocket($this->webSocketRequest('/engine.io/?EIO=4&transport=websocket'))?->error,
         );
         self::assertSame(
             ServerError::UnknownTransport,
-            $this->server->verifyWebSocket($this->webSocketRequest(self::UPGRADE)),
+            $this->server->verifyWebSocket($this->webSocketRequest(self::UPGRADE))?->error,
         );
         $connection = new FakeWebSocketConnection();
         $this->server->handleWebSocket($this->webSocketRequest(self::UPGRADE), $connection);
         self::assertTrue($connection->closed);
         self::assertFalse($this->connections[0]->isUpgrading());
+    }
+
+    // The allowRequest option
+
+    public function testAllowRequestLetsAHandshakeIn(): void
+    {
+        $seen = [];
+        $this->server = $this->allowing(static function (Request $request) use (&$seen): bool {
+            $seen[] = $request->header('Cookie');
+
+            return true;
+        });
+
+        $handshake = $this->request('GET', self::HANDSHAKE, headers: ['Cookie' => 'session=abc']);
+
+        self::assertSame(200, $handshake->status);
+        self::assertSame(['session=abc'], $seen);
+        self::assertCount(1, $this->connections);
+    }
+
+    public function testAllowRequestRefusesWithForbidden(): void
+    {
+        $this->server = $this->allowing(static fn (): bool => false);
+
+        $handshake = $this->request('GET', self::HANDSHAKE);
+
+        $this->assertForbidden($handshake, 'Forbidden');
+        self::assertSame([], $this->connections);
+        self::assertSame(0, $this->server->sessionCount());
+    }
+
+    public function testAllowRequestRefusesWithItsMessage(): void
+    {
+        $this->server = $this->allowing(static fn (): string => 'Sessão inválida');
+
+        $this->assertForbidden($this->request('GET', self::HANDSHAKE), 'Sessão inválida');
+    }
+
+    public function testAnEmptyMessageRefusesWithTheDefaultOne(): void
+    {
+        $this->server = $this->allowing(static fn (): string => '');
+
+        $this->assertForbidden($this->request('GET', self::HANDSHAKE), 'Forbidden');
+    }
+
+    public function testAllowRequestRunsOnlyOnHandshakes(): void
+    {
+        $calls = 0;
+        $this->server = $this->allowing(static function () use (&$calls): bool {
+            ++$calls;
+
+            return true;
+        });
+
+        $this->handshake();
+        $this->request('POST', '/engine.io/?EIO=4&transport=polling&sid=sid1', '4hello');
+        $connection = new FakeWebSocketConnection();
+        $upgrade = $this->webSocketRequest(self::UPGRADE);
+        self::assertNull($this->server->verifyWebSocket($upgrade));
+        $this->server->handleWebSocket($upgrade, $connection);
+
+        self::assertSame(1, $calls);
+    }
+
+    public function testAllowRequestRunsBeforeTheProtocolCheck(): void
+    {
+        $this->server = $this->allowing(static fn (): bool => false);
+
+        $this->assertForbidden($this->request('GET', '/engine.io/?transport=polling'), 'Forbidden');
+    }
+
+    public function testAllowRequestRunsAfterTheMethodAndTransportChecks(): void
+    {
+        $calls = 0;
+        $this->server = $this->allowing(static function () use (&$calls): bool {
+            ++$calls;
+
+            return false;
+        });
+
+        $this->assertRejected($this->request('POST', self::HANDSHAKE), ServerError::BadHandshakeMethod);
+        $this->assertRejected($this->request('GET', '/engine.io/?EIO=4'), ServerError::UnknownTransport);
+        $this->assertRejected($this->request('GET', '/engine.io/?EIO=4&transport=websocket'), ServerError::BadRequest);
+        self::assertSame(0, $calls);
+    }
+
+    public function testAllowRequestRefusesAWebSocketHandshakeOnce(): void
+    {
+        $calls = 0;
+        $this->server = $this->allowing(static function () use (&$calls): string {
+            ++$calls;
+
+            return 'no cookie';
+        });
+        $request = $this->webSocketRequest('/engine.io/?EIO=4&transport=websocket');
+
+        $rejection = $this->server->verifyWebSocket($request);
+
+        self::assertSame(ServerError::Forbidden, $rejection?->error);
+        self::assertSame('no cookie', $rejection->message);
+        self::assertSame(1, $calls);
+    }
+
+    public function testAllowRequestIsAskedOnceForAnAcceptedWebSocket(): void
+    {
+        $calls = 0;
+        $this->server = $this->allowing(static function () use (&$calls): bool {
+            return ++$calls === 1;
+        });
+        $request = $this->webSocketRequest('/engine.io/?EIO=4&transport=websocket');
+        $connection = new FakeWebSocketConnection();
+
+        self::assertNull($this->server->verifyWebSocket($request));
+        $this->server->handleWebSocket($request, $connection);
+
+        self::assertSame(1, $calls);
+        self::assertFalse($connection->closed);
+        self::assertCount(1, $this->connections);
+    }
+
+    public function testAnExceptionFromAllowRequestPropagates(): void
+    {
+        $this->server = $this->allowing(static function (): bool {
+            throw new RuntimeException('database down');
+        });
+
+        $this->expectExceptionMessage('database down');
+
+        $this->request('GET', self::HANDSHAKE);
     }
 
     // WebSocket
@@ -374,7 +505,7 @@ final class ServerTest extends TestCase
         $request = $this->webSocketRequest($url);
         $connection = new FakeWebSocketConnection();
 
-        self::assertSame($error, $this->server->verifyWebSocket($request));
+        self::assertSame($error, $this->server->verifyWebSocket($request)?->error);
         $this->server->handleWebSocket($request, $connection);
 
         self::assertTrue($connection->closed);
@@ -485,6 +616,21 @@ final class ServerTest extends TestCase
     private function webSocketRequest(string $url): Request
     {
         return new Request((string) parse_url($url, PHP_URL_PATH), FakeHttpExchange::parseQuery($url));
+    }
+
+    /**
+     * @param Closure(Request): (bool|string) $allowRequest
+     */
+    private function allowing(Closure $allowRequest): Server
+    {
+        return $this->server(new ServerOptions(path: '/engine.io/', allowRequest: $allowRequest));
+    }
+
+    private function assertForbidden(FakeHttpExchange $exchange, string $message): void
+    {
+        self::assertSame(403, $exchange->status);
+        self::assertSame(['code' => 4, 'message' => $message], json_decode((string) $exchange->responseBody, true));
+        self::assertSame('application/json', $exchange->responseHeaders['Content-Type'] ?? null);
     }
 
     private function assertRejected(FakeHttpExchange $exchange, ServerError $error): void

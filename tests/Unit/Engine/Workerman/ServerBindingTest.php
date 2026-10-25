@@ -20,6 +20,7 @@ use Marcolin\SocketIO\Tests\Fake\WebSocketFrames;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use Throwable;
+use Workerman\Protocols\Http\Request as WorkermanRequest;
 use Workerman\Worker;
 
 /**
@@ -38,6 +39,8 @@ final class ServerBindingTest extends TestCase
 
     /** @var list<Throwable> */
     private array $errors = [];
+
+    private ServerBinding $binding;
 
     protected function setUp(): void
     {
@@ -208,6 +211,55 @@ final class ServerBindingTest extends TestCase
         self::assertSame([], $this->connections);
     }
 
+    public function testAllowRequestRefusesAWebSocketWithAnHttpErrorAndNoSession(): void
+    {
+        $calls = 0;
+        $pair = $this->refusingPair('Sessão inválida', $calls);
+
+        $pair->write(
+            "GET /engine.io/?EIO=4&transport=websocket HTTP/1.1\r\n" . WebSocketFrames::upgradeHeaders() . "\r\n",
+        );
+
+        $response = $pair->read();
+        self::assertStringStartsWith('HTTP/1.1 400 Bad Request', $response);
+        self::assertStringEndsWith("\r\n\r\nSessão inválida", $response);
+        self::assertStringContainsString('Content-Length: ' . strlen('Sessão inválida') . "\r\n", $response);
+        self::assertTrue($pair->isClosed());
+        self::assertSame(1, $calls);
+        self::assertSame([], $this->connections);
+        self::assertSame([], $this->errors);
+    }
+
+    public function testAWebSocketStillClosingAfterARefusalGetsNoSession(): void
+    {
+        $calls = 0;
+        $pair = $this->refusingPair('Sessão inválida', $calls);
+        $target = '/engine.io/?EIO=4&transport=websocket';
+        $pair->write("GET $target HTTP/1.1\r\n" . WebSocketFrames::upgradeHeaders() . "\r\n");
+
+        // Workerman makes this call when the refusal is still in the send buffer.
+        $this->binding->onWebSocketConnected(
+            $pair->connection,
+            new WorkermanRequest("GET $target HTTP/1.1\r\n" . WebSocketFrames::upgradeHeaders() . "\r\n"),
+        );
+
+        self::assertSame(1, $calls);
+        self::assertSame([], $this->connections);
+        self::assertSame([], $this->errors);
+    }
+
+    public function testAllowRequestRefusesAPollWithA403(): void
+    {
+        $calls = 0;
+        $pair = $this->refusingPair('Sessão inválida', $calls);
+
+        $response = $this->get($pair, '/engine.io/?EIO=4&transport=polling');
+
+        self::assertStringStartsWith('HTTP/1.1 403 Forbidden', $response);
+        self::assertStringEndsWith("\r\n\r\n" . '{"code":4,"message":"Sessão inválida"}', $response);
+        self::assertSame([], $this->connections);
+    }
+
     public function testClosingTheWebSocketClosesTheSession(): void
     {
         $pair = $this->connect();
@@ -315,6 +367,32 @@ final class ServerBindingTest extends TestCase
     }
 
     // Helpers
+
+    /**
+     * A connection to a server whose allowRequest refuses every handshake with $message.
+     */
+    private function refusingPair(string $message, int &$calls): SocketPairConnection
+    {
+        $this->server = new Server(
+            new ServerOptions(path: '/engine.io/', allowRequest: static function () use ($message, &$calls): string {
+                ++$calls;
+
+                return $message;
+            }),
+            new FakeScheduler(),
+            new SequentialSessionIdGenerator(),
+        );
+        $this->server->on('connection', function (Socket $socket): void {
+            $this->connections[] = $socket;
+        });
+        $this->worker = new Worker();
+        $this->binding = new ServerBinding($this->server, function (Throwable $error): void {
+            $this->errors[] = $error;
+        });
+        $this->binding->bind($this->worker);
+
+        return $this->connect();
+    }
 
     private function connect(): SocketPairConnection
     {
