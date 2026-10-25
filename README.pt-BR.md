@@ -230,6 +230,8 @@ Um middleware faz o mesmo papel um passo depois, com a sessão já aberta: ele p
 | `$socket->nsp`, `$socket->request`, `$socket->conn` | O namespace, o request HTTP que abriu a conexão e a sessão Engine.IO. |
 | `on(string $event, Closure $listener)` | Um evento do cliente. O listener recebe os argumentos, mais um `Closure` de acknowledgement no fim quando o cliente pediu um; ele responde uma vez só. |
 | `emit(string $event, ...$args)`, `send(...$args)` | Envia um evento; um `Closure` como último argumento pede ao cliente que o confirme. |
+| `onAny(Closure $listener)`, `prependAny()`, `offAny(?Closure $listener = null)`, `listenersAny()` | Todo evento do cliente, antes dos listeners do próprio evento. O listener recebe o nome do evento, depois os argumentos, com o `Closure` de acknowledgement no fim quando o cliente pediu um. `offAny()` sem listener remove todos. |
+| `onAnyOutgoing(Closure $listener)`, `prependAnyOutgoing()`, `offAnyOutgoing()`, `listenersAnyOutgoing()` | Todo evento enviado a este cliente, por `emit()` ou por um broadcast (inclusive de outros processos), antes de ser escrito: o nome do evento, depois os argumentos, sem o callback de acknowledgement. |
 | `timeout(int $ms)`, `volatile`, `compress(bool)` | Modificadores do emit, que devolvem um objeto novo. Veja [Acknowledgements](#acknowledgements). |
 | `join(string\|array $rooms)`, `leave(string $room)` | Salas. |
 | `to()`, `in()`, `except()`, `broadcast` | Broadcast para outros sockets; o próprio socket fica de fora. |

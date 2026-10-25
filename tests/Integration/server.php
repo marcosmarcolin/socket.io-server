@@ -66,6 +66,19 @@ $io->on('connection', static function (Socket $socket) use ($io): void {
         $io->except($room)->emit('except-message', $message);
     });
 
+    // Records every event both ways, without acknowledgement callbacks, and reports them on request.
+    $incoming = [];
+    $outgoing = [];
+    $socket->onAny(static function (string $event, mixed ...$args) use (&$incoming): void {
+        $incoming[] = [$event, ...array_filter($args, static fn (mixed $arg): bool => ! $arg instanceof Closure)];
+    });
+    $socket->onAnyOutgoing(static function (string $event, mixed ...$args) use (&$outgoing): void {
+        $outgoing[] = [$event, ...$args];
+    });
+    $socket->on('seen', static function (Closure $ack) use (&$incoming, &$outgoing): void {
+        $ack(['incoming' => $incoming, 'outgoing' => $outgoing]);
+    });
+
     // Asks a room and sends back the answers, or the timeout and the answers so far.
     $socket->on('poll-room', static function (string $room, int $timeout) use ($io, $socket): void {
         $io->to($room)->timeout($timeout)->emit(

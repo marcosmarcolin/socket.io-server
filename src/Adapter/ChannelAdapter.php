@@ -8,7 +8,10 @@ use Closure;
 use LogicException;
 use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\Nsp;
+use Marcolin\SocketIO\Parser\Decoder;
+use Marcolin\SocketIO\Parser\InvalidPacketException;
 use Marcolin\SocketIO\Parser\Packet;
+use Marcolin\SocketIO\Parser\PacketType;
 
 /**
  * Broadcasts across the processes of a server through publish and subscribe, by default workerman/channel.
@@ -67,7 +70,11 @@ final class ChannelAdapter extends InMemoryAdapter
     public function broadcast(Packet $packet, BroadcastOptions $options): void
     {
         $parts = $this->encode($packet);
-        $this->deliver($parts, $options);
+        $this->deliver(
+            $parts,
+            $options,
+            static fn (): array => is_array($packet->data) ? array_values($packet->data) : [],
+        );
 
         $this->pubSub->publish($this->channelFor($options->rooms), [
             'sender' => $this->id,
@@ -149,7 +156,32 @@ final class ChannelAdapter extends InMemoryAdapter
             return;
         }
 
-        $this->deliver($parts, new BroadcastOptions($rooms, $except, $volatile));
+        $this->deliver(
+            $parts,
+            new BroadcastOptions($rooms, $except, $volatile),
+            static fn (): array => self::decode($parts),
+        );
+    }
+
+    /**
+     * The event name and arguments of another process's broadcast, for onAnyOutgoing() listeners.
+     *
+     * @param list<string|Binary> $parts
+     * @return list<mixed> empty when the parts aren't one event
+     */
+    private static function decode(array $parts): array
+    {
+        $decoder = new Decoder();
+        $packet = null;
+        try {
+            foreach ($parts as $part) {
+                $packet = $decoder->add($part);
+            }
+        } catch (InvalidPacketException) {
+            return [];
+        }
+        // The decoder gives binary events the plain Event type.
+        return $packet?->type === PacketType::Event && is_array($packet->data) ? array_values($packet->data) : [];
     }
 
     /**

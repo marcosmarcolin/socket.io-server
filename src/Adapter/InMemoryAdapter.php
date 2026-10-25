@@ -66,7 +66,7 @@ class InMemoryAdapter implements Adapter
 
     public function broadcast(Packet $packet, BroadcastOptions $options): void
     {
-        $this->deliver($this->encode($packet), $options);
+        $this->deliver($this->encode($packet), $options, self::eventData($packet));
     }
 
     public function broadcastWithAck(
@@ -76,12 +76,16 @@ class InMemoryAdapter implements Adapter
         Closure $ack,
     ): void {
         $id = $packet->id ?? throw new LogicException('A broadcast with an acknowledgement needs a packet id');
+        $data = self::eventData($packet);
         $parts = $this->encode($packet);
         $count = 0;
         foreach ($this->select($options) as $socket) {
             // A volatile packet the transport drops still counts, so the wait ends with the timeout.
             ++$count;
             $socket->expectAck($id, $ack);
+            if ($socket->hasOutgoingListeners()) {
+                $socket->notifyOutgoing($data());
+            }
             $socket->client->write($parts, $options->volatile);
         }
         $clientCount($count);
@@ -157,12 +161,27 @@ class InMemoryAdapter implements Adapter
      * Writes encoded parts to the sockets of this process that the options select.
      *
      * @param list<string|Binary> $parts
+     * @param Closure(): list<mixed> $data the event name and arguments, for the sockets' onAnyOutgoing()
+     *        listeners; called only when one of them has such a listener
      */
-    protected function deliver(array $parts, BroadcastOptions $options): void
+    protected function deliver(array $parts, BroadcastOptions $options, Closure $data): void
     {
+        $event = null;
         foreach ($this->select($options) as $socket) {
+            if ($socket->hasOutgoingListeners()) {
+                $event ??= $data();
+                $socket->notifyOutgoing($event);
+            }
             $socket->client->write($parts, $options->volatile);
         }
+    }
+
+    /**
+     * @return Closure(): list<mixed>
+     */
+    private static function eventData(Packet $packet): Closure
+    {
+        return static fn (): array => is_array($packet->data) ? array_values($packet->data) : [];
     }
 
     /**

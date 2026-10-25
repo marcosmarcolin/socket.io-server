@@ -9,6 +9,7 @@ use InvalidArgumentException;
 use LogicException;
 use Marcolin\SocketIO\Engine\Request;
 use Marcolin\SocketIO\Engine\Socket as EngineSocket;
+use Marcolin\SocketIO\Event\AnyListeners;
 use Marcolin\SocketIO\Event\Emitter;
 use Marcolin\SocketIO\Parser\Packet;
 use Marcolin\SocketIO\Parser\PacketType;
@@ -19,7 +20,8 @@ use Throwable;
  * A client connected to one namespace.
  *
  * on() listens to the client's events: listeners get the event arguments, plus an acknowledgement Closure last
- * when the client asked for one. Reserved events:
+ * when the client asked for one. onAny() gets every event, with its name first; onAnyOutgoing() gets every event
+ * sent to the client, by emit() or a broadcast. Reserved events:
  * - `disconnecting` and `disconnect` (string $reason, ?Throwable $description);
  * - `error` (Throwable), for a packet that broke the protocol, just before the connection closes.
  *
@@ -61,6 +63,10 @@ final class Socket extends Emitter
     /** @var array<int, Closure> acknowledgement callbacks by packet id */
     private array $acks = [];
 
+    private readonly AnyListeners $anyListeners;
+
+    private readonly AnyListeners $anyOutgoingListeners;
+
     /**
      * @internal created by Nsp
      * @param array<mixed> $auth
@@ -71,6 +77,8 @@ final class Socket extends Emitter
         array $auth,
         public readonly string $id,
     ) {
+        $this->anyListeners = new AnyListeners();
+        $this->anyOutgoingListeners = new AnyListeners();
         $this->conn = $client->conn;
         $this->request = $client->conn->request;
         $this->handshake = [
@@ -116,6 +124,84 @@ final class Socket extends Emitter
     public function send(mixed ...$args): static
     {
         return $this->emit('message', ...$args);
+    }
+
+    /**
+     * Listens to every event from the client, before its own listeners: the listener gets the event name, then
+     * its arguments, with the acknowledgement Closure last when the client asked for one.
+     */
+    public function onAny(Closure $listener): static
+    {
+        $this->anyListeners->add($listener);
+
+        return $this;
+    }
+
+    /**
+     * Like onAny(), but runs before the listeners added so far.
+     */
+    public function prependAny(Closure $listener): static
+    {
+        $this->anyListeners->prepend($listener);
+
+        return $this;
+    }
+
+    /**
+     * Removes a listener added with onAny() or prependAny(), or all of them without one.
+     */
+    public function offAny(?Closure $listener = null): static
+    {
+        $this->anyListeners->remove($listener);
+
+        return $this;
+    }
+
+    /**
+     * @return list<Closure>
+     */
+    public function listenersAny(): array
+    {
+        return $this->anyListeners->all();
+    }
+
+    /**
+     * Listens to every event sent to the client, by emit() or a broadcast, before it is written: the listener
+     * gets the event name, then its arguments, without the acknowledgement callback.
+     */
+    public function onAnyOutgoing(Closure $listener): static
+    {
+        $this->anyOutgoingListeners->add($listener);
+
+        return $this;
+    }
+
+    /**
+     * Like onAnyOutgoing(), but runs before the listeners added so far.
+     */
+    public function prependAnyOutgoing(Closure $listener): static
+    {
+        $this->anyOutgoingListeners->prepend($listener);
+
+        return $this;
+    }
+
+    /**
+     * Removes a listener added with onAnyOutgoing() or prependAnyOutgoing(), or all of them without one.
+     */
+    public function offAnyOutgoing(?Closure $listener = null): static
+    {
+        $this->anyOutgoingListeners->remove($listener);
+
+        return $this;
+    }
+
+    /**
+     * @return list<Closure>
+     */
+    public function listenersAnyOutgoing(): array
+    {
+        return $this->anyOutgoingListeners->all();
     }
 
     /**
@@ -219,6 +305,7 @@ final class Socket extends Emitter
             $this->registerAck($id, $last, $timeout);
         }
 
+        $this->anyOutgoingListeners->notify($event, ...$args);
         $this->packet(new Packet(PacketType::Event, $this->nsp->name, [$event, ...$args], $id), $volatile);
     }
 
@@ -230,6 +317,30 @@ final class Socket extends Emitter
     public function expectAck(int $id, Closure $ack): void
     {
         $this->acks[$id] = $ack;
+    }
+
+    /**
+     * Whether a broadcast needs the event's data to notify this socket's onAnyOutgoing() listeners.
+     *
+     * @internal used by the adapters
+     */
+    public function hasOutgoingListeners(): bool
+    {
+        return ! $this->anyOutgoingListeners->isEmpty();
+    }
+
+    /**
+     * Tells the onAnyOutgoing() listeners about an event about to be sent.
+     *
+     * @internal used by the adapters
+     * @param list<mixed> $data the event name, then its arguments
+     */
+    public function notifyOutgoing(array $data): void
+    {
+        $event = array_shift($data);
+        if (is_string($event)) {
+            $this->anyOutgoingListeners->notify($event, ...$data);
+        }
     }
 
     /**
@@ -358,7 +469,11 @@ final class Socket extends Emitter
             $args[] = $this->ack($packet->id);
         }
         if ($this->isConnected && (is_string($event) || is_int($event) || is_float($event))) {
-            $this->dispatch((string) $event, ...$args);
+            $this->anyListeners->notify((string) $event, ...$args);
+            // An onAny() listener may have disconnected the socket; the reference checks again too.
+            if ($this->stillConnected()) {
+                $this->dispatch((string) $event, ...$args);
+            }
         }
     }
 
@@ -376,6 +491,14 @@ final class Socket extends Emitter
             $sent = true;
             $this->packet(new Packet(PacketType::Ack, $this->nsp->name, array_values($args), $id));
         };
+    }
+
+    /**
+     * The connection state read anew, after listeners that may have changed it.
+     */
+    private function stillConnected(): bool
+    {
+        return $this->isConnected;
     }
 
     private function onAck(Packet $packet): void

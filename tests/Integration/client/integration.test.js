@@ -163,6 +163,22 @@ for (const mode of Object.keys(MODES)) {
       assert.equal(error.message, "Invalid namespace");
     });
 
+    test("lets the server see every event both ways with onAny and onAnyOutgoing", TIMEOUT, async () => {
+      const socket = await connected(mode);
+      socket.emit("first", 1, { a: true });
+      socket.emit("ask-me");
+      socket.on("question", (question, ack) => ack("yes"));
+      await next(socket, "answer-received");
+
+      const seen = await socket.emitWithAck("seen");
+
+      assert.deepEqual(seen.incoming, [["first", 1, { a: true }], ["ask-me"], ["seen"]]);
+      assert.deepEqual(seen.outgoing, [
+        ["question", "what is the answer?"],
+        ["answer-received", "yes"],
+      ]);
+    });
+
     test("collects the acknowledgements of a broadcast", TIMEOUT, async () => {
       const room = `poll-${mode}`;
       const [a, b, asker] = await Promise.all([connected(mode), connected(mode), connected(mode)]);
