@@ -129,6 +129,7 @@ With several server processes on one port, add `transports: ["websocket"]` (see 
 | `upgradeTimeout` | `10000` | How long an upgrade from polling to WebSocket may take. |
 | `connectTimeout` | `45000` | How long a client may stay without joining a namespace. |
 | `path` | `'/socket.io/'` | The URL path; the client's `path` option must match. |
+| `transports` | `['polling', 'websocket']` | The transports clients may use. With `['websocket']`, polling requests are refused, so clients need `transports: ['websocket']` too (otherwise they get `xhr poll error`). With `['polling']`, no upgrade is offered. |
 | `cors` | `['origin' => '*']` | `origin` is `'*'`, a list of allowed origins, a `Closure` that decides per request, or `null` to send no CORS headers. `credentials` (`false` by default) lets browsers send cookies. |
 
 Unknown options and wrong types throw `InvalidArgumentException`.
@@ -313,7 +314,7 @@ $io->attach($worker);
 Worker::runAll();
 ```
 
-- Clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee.
+- Clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee. Setting `'transports' => ['websocket']` on the server too refuses polling outright.
 - Only broadcasts cross processes (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the current process.
 
 ## Examples

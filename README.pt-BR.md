@@ -129,6 +129,7 @@ Com vários processos do servidor na mesma porta, acrescente `transports: ["webs
 | `upgradeTimeout` | `10000` | Quanto tempo um upgrade de polling para WebSocket pode levar. |
 | `connectTimeout` | `45000` | Quanto tempo um cliente pode ficar sem entrar em um namespace. |
 | `path` | `'/socket.io/'` | O caminho da URL; a opção `path` do cliente precisa ser igual. |
+| `transports` | `['polling', 'websocket']` | Os transportes que os clientes podem usar. Com `['websocket']`, requests de polling são recusados, então os clientes também precisam de `transports: ['websocket']` (senão recebem `xhr poll error`). Com `['polling']`, nenhum upgrade é oferecido. |
 | `cors` | `['origin' => '*']` | `origin` é `'*'`, uma lista de origens permitidas, um `Closure` que decide a cada request, ou `null` para não enviar cabeçalhos CORS. `credentials` (`false` por padrão) deixa o navegador enviar cookies. |
 
 Opções desconhecidas e tipos errados lançam `InvalidArgumentException`.
@@ -313,7 +314,7 @@ $io->attach($worker);
 Worker::runAll();
 ```
 
-- Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem.
+- Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem. Definir `'transports' => ['websocket']` também no servidor recusa o polling de vez.
 - Só o broadcast atravessa processos (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` e `disconnectSockets` agem no processo atual.
 
 ## Exemplos

@@ -22,6 +22,7 @@ final class ServerOptionsTest extends TestCase
         self::assertSame(1_000_000, $options->maxPayload);
         self::assertSame(10_000, $options->upgradeTimeout);
         self::assertSame('/socket.io/', $options->path);
+        self::assertSame(['polling', 'websocket'], $options->transports);
         self::assertEquals(new Cors('*'), $options->cors);
     }
 
@@ -66,6 +67,35 @@ final class ServerOptionsTest extends TestCase
         self::assertNull(ServerOptions::fromArray(['cors' => ['origin' => null]])->cors);
     }
 
+    public function testArrayFormTakesTheTransports(): void
+    {
+        self::assertSame(['websocket'], ServerOptions::fromArray(['transports' => ['websocket']])->transports);
+        self::assertSame(['polling'], ServerOptions::fromArray(['transports' => ['polling']])->transports);
+    }
+
+    /**
+     * @return iterable<string, array{list<string>}>
+     */
+    public static function invalidTransports(): iterable
+    {
+        yield 'none' => [[]];
+        yield 'unknown' => [['webtransport']];
+        yield 'misspelled' => [['WebSocket']];
+        yield 'repeated' => [['websocket', 'websocket']];
+    }
+
+    /**
+     * @param list<string> $transports
+     */
+    #[DataProvider('invalidTransports')]
+    public function testRejectsInvalidTransports(array $transports): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('"transports" option');
+
+        new ServerOptions(transports: $transports);
+    }
+
     public function testArrayFormTakesCredentialsAndAClosure(): void
     {
         $sameHost = static fn (string $origin, Request $request): bool => true;
@@ -87,6 +117,8 @@ final class ServerOptionsTest extends TestCase
         yield 'string int' => [['pingInterval' => '300'], '"pingInterval" option must be an integer'];
         yield 'path type' => [['path' => 1], '"path" option must be a string'];
         yield 'cors type' => [['cors' => '*'], '"cors" option must be an array'];
+        yield 'transports not a list' => [['transports' => 'websocket'], '"transports" option must be a list'];
+        yield 'transport not a string' => [['transports' => [1]], 'Each transport must be'];
         yield 'cors key' => [['cors' => ['methods' => ['GET']]], 'Unknown CORS option "methods"'];
         $starError = 'reject the CORS origin "*" with credentials';
         yield 'credentials not a bool' => [

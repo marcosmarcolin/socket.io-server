@@ -299,6 +299,44 @@ final class ServerTest extends TestCase
         $this->assertRejected($preflight, ServerError::BadHandshakeMethod);
     }
 
+    // The transports option
+
+    public function testWebSocketOnlyRefusesPollingAsAnUnknownTransport(): void
+    {
+        $this->server = $this->server(new ServerOptions(path: '/engine.io/', transports: ['websocket']));
+        $connection = new FakeWebSocketConnection();
+
+        $this->assertRejected($this->request('GET', self::HANDSHAKE), ServerError::UnknownTransport);
+        $this->server->handleWebSocket($this->webSocketRequest('/engine.io/?EIO=4&transport=websocket'), $connection);
+
+        $open = json_decode(substr($connection->sentData()[0] ?? '', 1), true);
+        self::assertIsArray($open);
+        self::assertSame([], $open['upgrades']);
+    }
+
+    public function testPollingOnlyOffersNoUpgradeAndRefusesWebSockets(): void
+    {
+        $this->server = $this->server(new ServerOptions(path: '/engine.io/', transports: ['polling']));
+
+        $handshake = $this->request('GET', self::HANDSHAKE);
+
+        $open = json_decode(substr((string) $handshake->responseBody, 1), true);
+        self::assertIsArray($open);
+        self::assertSame([], $open['upgrades']);
+        self::assertSame(
+            ServerError::UnknownTransport,
+            $this->server->verifyWebSocket($this->webSocketRequest('/engine.io/?EIO=4&transport=websocket')),
+        );
+        self::assertSame(
+            ServerError::UnknownTransport,
+            $this->server->verifyWebSocket($this->webSocketRequest(self::UPGRADE)),
+        );
+        $connection = new FakeWebSocketConnection();
+        $this->server->handleWebSocket($this->webSocketRequest(self::UPGRADE), $connection);
+        self::assertTrue($connection->closed);
+        self::assertFalse($this->connections[0]->isUpgrading());
+    }
+
     // WebSocket
 
     public function testWebSocketHandshake(): void
