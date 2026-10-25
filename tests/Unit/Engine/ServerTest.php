@@ -273,7 +273,7 @@ final class ServerTest extends TestCase
         $sameHost = static fn (string $origin, Request $request): bool =>
             parse_url($origin, PHP_URL_HOST) === parse_url('//' . $request->header('Host'), PHP_URL_HOST);
         $this->server = $this->server(new ServerOptions(path: '/engine.io/', cors: new Cors($sameHost, true)));
-        $page = ['Origin' => 'https://isp.test', 'Host' => 'isp.test:11687'];
+        $page = ['Origin' => 'https://app.test', 'Host' => 'app.test:3000'];
 
         $handshake = $this->request('GET', self::HANDSHAKE, headers: $page);
         $poll = $this->request('GET', '/engine.io/?EIO=4&transport=polling&sid=sid1', headers: $page);
@@ -283,7 +283,7 @@ final class ServerTest extends TestCase
         $foreign = $this->request('GET', self::HANDSHAKE, headers: ['Origin' => 'https://evil.test'] + $page);
 
         foreach ([$handshake, $poll, $error, $preflight] as $exchange) {
-            self::assertSame('https://isp.test', $exchange->responseHeaders['Access-Control-Allow-Origin'] ?? null);
+            self::assertSame('https://app.test', $exchange->responseHeaders['Access-Control-Allow-Origin'] ?? null);
             self::assertSame('true', $exchange->responseHeaders['Access-Control-Allow-Credentials'] ?? null);
         }
         self::assertSame(204, $preflight->status);
