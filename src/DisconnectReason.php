@@ -19,4 +19,5 @@ enum DisconnectReason: string
     case ServerNamespaceDisconnect = 'server namespace disconnect';
     case ClientNamespaceDisconnect = 'client namespace disconnect';
     case ForcedServerClose = 'forced server close';
+    case ServerShuttingDown = 'server shutting down';
 }

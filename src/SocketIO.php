@@ -128,6 +128,23 @@ final class SocketIO extends Emitter
     }
 
     /**
+     * Shuts the server down, as the reference does: every connected socket leaves with "server shutting down",
+     * the adapters close, every Engine.IO session closes at once, and the worker stops accepting connections in
+     * this process.
+     */
+    public function close(): void
+    {
+        foreach ($this->namespaces as $namespace) {
+            foreach ($namespace->sockets() as $socket) {
+                $socket->onClose(DisconnectReason::ServerShuttingDown);
+            }
+            $namespace->adapter()->close();
+        }
+        $this->engine->close();
+        $this->attachedWorker?->unlisten();
+    }
+
+    /**
      * The namespace with this name, created on first use. A missing leading slash is added.
      */
     public function of(string $name): Nsp

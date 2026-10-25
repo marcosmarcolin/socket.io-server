@@ -148,12 +148,12 @@ final class Server extends Emitter
     }
 
     /**
-     * Closes every session.
+     * Closes every session at once, as the reference does when the server shuts down.
      */
     public function close(): void
     {
         foreach ($this->sessions as $socket) {
-            $socket->close();
+            $socket->close(true);
         }
     }
 

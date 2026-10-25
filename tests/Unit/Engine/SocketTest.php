@@ -327,6 +327,40 @@ final class SocketTest extends TestCase
         $this->assertClosed($socket, CloseReason::ForcedClose);
     }
 
+    public function testDiscardClosesAtOnceAndDropsTheBuffer(): void
+    {
+        [$socket, $polling] = $this->pollingSocket();
+        $socket->send('dropped');
+
+        $socket->close(true);
+
+        $this->assertClosed($socket, CloseReason::ForcedClose);
+        self::assertSame(TransportState::Closed, $polling->state());
+    }
+
+    public function testDiscardEndsAnOrderlyCloseStillWaiting(): void
+    {
+        [$socket, $polling] = $this->pollingSocket();
+        $socket->send('waiting');
+        $socket->close();
+        self::assertSame(SocketState::Closing, $socket->state());
+
+        $socket->close(true);
+
+        $this->assertClosed($socket, CloseReason::ForcedClose);
+    }
+
+    public function testDiscardWithAPendingGetSendsOnlyTheClosePacket(): void
+    {
+        [$socket, $polling] = $this->pollingSocket();
+        $get = $this->get($polling);
+
+        $socket->close(true);
+
+        self::assertSame('1', $get->responseBody);
+        $this->assertClosed($socket, CloseReason::ForcedClose);
+    }
+
     public function testNothingIsSentOnceClosed(): void
     {
         [$socket, $connection] = $this->webSocketSocket();

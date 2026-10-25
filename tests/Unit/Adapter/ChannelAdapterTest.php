@@ -165,6 +165,17 @@ final class ChannelAdapterTest extends TestCase
         self::assertSame([], $this->broker->subscribers($channel));
     }
 
+    public function testCloseStopsListening(): void
+    {
+        [, $socket] = $this->connect('A');
+        $socket->join('lobby');
+        self::assertSame(['socket.io#/#', 'socket.io#/#lobby#'], $this->broker->channelsOf('A'));
+
+        $this->processes['A']->close();
+
+        self::assertSame([], $this->broker->channelsOf('A'));
+    }
+
     public function testSocketRoomsGetNoChannel(): void
     {
         $this->connect('A');

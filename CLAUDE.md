@@ -240,7 +240,7 @@ src/
 - **Dispatch is synchronous.** The reference defers some steps with `process.nextTick`; here, packets and middleware results are handled at once. An exception from a user listener propagates up to `ServerBinding`, which closes the connection and reports it.
 - **One socket per namespace and connection:** a second `CONNECT` to a joined namespace, or a packet for a namespace the connection didn't join, closes the connection. After leaving a namespace (either side), the client can connect to it again with a new id.
 - **Flags without hidden state:** `timeout()`, `volatile` and `compress()` on a `Socket` return an immutable `SocketEmitter`; the socket itself keeps no flags. `compress()` exists for API compatibility and has no effect: the server doesn't compress. `volatile` drops the emit when the transport can't take it right now.
-- **Disconnect reasons** (`DisconnectReason`, given to listeners as strings): the Engine.IO close reasons, plus `server namespace disconnect`, `client namespace disconnect` and `forced server close`. `disconnecting` fires while the socket still has its rooms, `disconnect` after it left them.
+- **Disconnect reasons** (`DisconnectReason`, given to listeners as strings): the Engine.IO close reasons, plus `server namespace disconnect`, `client namespace disconnect`, `forced server close` and `server shutting down`. `disconnecting` fires while the socket still has its rooms, `disconnect` after it left them.
 - **Ids:** a socket id differs from its Engine.IO session id and differs per namespace. Format: 24 lowercase hex characters, which `ChannelAdapter` relies on to recognize sid rooms.
 - **Strict parser validation** (any violation throws `Parser\InvalidPacketException`, which closes the connection), with the reference's error messages:
   - the type must be 0 to 6;
@@ -303,7 +303,14 @@ $io->on('connection', function (Socket $socket) use ($io): void {
 Worker::runAll();
 ```
 
-- `SocketIO`: `of()`, `on()` (including `workerStart`/`workerStop`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `adapter()`, `attach(Worker)`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- `SocketIO`: `of()`, `on()` (including `workerStart`/`workerStop`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- **`close()`**, as the reference's:
+  1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
+  2. each adapter's `close()` runs (`ChannelAdapter` unsubscribes from its channels);
+  3. `Engine\Server::close()` closes every session at once (`Engine\Socket::close(true)`, dropping what is buffered; a pending poll gets `1`);
+  4. the attached worker stops accepting connections in this process (`unlisten()`, as `httpServer.close()`).
+
+  Sockets still in their middlewares never connect. It is not called on `workerStop`: the reference has no such hook, and Workerman closes the connections itself.
 - `Nsp`: `on('connection')`, `use()`, `to/in/except`, `emit`, `fetchSockets()`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
 - `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `join`, `leave`, `to/in/except`, `broadcast`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
 - The broadcast helpers act on the local process only; cross-process delivery goes through the adapter.
