@@ -14,11 +14,14 @@ final class ServerOptions
 {
     private const INT_OPTIONS = ['pingInterval', 'pingTimeout', 'maxPayload', 'upgradeTimeout'];
 
+    public const TRANSPORTS = ['polling', 'websocket'];
+
     /** The path the server answers on, always ending with a slash. */
     public readonly string $path;
 
     /**
      * @param Cors|null $cors null disables CORS
+     * @param list<string> $transports the transports clients may use: "polling", "websocket", or both
      */
     public function __construct(
         public readonly int $pingInterval = 25_000,
@@ -27,6 +30,7 @@ final class ServerOptions
         public readonly int $upgradeTimeout = 10_000,
         string $path = '/socket.io/',
         public readonly ?Cors $cors = new Cors(),
+        public readonly array $transports = self::TRANSPORTS,
     ) {
         self::assertPositive('pingInterval', $pingInterval);
         self::assertPositive('pingTimeout', $pingTimeout);
@@ -36,6 +40,12 @@ final class ServerOptions
             throw new InvalidArgumentException(sprintf('The "path" option must start with "/", got "%s"', $path));
         }
         $this->path = rtrim($path, '/') . '/';
+        $valid = $transports !== []
+            && array_diff($transports, self::TRANSPORTS) === []
+            && count(array_unique($transports)) === count($transports);
+        if (! $valid) {
+            throw new InvalidArgumentException('The "transports" option must list "polling", "websocket", or both');
+        }
     }
 
     /**
@@ -45,7 +55,7 @@ final class ServerOptions
      */
     public static function fromArray(array $options): self
     {
-        $known = [...self::INT_OPTIONS, 'path', 'cors'];
+        $known = [...self::INT_OPTIONS, 'path', 'cors', 'transports'];
         foreach (array_keys($options) as $key) {
             if (! in_array($key, $known, true)) {
                 throw new InvalidArgumentException(sprintf('Unknown Engine.IO option "%s"', $key));
@@ -66,7 +76,23 @@ final class ServerOptions
             throw new InvalidArgumentException('The "path" option must be a string');
         }
 
-        return new self(...$ints, path: $path, cors: self::corsFromArray($options['cors'] ?? []));
+        $transports = $options['transports'] ?? self::TRANSPORTS;
+        if (! is_array($transports) || ! array_is_list($transports)) {
+            throw new InvalidArgumentException('The "transports" option must be a list, like ["websocket"]');
+        }
+        $names = [];
+        foreach ($transports as $transport) {
+            $names[] = is_string($transport)
+                ? $transport
+                : throw new InvalidArgumentException('Each transport must be "polling" or "websocket"');
+        }
+
+        return new self(
+            ...$ints,
+            path: $path,
+            cors: self::corsFromArray($options['cors'] ?? []),
+            transports: $names,
+        );
     }
 
     private static function corsFromArray(mixed $cors): ?Cors

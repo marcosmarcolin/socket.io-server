@@ -19,6 +19,7 @@ The first release. Its version number is chosen when it is tagged.
 - **Several processes**: `ChannelAdapter` broadcasts across processes through workerman/channel. It keeps phpsocket.io 3.x's fixes and publishes each broadcast once, so a socket in several targeted rooms gets it once.
 - **Workerman integration**: `new SocketIO($port, $options)`, or `attach()` on your own worker for another address, several processes or TLS; `workerStart`/`workerStop` events.
 - **CORS with credentials**: `cors.credentials` lets browsers send cookies cross-origin, and `cors.origin` also takes a `Closure` that decides per request, such as "the page's host, on any port". `'*'` with credentials throws, since browsers reject it.
+- **The `transports` option** limits the transports clients may use, such as `['websocket']` for several processes without sticky sessions. Others are refused as unknown, and the handshake offers only allowed upgrades, as in the reference.
 - **`$io->close()`** shuts the server down as the reference does: every socket leaves with `server shutting down`, the adapters close, every connection closes at once, and the worker stops accepting connections in this process.
 - **Documentation**: README with an API reference, in English and Brazilian Portuguese; six runnable examples; a migration guide from phpsocket.io.
 

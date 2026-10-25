@@ -21,8 +21,6 @@ use Marcolin\SocketIO\Event\Emitter;
  */
 final class Server extends Emitter
 {
-    private const TRANSPORTS = ['polling', 'websocket'];
-
     /** @var array<string, Socket> */
     private array $sessions = [];
 
@@ -165,7 +163,8 @@ final class Server extends Emitter
         string $method,
         bool $upgrade,
     ): ?ServerError {
-        if ($transport === null || ! in_array($transport, self::TRANSPORTS, true)) {
+        // A transport the options leave out is as unknown as a misspelled one, as in the reference.
+        if ($transport === null || ! in_array($transport, $this->options->transports, true)) {
             return ServerError::UnknownTransport;
         }
         // The header would break the response, as in Node's checkInvalidHeaderChar().

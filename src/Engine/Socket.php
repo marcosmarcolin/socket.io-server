@@ -66,7 +66,8 @@ final class Socket extends Emitter
         $this->setTransport($transport);
         $this->sendPacket(PacketType::Open, json_encode([
             'sid' => $id,
-            'upgrades' => $transport->upgrades(),
+            // Only upgrades to transports the options allow, as in the reference.
+            'upgrades' => array_values(array_intersect($transport->upgrades(), $options->transports)),
             'pingInterval' => $options->pingInterval,
             'pingTimeout' => $options->pingTimeout,
             'maxPayload' => $options->maxPayload,
