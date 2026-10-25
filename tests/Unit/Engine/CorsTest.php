@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Marcolin\SocketIO\Tests\Unit\Engine;
 
+use ArrayObject;
 use InvalidArgumentException;
 use Marcolin\SocketIO\Engine\Cors;
+use Marcolin\SocketIO\Engine\Request;
 use PHPUnit\Framework\TestCase;
 
 final class CorsTest extends TestCase
@@ -14,8 +16,8 @@ final class CorsTest extends TestCase
     {
         $cors = new Cors();
 
-        self::assertSame(['Access-Control-Allow-Origin' => '*'], $cors->headers('https://a.test'));
-        self::assertSame(['Access-Control-Allow-Origin' => '*'], $cors->headers(null));
+        self::assertSame(['Access-Control-Allow-Origin' => '*'], $cors->headers(self::request('https://a.test')));
+        self::assertSame(['Access-Control-Allow-Origin' => '*'], $cors->headers(self::request(null)));
     }
 
     public function testEchoesAListedOrigin(): void
@@ -24,10 +26,67 @@ final class CorsTest extends TestCase
 
         self::assertSame(
             ['Access-Control-Allow-Origin' => 'https://b.test', 'Vary' => 'Origin'],
-            $cors->headers('https://b.test'),
+            $cors->headers(self::request('https://b.test')),
         );
-        self::assertSame(['Vary' => 'Origin'], $cors->headers('https://c.test'));
-        self::assertSame(['Vary' => 'Origin'], $cors->headers(null));
+        self::assertSame(['Vary' => 'Origin'], $cors->headers(self::request('https://c.test')));
+        self::assertSame(['Vary' => 'Origin'], $cors->headers(self::request(null)));
+    }
+
+    public function testAClosureDecidesForEachRequest(): void
+    {
+        $calls = new ArrayObject();
+        // The rule the IXC dashboards need: the page's host, on any port.
+        $sameHost = static function (string $origin, Request $request) use ($calls): bool {
+            $calls->append([$origin, $request->header('Host')]);
+
+            return parse_url($origin, PHP_URL_HOST) === parse_url('//' . $request->header('Host'), PHP_URL_HOST);
+        };
+        $cors = new Cors($sameHost, credentials: true);
+
+        self::assertSame(
+            [
+                'Access-Control-Allow-Origin' => 'https://isp.test',
+                'Vary' => 'Origin',
+                'Access-Control-Allow-Credentials' => 'true',
+            ],
+            $cors->headers(self::request('https://isp.test', 'isp.test:11687')),
+        );
+        self::assertSame(
+            ['Vary' => 'Origin', 'Access-Control-Allow-Credentials' => 'true'],
+            $cors->headers(self::request('https://evil.test', 'isp.test:11687')),
+        );
+        self::assertSame(
+            ['Vary' => 'Origin', 'Access-Control-Allow-Credentials' => 'true'],
+            $cors->headers(self::request(null, 'isp.test:11687')),
+        );
+        // Without an Origin header, there is nothing to decide.
+        self::assertSame(
+            [['https://isp.test', 'isp.test:11687'], ['https://evil.test', 'isp.test:11687']],
+            $calls->getArrayCopy(),
+        );
+    }
+
+    public function testOnlyTrueFromTheClosureAllows(): void
+    {
+        $cors = new Cors(static fn (): bool => false);
+
+        self::assertSame(['Vary' => 'Origin'], $cors->headers(self::request('https://a.test')));
+    }
+
+    public function testCredentialsWithAList(): void
+    {
+        $cors = new Cors(['https://a.test'], credentials: true);
+
+        self::assertSame(
+            [
+                'Access-Control-Allow-Origin' => 'https://a.test',
+                'Vary' => 'Origin',
+                'Access-Control-Allow-Credentials' => 'true',
+            ],
+            $cors->headers(self::request('https://a.test')),
+        );
+        self::assertTrue($cors->credentials);
+        self::assertFalse((new Cors())->credentials);
     }
 
     public function testPreflightAllowsTheMethodsAndEchoesTheRequestedHeaders(): void
@@ -37,19 +96,22 @@ final class CorsTest extends TestCase
             'Access-Control-Allow-Methods' => 'GET, POST, OPTIONS',
             'Access-Control-Allow-Headers' => 'content-type, x-token',
             'Vary' => 'Access-Control-Request-Headers',
-        ], (new Cors())->preflightHeaders('https://a.test', 'content-type, x-token'));
+        ], (new Cors())->preflightHeaders(self::request('https://a.test', null, 'content-type, x-token')));
 
         self::assertSame([
             'Access-Control-Allow-Origin' => 'https://a.test',
             'Vary' => 'Origin, Access-Control-Request-Headers',
+            'Access-Control-Allow-Credentials' => 'true',
             'Access-Control-Allow-Methods' => 'GET, POST, OPTIONS',
             'Access-Control-Allow-Headers' => 'content-type',
-        ], (new Cors(['https://a.test']))->preflightHeaders('https://a.test', 'content-type'));
+        ], (new Cors(['https://a.test'], true))->preflightHeaders(
+            self::request('https://a.test', null, 'content-type'),
+        ));
 
         self::assertSame([
             'Access-Control-Allow-Origin' => '*',
             'Access-Control-Allow-Methods' => 'GET, POST, OPTIONS',
-        ], (new Cors())->preflightHeaders(null, null));
+        ], (new Cors())->preflightHeaders(self::request(null)));
     }
 
     public function testRejectsAStringOtherThanStar(): void
@@ -57,6 +119,25 @@ final class CorsTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
 
         $cors = new Cors('https://a.test');
-        self::fail('Accepted, with headers ' . json_encode($cors->headers(null)));
+        self::fail('Accepted, with headers ' . json_encode($cors->headers(self::request(null))));
+    }
+
+    public function testRejectsStarWithCredentials(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('credentials');
+
+        $cors = new Cors('*', credentials: true);
+        self::fail('Accepted, with headers ' . json_encode($cors->headers(self::request(null))));
+    }
+
+    private static function request(?string $origin, ?string $host = null, ?string $requestHeaders = null): Request
+    {
+        $headers = array_filter(
+            ['Origin' => $origin, 'Host' => $host, 'Access-Control-Request-Headers' => $requestHeaders],
+            static fn (?string $value): bool => $value !== null,
+        );
+
+        return new Request('/socket.io/', [], $headers);
     }
 }

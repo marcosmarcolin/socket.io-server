@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marcolin\SocketIO\Engine;
 
+use Closure;
 use InvalidArgumentException;
 
 /**
@@ -74,20 +75,21 @@ final class ServerOptions
             throw new InvalidArgumentException('The "cors" option must be an array, like ["origin" => "*"]');
         }
         foreach (array_keys($cors) as $key) {
-            if ($key !== 'origin') {
+            if ($key !== 'origin' && $key !== 'credentials') {
                 throw new InvalidArgumentException(sprintf('Unknown CORS option "%s"', $key));
             }
         }
-        if (! array_key_exists('origin', $cors)) {
-            return new Cors();
+        $credentials = $cors['credentials'] ?? false;
+        if (! is_bool($credentials)) {
+            throw new InvalidArgumentException('The CORS "credentials" option must be a boolean');
         }
 
-        $origin = $cors['origin'];
+        $origin = array_key_exists('origin', $cors) ? $cors['origin'] : '*';
         if ($origin === null) {
             return null;
         }
-        if ($origin === '*') {
-            return new Cors('*');
+        if ($origin === '*' || $origin instanceof Closure) {
+            return new Cors($origin, $credentials);
         }
         if (is_array($origin) && array_is_list($origin) && $origin !== []) {
             $origins = [];
@@ -97,10 +99,12 @@ final class ServerOptions
                     : throw new InvalidArgumentException('Each CORS origin must be a non-empty string');
             }
 
-            return new Cors($origins);
+            return new Cors($origins, $credentials);
         }
 
-        throw new InvalidArgumentException('The CORS origin must be "*", a non-empty list of origins, or null');
+        throw new InvalidArgumentException(
+            'The CORS origin must be "*", a non-empty list of origins, a Closure, or null',
+        );
     }
 
     private static function assertPositive(string $name, int $value): void

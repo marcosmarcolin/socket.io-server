@@ -266,6 +266,28 @@ final class ServerTest extends TestCase
         self::assertSame('Origin', $other->responseHeaders['Vary'] ?? null);
     }
 
+    public function testCredentialsWithAnOriginDecidedPerRequest(): void
+    {
+        $sameHost = static fn (string $origin, Request $request): bool =>
+            parse_url($origin, PHP_URL_HOST) === parse_url('//' . $request->header('Host'), PHP_URL_HOST);
+        $this->server = $this->server(new ServerOptions(path: '/engine.io/', cors: new Cors($sameHost, true)));
+        $page = ['Origin' => 'https://isp.test', 'Host' => 'isp.test:11687'];
+
+        $handshake = $this->request('GET', self::HANDSHAKE, headers: $page);
+        $poll = $this->request('GET', '/engine.io/?EIO=4&transport=polling&sid=sid1', headers: $page);
+        $this->connections[0]->send('later');
+        $error = $this->request('GET', '/engine.io/?EIO=4', headers: $page);
+        $preflight = $this->request('OPTIONS', self::HANDSHAKE, headers: $page);
+        $foreign = $this->request('GET', self::HANDSHAKE, headers: ['Origin' => 'https://evil.test'] + $page);
+
+        foreach ([$handshake, $poll, $error, $preflight] as $exchange) {
+            self::assertSame('https://isp.test', $exchange->responseHeaders['Access-Control-Allow-Origin'] ?? null);
+            self::assertSame('true', $exchange->responseHeaders['Access-Control-Allow-Credentials'] ?? null);
+        }
+        self::assertSame(204, $preflight->status);
+        self::assertArrayNotHasKey('Access-Control-Allow-Origin', $foreign->responseHeaders);
+    }
+
     public function testCorsCanBeDisabled(): void
     {
         $this->server = $this->server(new ServerOptions(path: '/engine.io/', cors: null));

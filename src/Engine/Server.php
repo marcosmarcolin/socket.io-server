@@ -53,10 +53,7 @@ final class Server extends Emitter
         if ($cors !== null) {
             $exchange = new CorsHttpExchange($exchange, $cors);
             if ($exchange->method() === 'OPTIONS') {
-                $exchange->respond(204, '', $cors->preflightHeaders(
-                    $exchange->header('Origin'),
-                    $exchange->header('Access-Control-Request-Headers'),
-                ));
+                $exchange->respond(204, '', $cors->preflightHeaders($exchange->request()));
 
                 return;
             }

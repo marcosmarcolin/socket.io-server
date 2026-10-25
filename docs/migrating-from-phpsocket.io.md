@@ -15,6 +15,7 @@ On the client side, follow [Socket.IO's migration from 2.x to 3.0](https://socke
 - `io()` connects to `/` explicitly: there is no implicit connection to the main namespace anymore.
 - Credentials go in the `auth` option, and the server reads them in `$socket->handshake['auth']`, instead of in the query string.
 - With several server processes, connect with `transports: ['websocket']`.
+- **Cookies**: the 2.x client sends cookies cross-origin by default, and phpsocket.io allows any origin with credentials. The v3/v4 client sends them only with `withCredentials: true`, and this server needs `'cors' => ['origin' => ..., 'credentials' => true]` with a list of origins or a `Closure` (see [Cookies across origins](../README.md#cookies-across-origins)). Without both, a cookie-based login silently stops working.
 
 ## 2. Requirements and Composer
 
@@ -35,7 +36,7 @@ On the client side, follow [Socket.IO's migration from 2.x to 3.0](https://socke
 | `new SocketIO(2026)` | the same |
 | `new SocketIO(2026, ['ssl' => [...]])`: the second argument is the socket context | the second argument holds [server options](../README.md#server-options). For TLS, create the worker with the context, set `$worker->transport = 'ssl'`, and call `$io->attach($worker)` ([TLS](../README.md#tls)) |
 | `['host' => '::1']` | `$io->attach(new Worker('tcp://[::1]:2026'))` |
-| `['origins' => 'http://a.com:80']`, `$io->origins(...)` | `['cors' => ['origin' => ['http://a.com']]]` |
+| `['origins' => 'http://a.com:80']`, `$io->origins(...)` | `['cors' => ['origin' => ['http://a.com']]]`, plus `'credentials' => true` for cookies |
 | `['nsp' => MyNsp::class, 'socket' => MySocket::class]` | not supported: the classes are final. Use middlewares and `$socket->data` |
 | `$io->worker->count = 4` | still works. Add `$io->worker->reusePort = true` so the kernel spreads connections |
 | `$io->adapter(ChannelAdapter::class)` with `ChannelAdapter::$ip` and `::$port` | `$io->adapter(ChannelAdapter::factory($ip, $port))`, still in `workerStart`, with `use Marcolin\SocketIO\Adapter\ChannelAdapter;` |
