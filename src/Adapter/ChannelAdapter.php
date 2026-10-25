@@ -70,6 +70,17 @@ final class ChannelAdapter extends InMemoryAdapter
         ]);
     }
 
+    /**
+     * Stops listening to the namespace's channels.
+     */
+    public function close(): void
+    {
+        foreach (array_keys($this->rooms) as $room) {
+            $this->roomDeleted((string) $room);
+        }
+        $this->pubSub->unsubscribe($this->prefix);
+    }
+
     protected function roomCreated(string $room): void
     {
         if (! self::isSocketRoom($room)) {

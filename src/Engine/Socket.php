@@ -107,10 +107,17 @@ final class Socket extends Emitter
     }
 
     /**
-     * Closes the session once the write buffer is flushed.
+     * Closes the session once the write buffer is flushed; with $discard, at once, dropping what is buffered.
      */
-    public function close(): void
+    public function close(bool $discard = false): void
     {
+        if ($discard && $this->state !== SocketState::Closed) {
+            $this->state = SocketState::Closing;
+            $this->transport->discard();
+            $this->closeTransport();
+
+            return;
+        }
         if ($this->state !== SocketState::Open) {
             return;
         }

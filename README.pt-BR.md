@@ -186,6 +186,7 @@ $io->use(function (Socket $socket, Closure $next): void {
 | `on('workerStart' \| 'workerStop', fn (Worker $worker))` | Cada processo iniciando ou parando. |
 | `use(fn (Socket $socket, Closure $next))` | Um middleware em `/`. |
 | `adapter(fn (Nsp $nsp): Adapter)` | Como os namespaces guardam as salas e fazem broadcast, por exemplo `ChannelAdapter::factory()`. |
+| `close()` | Desliga o servidor: cada socket sai com `server shutting down`, as conexões fecham, e o worker para de aceitar novas neste processo. |
 | `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()` | Broadcast em `/`, como num namespace. |
 
 ### Namespaces: `Nsp`
@@ -215,7 +216,7 @@ $io->use(function (Socket $socket, Closure $next): void {
 | `to()`, `in()`, `except()`, `broadcast` | Broadcast para outros sockets; o próprio socket fica de fora. |
 | `disconnect(bool $close = false)` | Sai do namespace; com `true`, fecha a conexão inteira. |
 
-Eventos: `disconnecting` e `disconnect` recebem `(string $reason, ?Throwable $description)`; `disconnecting` ainda vê as salas. Os motivos são `transport close`, `transport error`, `ping timeout`, `parse error`, `forced close`, `server namespace disconnect`, `client namespace disconnect` e `forced server close`. `error` recebe um `Throwable` quando o cliente enviou um pacote que quebra o protocolo, logo antes de a conexão fechar.
+Eventos: `disconnecting` e `disconnect` recebem `(string $reason, ?Throwable $description)`; `disconnecting` ainda vê as salas. Os motivos são `transport close`, `transport error`, `ping timeout`, `parse error`, `forced close`, `server namespace disconnect`, `client namespace disconnect`, `forced server close` e `server shutting down`. `error` recebe um `Throwable` quando o cliente enviou um pacote que quebra o protocolo, logo antes de a conexão fechar.
 
 Os nomes `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` e `removeListener` são reservados: emiti-los lança exceção.
 

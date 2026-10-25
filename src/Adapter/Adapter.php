@@ -63,4 +63,9 @@ interface Adapter
     public function delSockets(BroadcastOptions $options, array $rooms): void;
 
     public function disconnectSockets(BroadcastOptions $options, bool $close): void;
+
+    /**
+     * Releases what the adapter holds outside this process, when the server shuts down.
+     */
+    public function close(): void;
 }

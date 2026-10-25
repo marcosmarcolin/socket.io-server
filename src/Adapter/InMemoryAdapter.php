@@ -103,6 +103,10 @@ class InMemoryAdapter implements Adapter
         }
     }
 
+    public function close(): void
+    {
+    }
+
     /**
      * Called when the first socket of this process joins a room.
      */
