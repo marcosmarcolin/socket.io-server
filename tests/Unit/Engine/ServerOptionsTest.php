@@ -6,6 +6,7 @@ namespace Marcolin\SocketIO\Tests\Unit\Engine;
 
 use InvalidArgumentException;
 use Marcolin\SocketIO\Engine\Cors;
+use Marcolin\SocketIO\Engine\Request;
 use Marcolin\SocketIO\Engine\ServerOptions;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -65,6 +66,18 @@ final class ServerOptionsTest extends TestCase
         self::assertNull(ServerOptions::fromArray(['cors' => ['origin' => null]])->cors);
     }
 
+    public function testArrayFormTakesCredentialsAndAClosure(): void
+    {
+        $sameHost = static fn (string $origin, Request $request): bool => true;
+
+        $withList = ServerOptions::fromArray(['cors' => ['origin' => ['https://a.test'], 'credentials' => true]])->cors;
+        $withClosure = ServerOptions::fromArray(['cors' => ['origin' => $sameHost, 'credentials' => true]])->cors;
+
+        self::assertEquals(new Cors(['https://a.test'], true), $withList);
+        self::assertEquals(new Cors($sameHost, true), $withClosure);
+        self::assertFalse(ServerOptions::fromArray([])->cors?->credentials);
+    }
+
     /**
      * @return iterable<string, array{array<string, mixed>, string}>
      */
@@ -74,7 +87,14 @@ final class ServerOptionsTest extends TestCase
         yield 'string int' => [['pingInterval' => '300'], '"pingInterval" option must be an integer'];
         yield 'path type' => [['path' => 1], '"path" option must be a string'];
         yield 'cors type' => [['cors' => '*'], '"cors" option must be an array'];
-        yield 'cors key' => [['cors' => ['credentials' => true]], 'Unknown CORS option "credentials"'];
+        yield 'cors key' => [['cors' => ['methods' => ['GET']]], 'Unknown CORS option "methods"'];
+        $starError = 'reject the CORS origin "*" with credentials';
+        yield 'credentials not a bool' => [
+            ['cors' => ['origin' => ['https://a.test'], 'credentials' => 'yes']],
+            '"credentials" option must be a boolean',
+        ];
+        yield 'credentials with any origin' => [['cors' => ['credentials' => true]], $starError];
+        yield 'credentials with star' => [['cors' => ['origin' => '*', 'credentials' => true]], $starError];
         yield 'origin string' => [['cors' => ['origin' => 'https://a.test']], 'CORS origin must be'];
         yield 'origin empty list' => [['cors' => ['origin' => []]], 'CORS origin must be'];
         yield 'origin map' => [['cors' => ['origin' => ['a' => 'https://a.test']]], 'CORS origin must be'];

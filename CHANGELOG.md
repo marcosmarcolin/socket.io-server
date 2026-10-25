@@ -18,6 +18,7 @@ The first release. Its version number is chosen when it is tagged.
 - **Binary data** with `Binary`, anywhere in the data, both ways.
 - **Several processes**: `ChannelAdapter` broadcasts across processes through workerman/channel. It keeps phpsocket.io 3.x's fixes and publishes each broadcast once, so a socket in several targeted rooms gets it once.
 - **Workerman integration**: `new SocketIO($port, $options)`, or `attach()` on your own worker for another address, several processes or TLS; `workerStart`/`workerStop` events.
+- **CORS with credentials**: `cors.credentials` lets browsers send cookies cross-origin, and `cors.origin` also takes a `Closure` that decides per request, such as "the page's host, on any port". `'*'` with credentials throws, since browsers reject it.
 - **Documentation**: README with an API reference, in English and Brazilian Portuguese; six runnable examples; a migration guide from phpsocket.io.
 
 ### Verified

@@ -17,6 +17,7 @@ It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and 
 - [Quick start](#quick-start)
 - [The client side](#the-client-side)
 - [Server options](#server-options)
+  - [Cookies across origins](#cookies-across-origins)
 - [API](#api)
 - [Data: JSON and binary](#data-json-and-binary)
 - [TLS](#tls)
@@ -128,9 +129,47 @@ With several server processes on one port, add `transports: ["websocket"]` (see 
 | `upgradeTimeout` | `10000` | How long an upgrade from polling to WebSocket may take. |
 | `connectTimeout` | `45000` | How long a client may stay without joining a namespace. |
 | `path` | `'/socket.io/'` | The URL path; the client's `path` option must match. |
-| `cors` | `['origin' => '*']` | `origin` is `'*'`, a list of allowed origins, or `null` to send no CORS headers. |
+| `cors` | `['origin' => '*']` | `origin` is `'*'`, a list of allowed origins, a `Closure` that decides per request, or `null` to send no CORS headers. `credentials` (`false` by default) lets browsers send cookies. |
 
 Unknown options and wrong types throw `InvalidArgumentException`.
+
+### Cookies across origins
+
+When the page and the server differ in host or port, the browser sends cookies only if the client asks and the server allows it. A typical case is authenticating by a session cookie:
+
+```js
+const socket = io("https://example.com:3000", { withCredentials: true });
+```
+
+```php
+use Marcolin\SocketIO\Engine\Request;
+
+$io = new SocketIO(3000, [
+    'cors' => [
+        // The page's host, on any port; a list of origins works too.
+        'origin' => fn (string $origin, Request $request): bool =>
+            parse_url($origin, PHP_URL_HOST) === parse_url('//' . $request->header('Host'), PHP_URL_HOST),
+        'credentials' => true,
+    ],
+]);
+
+$io->on('connection', function (Socket $socket): void {
+    $cookie = $socket->handshake['headers']['cookie'] ?? '';
+});
+```
+
+With `credentials`, `origin` can't be `'*'`: browsers reject that pair, so it throws.
+
+CORS only covers HTTP long-polling: browsers don't apply it to WebSocket, so a page on another site can open a WebSocket to your server, with your cookies if they are `SameSite=None`. To refuse other origins on every transport, check the `Origin` header in a middleware too:
+
+```php
+$io->use(function (Socket $socket, Closure $next): void {
+    $origin = $socket->handshake['headers']['origin'] ?? '';
+    $host = $socket->handshake['headers']['host'] ?? '';
+    $sameHost = parse_url($origin, PHP_URL_HOST) === parse_url('//' . $host, PHP_URL_HOST);
+    $next($sameHost ? null : new ConnectionError('forbidden origin'));
+});
+```
 
 ## API
 

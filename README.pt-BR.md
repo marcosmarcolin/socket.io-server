@@ -17,6 +17,7 @@ Ele fala os protocolos atuais, Engine.IO v4 e Socket.IO v5, então navegadores e
 - [Início rápido](#início-rápido)
 - [O lado do cliente](#o-lado-do-cliente)
 - [Opções do servidor](#opções-do-servidor)
+  - [Cookies entre origens](#cookies-entre-origens)
 - [API](#api)
 - [Dados: JSON e binário](#dados-json-e-binário)
 - [TLS](#tls)
@@ -128,9 +129,47 @@ Com vários processos do servidor na mesma porta, acrescente `transports: ["webs
 | `upgradeTimeout` | `10000` | Quanto tempo um upgrade de polling para WebSocket pode levar. |
 | `connectTimeout` | `45000` | Quanto tempo um cliente pode ficar sem entrar em um namespace. |
 | `path` | `'/socket.io/'` | O caminho da URL; a opção `path` do cliente precisa ser igual. |
-| `cors` | `['origin' => '*']` | `origin` é `'*'`, uma lista de origens permitidas, ou `null` para não enviar cabeçalhos CORS. |
+| `cors` | `['origin' => '*']` | `origin` é `'*'`, uma lista de origens permitidas, um `Closure` que decide a cada request, ou `null` para não enviar cabeçalhos CORS. `credentials` (`false` por padrão) deixa o navegador enviar cookies. |
 
 Opções desconhecidas e tipos errados lançam `InvalidArgumentException`.
+
+### Cookies entre origens
+
+Quando a página e o servidor diferem no host ou na porta, o navegador só envia cookies se o cliente pedir e o servidor permitir. Um caso típico é autenticar por cookie de sessão:
+
+```js
+const socket = io("https://example.com:3000", { withCredentials: true });
+```
+
+```php
+use Marcolin\SocketIO\Engine\Request;
+
+$io = new SocketIO(3000, [
+    'cors' => [
+        // The page's host, on any port; a list of origins works too.
+        'origin' => fn (string $origin, Request $request): bool =>
+            parse_url($origin, PHP_URL_HOST) === parse_url('//' . $request->header('Host'), PHP_URL_HOST),
+        'credentials' => true,
+    ],
+]);
+
+$io->on('connection', function (Socket $socket): void {
+    $cookie = $socket->handshake['headers']['cookie'] ?? '';
+});
+```
+
+Com `credentials`, `origin` não pode ser `'*'`: o navegador recusa esse par, então isso lança exceção.
+
+O CORS só cobre o HTTP long-polling: o navegador não o aplica ao WebSocket, então uma página de outro site pode abrir um WebSocket para o seu servidor, com os seus cookies se forem `SameSite=None`. Para recusar outras origens em qualquer transporte, verifique o cabeçalho `Origin` também num middleware:
+
+```php
+$io->use(function (Socket $socket, Closure $next): void {
+    $origin = $socket->handshake['headers']['origin'] ?? '';
+    $host = $socket->handshake['headers']['host'] ?? '';
+    $sameHost = parse_url($origin, PHP_URL_HOST) === parse_url('//' . $host, PHP_URL_HOST);
+    $next($sameHost ? null : new ConnectionError('forbidden origin'));
+});
+```
 
 ## API
 

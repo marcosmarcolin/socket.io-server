@@ -219,11 +219,13 @@ src/
 
   After the upgrade, HTTP requests or another WebSocket with the same `sid` are rejected. A second WebSocket during an upgrade is closed too. If the upgrade doesn't complete within `upgradeTimeout` (10 s), or any packet other than `2probe` or `5` arrives on the new transport, the WebSocket is closed and the session stays on polling.
 - **Polling payload:** packets separated by `\x1e`; binary as `b` + base64. Over WebSocket, binary goes as a raw binary frame.
-- **CORS:** the `cors.origin` option (`'*'` by default, a list of origins, or `null` to disable), including the `OPTIONS` preflight.
+- **CORS:** the `cors` option, as the `cors` package the reference uses, including the `OPTIONS` preflight.
+  - `origin` is `'*'` (default), a list of origins, a `Closure(string $origin, Request $request): bool` deciding per request, or `null` to disable CORS. `credentials` (default `false`) adds `Access-Control-Allow-Credentials: true`, which browsers need to send cookies cross-origin.
   - The headers go on every polling answer, errors included.
-  - With a list, a listed origin is echoed with `Vary: Origin`, and any other origin gets no `Access-Control-Allow-Origin`, so the browser blocks it.
-  - The preflight answers 204 with `GET, POST, OPTIONS` and echoes `Access-Control-Request-Headers`.
-  - `credentials` is not supported yet. With CORS disabled, `OPTIONS` is an ordinary request and gets code 2.
+  - With a list or a `Closure`, an allowed origin is echoed with `Vary: Origin`, and any other origin gets no `Access-Control-Allow-Origin`, so the browser blocks it. The `Closure` runs only when the request has an `Origin`, and only `true` allows.
+  - `'*'` with `credentials` throws: browsers reject that pair, and the `cors` package would send it anyway.
+  - The preflight answers 204 with `GET, POST, OPTIONS` and echoes `Access-Control-Request-Headers`. With CORS disabled, `OPTIONS` is an ordinary request and gets code 2.
+  - CORS doesn't cover WebSocket, in browsers or in the reference. The README shows the middleware that checks `Origin` on every transport.
 
 ### Socket.IO
 

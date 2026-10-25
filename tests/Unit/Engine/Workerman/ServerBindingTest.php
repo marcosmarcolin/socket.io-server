@@ -6,7 +6,9 @@ namespace Marcolin\SocketIO\Tests\Unit\Engine\Workerman;
 
 use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\Engine\CloseReason;
+use Marcolin\SocketIO\Engine\Cors;
 use Marcolin\SocketIO\Engine\Protocol\HttpOrWebSocket;
+use Marcolin\SocketIO\Engine\Request;
 use Marcolin\SocketIO\Engine\Server;
 use Marcolin\SocketIO\Engine\ServerOptions;
 use Marcolin\SocketIO\Engine\Socket;
@@ -79,6 +81,29 @@ final class ServerBindingTest extends TestCase
         self::assertStringContainsStringIgnoringCase("Access-Control-Allow-Origin: *\r\n", $response);
         self::assertStringContainsString("\r\n\r\n0{\"sid\":\"sid1\"", $response);
         self::assertSame(1, $this->server->sessionCount());
+    }
+
+    public function testCorsHeadersWithCredentialsReachTheWire(): void
+    {
+        $server = new Server(
+            new ServerOptions(path: '/engine.io/', cors: new Cors(
+                static fn (string $origin, Request $request): bool => $request->header('Host') === 'isp.test:11687',
+                true,
+            )),
+            new FakeScheduler(),
+        );
+        $worker = new Worker();
+        (new ServerBinding($server))->bind($worker);
+        $pair = new SocketPairConnection($worker);
+
+        $pair->write("GET /engine.io/?EIO=4&transport=polling HTTP/1.1\r\nHost: isp.test:11687\r\n"
+            . "Origin: https://isp.test\r\nCookie: IXC_Session=abc\r\n\r\n");
+        $response = $pair->read();
+
+        self::assertStringStartsWith('HTTP/1.1 200 OK', $response);
+        self::assertStringContainsStringIgnoringCase("Access-Control-Allow-Origin: https://isp.test\r\n", $response);
+        self::assertStringContainsStringIgnoringCase("Access-Control-Allow-Credentials: true\r\n", $response);
+        self::assertStringContainsStringIgnoringCase("Vary: Origin\r\n", $response);
     }
 
     public function testPollingRoundTripOnOneKeepAliveConnection(): void
