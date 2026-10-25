@@ -130,6 +130,7 @@ Com vários processos do servidor na mesma porta, acrescente `transports: ["webs
 | `path` | `'/socket.io/'` | O caminho da URL; a opção `path` do cliente precisa ser igual. |
 | `transports` | `['polling', 'websocket']` | Os transportes que os clientes podem usar. Com `['websocket']`, requests de polling são recusados, então os clientes também precisam de `transports: ['websocket']` (senão recebem `xhr poll error`). Com `['polling']`, nenhum upgrade é oferecido. |
 | `cors` | `['origin' => '*']` | `origin` é `'*'`, uma lista de origens permitidas, um `Closure` que decide a cada request, ou `null` para não enviar cabeçalhos CORS. `credentials` (`false` por padrão) deixa o navegador enviar cookies. |
+| `allowUpgrades` | `true` | Com `false`, o handshake não oferece upgrade, então clientes que começam no polling continuam nele; clientes com `transports: ['websocket']` continuam conectando por WebSocket. |
 | `allowRequest` | `null` | Um `Closure` que aceita ou recusa cada handshake antes de a sessão abrir. Veja [Recusar uma conexão antes do handshake](#recusar-uma-conexão-antes-do-handshake). |
 
 Opções desconhecidas e tipos errados lançam `InvalidArgumentException`.
