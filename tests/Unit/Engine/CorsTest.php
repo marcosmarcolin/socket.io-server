@@ -35,7 +35,7 @@ final class CorsTest extends TestCase
     public function testAClosureDecidesForEachRequest(): void
     {
         $calls = new ArrayObject();
-        // The rule the IXC dashboards need: the page's host, on any port.
+        // A common rule: the page's host, on any port.
         $sameHost = static function (string $origin, Request $request) use ($calls): bool {
             $calls->append([$origin, $request->header('Host')]);
 
@@ -45,23 +45,23 @@ final class CorsTest extends TestCase
 
         self::assertSame(
             [
-                'Access-Control-Allow-Origin' => 'https://isp.test',
+                'Access-Control-Allow-Origin' => 'https://app.test',
                 'Vary' => 'Origin',
                 'Access-Control-Allow-Credentials' => 'true',
             ],
-            $cors->headers(self::request('https://isp.test', 'isp.test:11687')),
+            $cors->headers(self::request('https://app.test', 'app.test:3000')),
         );
         self::assertSame(
             ['Vary' => 'Origin', 'Access-Control-Allow-Credentials' => 'true'],
-            $cors->headers(self::request('https://evil.test', 'isp.test:11687')),
+            $cors->headers(self::request('https://evil.test', 'app.test:3000')),
         );
         self::assertSame(
             ['Vary' => 'Origin', 'Access-Control-Allow-Credentials' => 'true'],
-            $cors->headers(self::request(null, 'isp.test:11687')),
+            $cors->headers(self::request(null, 'app.test:3000')),
         );
         // Without an Origin header, there is nothing to decide.
         self::assertSame(
-            [['https://isp.test', 'isp.test:11687'], ['https://evil.test', 'isp.test:11687']],
+            [['https://app.test', 'app.test:3000'], ['https://evil.test', 'app.test:3000']],
             $calls->getArrayCopy(),
         );
     }

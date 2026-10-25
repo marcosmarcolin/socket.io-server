@@ -90,7 +90,7 @@ final class ServerBindingTest extends TestCase
     {
         $server = new Server(
             new ServerOptions(path: '/engine.io/', cors: new Cors(
-                static fn (string $origin, Request $request): bool => $request->header('Host') === 'isp.test:11687',
+                static fn (string $origin, Request $request): bool => $request->header('Host') === 'app.test:3000',
                 true,
             )),
             new FakeScheduler(),
@@ -99,12 +99,12 @@ final class ServerBindingTest extends TestCase
         (new ServerBinding($server))->bind($worker);
         $pair = new SocketPairConnection($worker);
 
-        $pair->write("GET /engine.io/?EIO=4&transport=polling HTTP/1.1\r\nHost: isp.test:11687\r\n"
-            . "Origin: https://isp.test\r\nCookie: IXC_Session=abc\r\n\r\n");
+        $pair->write("GET /engine.io/?EIO=4&transport=polling HTTP/1.1\r\nHost: app.test:3000\r\n"
+            . "Origin: https://app.test\r\nCookie: session=abc\r\n\r\n");
         $response = $pair->read();
 
         self::assertStringStartsWith('HTTP/1.1 200 OK', $response);
-        self::assertStringContainsStringIgnoringCase("Access-Control-Allow-Origin: https://isp.test\r\n", $response);
+        self::assertStringContainsStringIgnoringCase("Access-Control-Allow-Origin: https://app.test\r\n", $response);
         self::assertStringContainsStringIgnoringCase("Access-Control-Allow-Credentials: true\r\n", $response);
         self::assertStringContainsStringIgnoringCase("Vary: Origin\r\n", $response);
     }
