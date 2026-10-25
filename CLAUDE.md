@@ -94,7 +94,8 @@ Both scripts share `tests/Compliance/suite.sh`, which downloads the suite at a p
 - Commits are signed (GPG) and authored as `marcolindev@gmail.com`; this is configured in the repo's local git config.
 - **After the first commit, every change goes through a pull request.** No direct pushes to `main`. One focused change per PR, with green CI, tests and a description of what changed and how it was verified.
 - **Merges, tags, releases and anything published need Marcos's explicit approval each time.** A green CI is not approval.
-- The repo is `marcosmarcolin/socket.io-server`, private until the first usable release.
+- The repo is `marcosmarcolin/socket.io-server`, public since v0.1.0 and published on Packagist, which GitHub updates on each tag.
+- **Releases** follow SemVer, 0.x until the API is settled: a PR renames `[Unreleased]` in `CHANGELOG.md` to the version and date, then, with Marcos's approval, the merge commit gets a signed tag `vX.Y.Z` and a GitHub Release with that changelog section.
 
 ## Architecture
 
@@ -364,4 +365,4 @@ Worker::runAll();
 7. [x] Integration with `socket.io-client@4` in CI (the multi-process scenario comes with step 8, since it needs `ChannelAdapter`).
 8. [x] `ChannelAdapter`, with a multi-process integration test and a scale check.
 9. [x] Complete README, examples, and a migration guide from phpsocket.io 3.x.
-10. [ ] First release (`v0.1.0` or `v1.0.0-beta.1`, to be decided). Once the package is on Packagist, the READMEs switch to `composer require` and gain its badges (version, downloads, PHP version).
+10. [x] First release, `v0.1.0`, on Packagist; the READMEs install with `composer require` and show its badges (version, downloads, PHP version).
