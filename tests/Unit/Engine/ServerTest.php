@@ -316,6 +316,36 @@ final class ServerTest extends TestCase
         self::assertSame([], $open['upgrades']);
     }
 
+    // The allowUpgrades option
+
+    public function testWithoutUpgradesThePollingHandshakeOffersNone(): void
+    {
+        $this->server = $this->server(new ServerOptions(path: '/engine.io/', allowUpgrades: false));
+
+        $handshake = $this->request('GET', self::HANDSHAKE);
+
+        $open = json_decode(substr((string) $handshake->responseBody, 1), true);
+        self::assertIsArray($open);
+        self::assertSame([], $open['upgrades']);
+    }
+
+    public function testWithoutUpgradesAClientThatTriesAnywayStillUpgrades(): void
+    {
+        // The option only changes what the handshake offers, as in the reference.
+        $this->server = $this->server(new ServerOptions(path: '/engine.io/', allowUpgrades: false));
+        $this->handshake();
+        $connection = new FakeWebSocketConnection();
+        $request = $this->webSocketRequest(self::UPGRADE);
+
+        self::assertNull($this->server->verifyWebSocket($request));
+        $this->server->handleWebSocket($request, $connection);
+        $connection->receive('2probe');
+        $this->poll();
+        $connection->receive('5');
+
+        self::assertTrue($this->connections[0]->isUpgraded());
+    }
+
     public function testPollingOnlyOffersNoUpgradeAndRefusesWebSockets(): void
     {
         $this->server = $this->server(new ServerOptions(path: '/engine.io/', transports: ['polling']));

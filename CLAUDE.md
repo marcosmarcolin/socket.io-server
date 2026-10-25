@@ -115,7 +115,7 @@ src/
     SessionIdGenerator.php, RandomSessionIdGenerator.php  20-character base64url session ids
     Socket.php                  session: state, heartbeat, upgrade, write buffer
     SocketState.php, CloseReason.php  session state; close reasons with the reference's strings
-    ServerOptions.php           pingInterval, pingTimeout, maxPayload, upgradeTimeout, path, cors, transports, allowRequest; fromArray()
+    ServerOptions.php           pingInterval, pingTimeout, maxPayload, upgradeTimeout, path, cors, transports, allowRequest, allowUpgrades; fromArray()
     Transport/Transport.php     base transport (Emitter): packet, ready, drain, error, close
     Transport/Polling.php       pending GET, POST, noop on upgrade
     Transport/WebSocket.php     one packet per frame, text or binary
@@ -198,7 +198,7 @@ src/
 
   A WebSocket request is validated before the handshake is answered (`Server::verifyWebSocket()`) and again when the connection is handed over, in case the session closed in between. `allowRequest` is asked only the first time.
 - **`allowRequest`:** a `Closure(Engine\Request): bool|string`, called synchronously for each handshake (requests with a `sid` skip it). `true` accepts; `false`, or any other value, refuses with code 4 and HTTP 403. A non-empty string replaces the message, as the reference's `errorContext.message` does; over WebSocket, the message goes in the plain HTTP 400. Exceptions propagate to `ServerBinding`, which closes the connection (with a 500 over polling).
-- **Handshake:** only via `GET` without `sid` (or WebSocket without `sid`). It answers an `open` packet with `sid`, `upgrades`, `pingInterval`, `pingTimeout` and `maxPayload`. `upgrades` is `["websocket"]` on polling and `[]` on WebSocket, keeping only the transports the `transports` option allows (`[]` on polling when it is `['polling']`). The session id is 15 random bytes in base64url (20 characters), like the reference's `base64id`. A closed session leaves the registry at once, so later requests with its `sid` get code 1.
+- **Handshake:** only via `GET` without `sid` (or WebSocket without `sid`). It answers an `open` packet with `sid`, `upgrades`, `pingInterval`, `pingTimeout` and `maxPayload`. `upgrades` is `["websocket"]` on polling and `[]` on WebSocket, keeping only the transports the `transports` option allows (`[]` on polling when it is `['polling']`), and `[]` with `allowUpgrades` set to `false`. As in the reference, that option only changes the offer: a client that tries the upgrade anyway still gets it. The session id is 15 random bytes in base64url (20 characters), like the reference's `base64id`. A closed session leaves the registry at once, so later requests with its `sid` get code 1.
 - **`maxPayload`:** a polling `POST` body larger than it gets 413 and the session goes on, as in the reference.
 - **Heartbeat:** the **server** sends `ping` every `pingInterval`. Without a `pong` within `pingTimeout`, the session closes with `ping timeout`.
   - the next `ping` is scheduled `pingInterval` after the `pong`;

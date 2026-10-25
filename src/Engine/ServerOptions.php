@@ -24,6 +24,7 @@ final class ServerOptions
      * @param list<string> $transports the transports clients may use: "polling", "websocket", or both
      * @param (Closure(Request $request): (bool|string))|null $allowRequest decides each handshake: true lets it in,
      *        false or a message refuses it with code 4 (Forbidden)
+     * @param bool $allowUpgrades whether the handshake offers upgrades; without them, polling clients stay on polling
      */
     public function __construct(
         public readonly int $pingInterval = 25_000,
@@ -34,6 +35,7 @@ final class ServerOptions
         public readonly ?Cors $cors = new Cors(),
         public readonly array $transports = self::TRANSPORTS,
         public readonly ?Closure $allowRequest = null,
+        public readonly bool $allowUpgrades = true,
     ) {
         self::assertPositive('pingInterval', $pingInterval);
         self::assertPositive('pingTimeout', $pingTimeout);
@@ -58,7 +60,7 @@ final class ServerOptions
      */
     public static function fromArray(array $options): self
     {
-        $known = [...self::INT_OPTIONS, 'path', 'cors', 'transports', 'allowRequest'];
+        $known = [...self::INT_OPTIONS, 'path', 'cors', 'transports', 'allowRequest', 'allowUpgrades'];
         foreach (array_keys($options) as $key) {
             if (! in_array($key, $known, true)) {
                 throw new InvalidArgumentException(sprintf('Unknown Engine.IO option "%s"', $key));
@@ -95,12 +97,18 @@ final class ServerOptions
             throw new InvalidArgumentException('The "allowRequest" option must be a Closure');
         }
 
+        $allowUpgrades = $options['allowUpgrades'] ?? true;
+        if (! is_bool($allowUpgrades)) {
+            throw new InvalidArgumentException('The "allowUpgrades" option must be a boolean');
+        }
+
         return new self(
             ...$ints,
             path: $path,
             cors: self::corsFromArray($options['cors'] ?? []),
             transports: $names,
             allowRequest: $allowRequest,
+            allowUpgrades: $allowUpgrades,
         );
     }
 

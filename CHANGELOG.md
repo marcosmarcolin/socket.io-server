@@ -7,6 +7,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Added
 
 - **`onAny()` and `onAnyOutgoing()`** on `Socket`, with `prependAny()`, `offAny()`, `listenersAny()` and their outgoing counterparts, as in the reference. Outgoing listeners see emits and broadcasts, including broadcasts from other processes through `ChannelAdapter`.
+- **The `allowUpgrades` option** (`true` by default): with `false`, the handshake offers no upgrade, as in the reference.
 
 ## [0.1.0] - 2026-10-25
 
