@@ -366,7 +366,7 @@ $io->on('connection', function (Socket $socket) use ($io): void {
 Worker::runAll();
 ```
 
-- `SocketIO`: `$io->engine` (its `initial_headers`, `headers` and `connection_error` events), `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- `SocketIO`: `$io->engine` (its `initial_headers`, `headers` and `connection_error` events), `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `fetchSockets(?Closure)`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()` (all on `/`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
 - **`close()`**, as the reference's:
   1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
   2. each adapter's `close()` runs (`PubSubAdapter` unsubscribes from its channels);

@@ -19,6 +19,7 @@
 | `close()` | Desliga o servidor: cada socket sai com `server shutting down`, as conexões fecham, e o worker para de aceitar novas neste processo. |
 | `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `local`, `compress()`, `timeout()` | Broadcast em `/`, como num namespace. |
 | `serverSideEmit(string $event, ...$args)` | Um evento para `/` nos outros servidores; veja `Nsp`. |
+| `fetchSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()` | Os helpers de sockets de `/`, como num namespace. |
 
 ## Namespaces: `Nsp`
 
