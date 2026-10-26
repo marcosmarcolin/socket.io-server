@@ -13,32 +13,19 @@ It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and 
 
 > **Version 0.x.** The API may still change between minor versions until 1.0; each change is listed in the [changelog](CHANGELOG.md).
 
-## Contents
+## Features
 
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Quick start](#quick-start)
-- [The client side](#the-client-side)
-- [Server options](#server-options)
-  - [Cookies across origins](#cookies-across-origins)
-  - [Refusing a connection before the handshake](#refusing-a-connection-before-the-handshake)
-- [API](#api)
-- [Data: JSON and binary](#data-json-and-binary)
-- [TLS](#tls)
-- [Several processes](#several-processes)
-- [Examples](#examples)
-- [Migrating from phpsocket.io](#migrating-from-phpsocketio)
-- [Status](#status)
-- [Development](#development)
-- [License](#license)
+- HTTP long-polling and WebSocket on one port, with the upgrade from polling to WebSocket.
+- Namespaces, middlewares, rooms, acknowledgements (broadcasts with a timeout too), binary data and catch-all listeners.
+- Several processes and machines, through [workerman/channel](https://github.com/walkor/channel) or Redis.
+- CORS with cookies, a hook to refuse connections before the handshake, and TLS.
+- An API shaped like [phpsocket.io](https://github.com/walkor/phpsocket.io)'s, to ease migration.
 
 ## Requirements
 
 - PHP 8.1 or later, with the `json` extension, and `pcntl` and `posix` to run Workerman.
 - [Workerman](https://github.com/walkor/workerman) 5.2.
 - On the client: `socket.io-client` v3 or v4. For the 1.x and 2.x clients, use [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io).
-
-Out of scope: WebTransport, JSONP polling, custom parsers (msgpack), dynamic namespaces, and connection state recovery.
 
 ## Installation
 
@@ -48,357 +35,46 @@ composer require marcosmarcolin/socket.io-server
 
 ## Quick start
 
+`server.php`:
+
 ```php
 <?php
 
-use Marcolin\SocketIO\ConnectionError;
 use Marcolin\SocketIO\Socket;
 use Marcolin\SocketIO\SocketIO;
 use Workerman\Worker;
 
 require __DIR__ . '/vendor/autoload.php';
 
-$io = new SocketIO(3000, [
-    'pingInterval' => 25000,
-    'pingTimeout' => 20000,
-    'cors' => ['origin' => ['https://example.com']],
-]);
-
-// Runs before each connection to "/".
-$io->use(function (Socket $socket, Closure $next): void {
-    $token = $socket->handshake['auth']['token'] ?? null;
-    $next($token === 'secret' ? null : new ConnectionError('unauthorized'));
-});
+$io = new SocketIO(3000, ['cors' => ['origin' => ['https://example.com']]]);
 
 $io->on('connection', function (Socket $socket) use ($io): void {
-    $socket->data['joinedAt'] = time();
     $socket->join('lobby');
     $socket->emit('hello', 'world');
-    $socket->broadcast->emit('joined', $socket->id);
 
     // A Closure as the last argument is the client's acknowledgement callback.
-    $socket->on('chat', function (string $message, ?Closure $ack = null) use ($socket): void {
-        $socket->to('lobby')->emit('chat', $message);
+    $socket->on('chat', function (string $message, ?Closure $ack = null) use ($io): void {
+        $io->to('lobby')->emit('chat', $message);
         if ($ack !== null) {
             $ack('delivered');
         }
     });
-
-    $socket->timeout(5000)->emit('question', function (?Throwable $error, mixed $answer): void {
-        // $error is a TimeoutException when the client didn't answer in time.
-    });
-
-    $socket->on('disconnect', function (string $reason) use ($io, $socket): void {
-        $io->to('lobby')->emit('left', $socket->id, $reason);
-    });
-});
-
-$io->of('/admin')->on('connection', function (Socket $socket): void {
-    $socket->emit('welcome', ['role' => 'admin']);
 });
 
 Worker::runAll();
 ```
 
-Run it with `php server.php start` (`start -d` to run in the background, `stop`, `restart`, `status`: the usual Workerman commands).
-
-## The client side
+Run it with `php server.php start` (`start -d` to run in the background, `stop`, `restart`, `status`: the usual Workerman commands). Then, on the client:
 
 ```js
 import { io } from "socket.io-client";
 
-const socket = io("http://localhost:3000", { auth: { token: "secret" } });
+const socket = io("http://localhost:3000");
 
 socket.on("hello", (word) => console.log(word));
+socket.on("chat", (message) => console.log(message));
 socket.emit("chat", "hi", (status) => console.log(status)); // "delivered"
-socket.on("question", (answer) => answer("blue")); // the server's timeout() emit
 ```
-
-With several server processes on one port, add `transports: ["websocket"]` (see [Several processes](#several-processes)).
-
-## Server options
-
-`new SocketIO($port, $options)` takes these options. Times are in milliseconds.
-
-| Option | Default | Meaning |
-|---|---|---|
-| `pingInterval` | `25000` | How often the server pings each client. |
-| `pingTimeout` | `20000` | How long it waits for the pong before closing the connection. |
-| `maxPayload` | `1000000` | Largest message, in bytes; longer HTTP bodies get 413. |
-| `upgradeTimeout` | `10000` | How long an upgrade from polling to WebSocket may take. |
-| `connectTimeout` | `45000` | How long a client may stay without joining a namespace. |
-| `path` | `'/socket.io/'` | The URL path; the client's `path` option must match. |
-| `transports` | `['polling', 'websocket']` | The transports clients may use. With `['websocket']`, polling requests are refused, so clients need `transports: ['websocket']` too (otherwise they get `xhr poll error`). With `['polling']`, no upgrade is offered. |
-| `cors` | `['origin' => '*']` | `origin` is `'*'`, a list of allowed origins, a `Closure` that decides per request, or `null` to send no CORS headers. `credentials` (`false` by default) lets browsers send cookies. |
-| `allowUpgrades` | `true` | With `false`, the handshake offers no upgrade, so clients that start on polling stay on it; clients with `transports: ['websocket']` still connect over WebSocket. |
-| `allowRequest` | `null` | A `Closure` that accepts or refuses each handshake before the session opens. See [Refusing a connection before the handshake](#refusing-a-connection-before-the-handshake). |
-
-Unknown options and wrong types throw `InvalidArgumentException`.
-
-### Cookies across origins
-
-When the page and the server differ in host or port, the browser sends cookies only if the client asks and the server allows it. A typical case is authenticating by a session cookie:
-
-```js
-const socket = io("https://example.com:3000", { withCredentials: true });
-```
-
-```php
-use Marcolin\SocketIO\Engine\Request;
-
-$io = new SocketIO(3000, [
-    'cors' => [
-        // The page's host, on any port; a list of origins works too.
-        'origin' => fn (string $origin, Request $request): bool =>
-            parse_url($origin, PHP_URL_HOST) === parse_url('//' . $request->header('Host'), PHP_URL_HOST),
-        'credentials' => true,
-    ],
-]);
-
-$io->on('connection', function (Socket $socket): void {
-    $cookie = $socket->handshake['headers']['cookie'] ?? '';
-});
-```
-
-With `credentials`, `origin` can't be `'*'`: browsers reject that pair, so it throws.
-
-CORS only covers HTTP long-polling: browsers don't apply it to WebSocket, so a page on another site can open a WebSocket to your server, with your cookies if they are `SameSite=None`. To refuse other origins on every transport, check the `Origin` header in a middleware too:
-
-```php
-$io->use(function (Socket $socket, Closure $next): void {
-    $origin = $socket->handshake['headers']['origin'] ?? '';
-    $host = $socket->handshake['headers']['host'] ?? '';
-    $sameHost = parse_url($origin, PHP_URL_HOST) === parse_url('//' . $host, PHP_URL_HOST);
-    $next($sameHost ? null : new ConnectionError('forbidden origin'));
-});
-```
-
-### Refusing a connection before the handshake
-
-`allowRequest` gets the `Engine\Request` of each handshake, over polling or WebSocket, before any session opens. It returns `true` to accept. `false` or a message refuses with code 4 (`Forbidden`): HTTP 403 with `{"code":4,"message":"..."}` over polling, HTTP 400 with the message over WebSocket. The client gets `connect_error`.
-
-```php
-use Marcolin\SocketIO\Engine\Request;
-
-$io = new SocketIO(3000, [
-    'allowRequest' => function (Request $request) use ($sessions): bool|string {
-        return $sessions->isValid($request->header('cookie') ?? '') ? true : 'invalid session';
-    },
-]);
-```
-
-It runs synchronously in the event loop, so keep it fast: a slow check holds up every connection of the process. An exception closes the connection (with a 500 over polling) and goes to the worker's log.
-
-A middleware does the same job one step later, after the session opens: it may wait for asynchronous work, and its `ConnectionError` reaches the client with a message and data over every transport. With `allowRequest`, the client reads the message only over polling, in `err.context.responseText`; over WebSocket it sees `websocket error`.
-
-## API
-
-### `SocketIO`
-
-| | |
-|---|---|
-| `new SocketIO(?int $port = null, array $options = [])` | With a port, it listens on `tcp://0.0.0.0:<port>`. Without one, call `attach()`. |
-| `attach(Worker $worker)` | Serves the server on your own `tcp` or `ssl` worker, for another address, several processes or TLS. Call it before `Worker::runAll()`. |
-| `$io->worker` | The attached worker, or `null`. |
-| `of(string $name): Nsp` | The namespace with that name, created on first use. |
-| `$io->sockets` | The main namespace, `/`. |
-| `on('connection', fn (Socket $socket))` | The main namespace's `connection` event. |
-| `on('workerStart' \| 'workerStop', fn (Worker $worker))` | Each process starting or stopping. |
-| `use(fn (Socket $socket, Closure $next))` | A middleware on `/`. |
-| `adapter(fn (Nsp $nsp): Adapter)` | How namespaces keep rooms and broadcast, such as `ChannelAdapter::factory()` or `RedisAdapter::factory()`. |
-| `close()` | Shuts the server down: every socket leaves with `server shutting down`, the connections close, and the worker stops accepting new ones in this process. |
-| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcasting on `/`, as on a namespace. |
-
-### Namespaces: `Nsp`
-
-| | |
-|---|---|
-| `on('connection', fn (Socket $socket))` | A socket joined, after the middlewares let it in. `connect` is the same. |
-| `use(fn (Socket $socket, Closure $next))` | Runs before each connection, in order. Call `$next()` to let the socket in, or `$next($error)` to refuse it; `$next` may be called later, from an asynchronous callback. A `ConnectionError` also sends its `data`. An exception thrown before `$next` refuses the socket. |
-| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcasting to the namespace. See [Acknowledgements](#acknowledgements) for `timeout()`. |
-| `sockets(): array<string, Socket>` | The connected sockets, by id. |
-| `allSockets(): list<string>` | Their ids. |
-| `fetchSockets(): list<Socket>`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets(bool $close = false)` | Act on the selected sockets; use `to()` and `except()` first to select. |
-
-### `Socket`
-
-| | |
-|---|---|
-| `$socket->id` | 24 hexadecimal characters, different from the Engine.IO session id and per namespace. |
-| `$socket->handshake` | `headers` (lower-case names), `time`, `address`, `xdomain`, `secure`, `issued` (ms), `url`, `query`, and `auth`, the client's `auth` option. |
-| `$socket->data` | A free-form array for your own data. |
-| `$socket->rooms`, `$socket->connected`, `$socket->disconnected` | Its rooms (its own id included) and its state. |
-| `$socket->nsp`, `$socket->request`, `$socket->conn` | Its namespace, the HTTP request that opened the connection, and the Engine.IO session. |
-| `on(string $event, Closure $listener)` | An event from the client. The listener gets the arguments, plus an acknowledgement `Closure` last when the client asked for one; it answers once. |
-| `emit(string $event, ...$args)`, `send(...$args)` | Sends an event; a `Closure` as the last argument asks the client to acknowledge it. |
-| `onAny(Closure $listener)`, `prependAny()`, `offAny(?Closure $listener = null)`, `listenersAny()` | Every event from the client, before its own listeners. The listener gets the event name, then the arguments, with the acknowledgement `Closure` last when the client asked for one. `offAny()` without a listener removes them all. |
-| `onAnyOutgoing(Closure $listener)`, `prependAnyOutgoing()`, `offAnyOutgoing()`, `listenersAnyOutgoing()` | Every event sent to this client, by `emit()` or a broadcast (from other processes too), before it is written: the event name, then the arguments, without the acknowledgement callback. |
-| `timeout(int $ms)`, `volatile`, `compress(bool)` | Emit modifiers, which return a new object. See [Acknowledgements](#acknowledgements). |
-| `join(string\|array $rooms)`, `leave(string $room)` | Rooms. |
-| `to()`, `in()`, `except()`, `broadcast` | Broadcasting to other sockets; the socket itself is left out. |
-| `disconnect(bool $close = false)` | Leaves the namespace; with `true`, closes the whole connection. |
-
-Events: `disconnecting` and `disconnect` get `(string $reason, ?Throwable $description)`; `disconnecting` still sees the rooms. The reasons are `transport close`, `transport error`, `ping timeout`, `parse error`, `forced close`, `server namespace disconnect`, `client namespace disconnect`, `forced server close` and `server shutting down`. `error` gets a `Throwable` when the client sent a packet that breaks the protocol, just before the connection closes.
-
-The names `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` and `removeListener` are reserved: emitting them throws.
-
-### Acknowledgements
-
-```php
-// The server asks; the callback gets the client's answer.
-$socket->emit('question', 'colour?', function (mixed $answer): void {});
-
-// With a timeout, the callback gets null and the answer, or a TimeoutException.
-$socket->timeout(5000)->emit('question', 'colour?', function (?Throwable $error, mixed $answer): void {});
-
-// The client asks; the last argument answers it.
-$socket->on('sum', function (array $numbers, Closure $ack): void {
-    $ack(array_sum($numbers));
-});
-```
-
-A broadcast takes an acknowledgement callback after `timeout()`. The callback gets one answer per socket it reached, in the order they arrive: the first argument of each client's acknowledgement.
-
-```php
-$io->to('room1')->timeout(5000)->emit('vote', function (?Throwable $error, array $answers): void {
-    // $error is null once every socket answered,
-    // or a TimeoutException, with the answers that arrived in time.
-});
-```
-
-- Without `timeout()`, passing a `Closure` throws, since a socket that never answers would keep the callback waiting forever.
-- With no socket to reach, the callback runs at once with `[]`.
-- With `volatile`, a socket skipped because its transport was busy still counts, so the wait ends with the timeout.
-- It works within one process: `ChannelAdapter` and `RedisAdapter` throw.
-
-### Broadcasting: `BroadcastOperator`
-
-`to()`, `in()`, `except()` and `volatile` return an immutable operator:
-
-```php
-$io->emit('news', $data);                         // every socket of "/"
-$io->to('room1')->to('room2')->emit('news');      // sockets in either room, once each
-$io->except('muted')->emit('news');               // everyone but the sockets in "muted"
-$io->of('/admin')->to($socketId)->emit('ping');   // one socket, by its id
-$socket->broadcast->emit('joined', $socket->id);  // everyone but this socket
-$socket->to('room1')->emit('typing');             // the room, but not this socket
-$io->volatile->emit('position', $x, $y);          // skipped where the transport is busy
-```
-
-`compress()` exists for compatibility and has no effect: the server doesn't compress.
-
-### Errors
-
-- A middleware refuses a connection with `$next(new ConnectionError($message, $data))`: the client's `connect_error` gets `message` and `data`.
-- A client packet that breaks the protocol closes its connection.
-- An exception from your listeners closes the connection it came from and is logged with `Worker::log`; the worker keeps running.
-
-## Data: JSON and binary
-
-- JSON objects arrive as PHP associative arrays. PHP can't tell `{}` from `[]`, so send an empty object as `new stdClass()`.
-- Binary data arrives as `Marcolin\SocketIO\Binary`, wherever it is in the data. Wrap bytes in `new Binary($bytes)` to send them; the client gets a `Buffer` or an `ArrayBuffer`.
-- Strings must be valid UTF-8; for other bytes, use `Binary`.
-
-## TLS
-
-Create the worker with the certificate, mark it `ssl`, and attach it:
-
-```php
-$worker = new Worker('tcp://0.0.0.0:443', [
-    'ssl' => ['local_cert' => '/path/to/cert.pem', 'local_pk' => '/path/to/key.pem', 'verify_peer' => false],
-]);
-$worker->transport = 'ssl';
-$io->attach($worker);
-```
-
-## Several processes
-
-Broadcasts reach the other processes through an adapter, set in `workerStart` on every process:
-
-- `ChannelAdapter`, on a [workerman/channel](https://github.com/walkor/channel) server: nothing else to run, good for one machine.
-- `RedisAdapter`, on a Redis server: for several machines, or when you already run Redis. It needs no extra package.
-
-Both work the same way: each broadcast is encoded once and published once, and every process delivers it to its own sockets.
-
-### workerman/channel
-
-```sh
-composer require workerman/channel
-```
-
-```php
-<?php
-
-use Channel\Server as ChannelServer;
-use Marcolin\SocketIO\Adapter\ChannelAdapter;
-use Marcolin\SocketIO\SocketIO;
-use Workerman\Worker;
-
-require __DIR__ . '/vendor/autoload.php';
-
-// The channel server, in a process of its own.
-new ChannelServer('127.0.0.1', 2206);
-
-$io = new SocketIO(options: ['cors' => ['origin' => ['https://example.com']]]);
-
-// The adapter connects to the channel server, which needs each process's event loop.
-$io->on('workerStart', function () use ($io): void {
-    $io->adapter(ChannelAdapter::factory('127.0.0.1', 2206));
-});
-
-$worker = new Worker('tcp://0.0.0.0:3000');
-$worker->count = 4;
-$worker->reusePort = true;
-$io->attach($worker);
-
-Worker::runAll();
-```
-
-### Redis
-
-```php
-<?php
-
-use Marcolin\SocketIO\Adapter\RedisAdapter;
-use Marcolin\SocketIO\SocketIO;
-use Workerman\Worker;
-
-require __DIR__ . '/vendor/autoload.php';
-
-$io = new SocketIO(options: ['cors' => ['origin' => ['https://example.com']]]);
-
-// The adapter connects to Redis, which needs each process's event loop. It reconnects by itself.
-$io->on('workerStart', function () use ($io): void {
-    $io->adapter(RedisAdapter::factory('redis://:password@10.0.0.5:6379'));
-});
-
-$worker = new Worker('tcp://0.0.0.0:3000');
-$worker->count = 4;
-$worker->reusePort = true;
-$io->attach($worker);
-
-Worker::runAll();
-```
-
-Every argument is optional:
-
-```php
-RedisAdapter::factory(
-    url: 'redis://127.0.0.1:6379',   // redis://[[user]:password@]host[:port]
-    key: 'socket.io',                // the first part of every channel name
-    onError: null,                   // fn (Throwable $error): connection failures and Redis errors
-);
-```
-
-- The URL defaults to `redis://127.0.0.1:6379`. Reserved characters in the user or password are percent-encoded; a database number is accepted and ignored, as publish and subscribe channels are shared by every database. TLS (`rediss://`) is not supported yet.
-- Servers of different apps sharing one Redis need different `key`s, or they get each other's broadcasts.
-- When Redis is unreachable, the adapter retries every second and reports the failure once to `onError` (`Worker::log` by default). Up to 1,000 publishes wait for the connection; messages published while a process was disconnected are lost, as always with Redis pub/sub.
-
-### Limits
-
-- Clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee. Setting `'transports' => ['websocket']` on the server too refuses polling outright. Across machines, a load balancer with sticky sessions lets polling work.
-- Only broadcasts cross processes (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the current process.
-- Broadcasts with an acknowledgement (`timeout()->emit(..., $callback)`) don't cross processes yet: both adapters throw.
 
 ## Examples
 
@@ -414,58 +90,14 @@ Each one runs with `php examples/<name>/start.php start`; then open http://local
 | [multi-process](examples/multi-process) | four processes and `ChannelAdapter` |
 | [redis](examples/redis) | four processes and `RedisAdapter`; it needs a Redis server |
 
-## Migrating from phpsocket.io
+## Documentation
 
-Moving from [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io): see [the migration guide](docs/migrating-from-phpsocket.io.md). Your clients move to `socket.io-client` v3 or v4.
-
-## Status
-
-Changes are listed in [CHANGELOG.md](CHANGELOG.md).
-
-| Step | State |
-|---|---|
-| Engine.IO packet parser | Done |
-| Engine.IO session: heartbeat, write buffer, polling and WebSocket transports, upgrade | Done |
-| Engine.IO server: request validation, sessions, CORS | Done |
-| Workerman integration: one port for HTTP and WebSocket, timers, connection adapters | Done |
-| The official Engine.IO v4 test suite running in CI (25 of 25 passing) | Done |
-| Socket.IO v5 parser: encoder, decoder, binary attachments | Done |
-| Socket.IO server: connection, namespaces, middlewares, events, acks, rooms | Done |
-| Broadcast to rooms and namespaces | Done |
-| The official Socket.IO v5 test suite running in CI (32 of 32 passing) | Done |
-| Integration tests with the official `socket.io-client` 4.8.4: polling, WebSocket, upgrade, namespaces, rooms, acks, binary | Done |
-| Cross-process broadcast: `ChannelAdapter` on `workerman/channel` | Done |
-| Cross-process broadcast on Redis: `RedisAdapter`, with its own client | Done |
-| Multi-process integration tests and a scale check (200 clients, 4,000 deliveries) | Done |
-| Examples: chat, rooms, acknowledgements, namespaces, binary data, several processes | Done |
-| Complete README with an API reference, and a migration guide from phpsocket.io | Done |
-| First release, 0.1.0 | Done |
-
-## Development
-
-Everything runs in Docker; PHP and Composer are not needed on the host.
-
-```sh
-docker compose run --rm php composer install
-docker compose run --rm php vendor/bin/phpunit
-docker compose run --rm php composer lint      # phpcs (PSR-12) and PHPStan (level max)
-tests/Compliance/engine-io.sh                  # the official Engine.IO v4 test suite
-tests/Compliance/socket-io.sh                  # the official Socket.IO v5 test suite
-tests/Integration/run.sh                       # the official socket.io-client against this server
-tests/Integration/run.sh multi-process         # the same over two processes and a channel server
-tests/Integration/run.sh multi-process-redis   # the same two processes, joined by Redis
-tests/Integration/run.sh examples              # every example, each against its test
-```
-
-### Secret scanning
-
-[gitleaks](https://github.com/gitleaks/gitleaks) runs in Docker and blocks commits that add secrets. Enable the hook once per clone:
-
-```sh
-git config core.hooksPath .githooks
-```
-
-Docker must be running to commit. CI also scans the whole history on every pull request.
+- [Configuration](docs/configuration.md): server options, CORS and cookies, refusing connections, TLS.
+- [API reference](docs/api.md): `SocketIO`, namespaces, sockets, acknowledgements, broadcasting, JSON and binary data.
+- [Several processes](docs/multiple-processes.md): `ChannelAdapter` and `RedisAdapter`.
+- [Migrating from phpsocket.io](docs/migrating-from-phpsocket.io.md): moving an app and its clients.
+- [Development](docs/development.md): tests, linters and the compliance suites, all in Docker.
+- [Changelog](CHANGELOG.md).
 
 ## License
 
