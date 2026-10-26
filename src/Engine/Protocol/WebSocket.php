@@ -36,12 +36,18 @@ final class WebSocket extends WorkermanWebSocket
     }
 
     /**
-     * Sends one message as a text or a binary frame.
+     * Sends one message as a text or a binary frame, deflated when $compress, which needs permessage-deflate
+     * accepted in the handshake.
      */
-    public static function send(TcpConnection $connection, string $data, bool $binary): void
+    public static function send(TcpConnection $connection, string $data, bool $binary, bool $compress = false): void
     {
-        // Workerman picks the frame type from this property; it is only touched here.
-        $connection->websocketType = $binary ? self::BINARY_TYPE_ARRAYBUFFER : self::BINARY_TYPE_BLOB;
+        // Workerman picks the frame type, and whether to deflate it, from this property; it is only touched here.
+        $connection->websocketType = match (true) {
+            $binary && $compress => self::BINARY_TYPE_ARRAYBUFFER_DEFLATE,
+            $binary => self::BINARY_TYPE_ARRAYBUFFER,
+            $compress => self::BINARY_TYPE_BLOB_DEFLATE,
+            default => self::BINARY_TYPE_BLOB,
+        };
         $connection->send($data);
         $connection->websocketType = self::BINARY_TYPE_BLOB;
     }

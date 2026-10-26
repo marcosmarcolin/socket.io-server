@@ -82,6 +82,20 @@ describe("http compression", () => {
     assert.equal(plain.body, `42["big","${"x".repeat(4000)}"]`);
   });
 
+  test("big messages go deflated both ways over WebSocket", TIMEOUT, async () => {
+    const socket = await connected("websocket");
+    const text = "é".repeat(30000);
+    // Node's ws offers the extension by default, so this connection negotiated it.
+    assert.match(await socket.emitWithAck("ws-extensions"), /^permessage-deflate/);
+
+    // The client deflates its frame and the server inflates it; the answer goes back deflated.
+    assert.equal(await socket.emitWithAck("echo", text), text);
+
+    const big = next(socket, "big");
+    socket.emit("big", 100000, true);
+    assert.equal((await big)[0], "x".repeat(100000));
+  });
+
   test("the official client reads compressed answers over polling", TIMEOUT, async () => {
     const socket = await connected("polling");
 
@@ -116,6 +130,7 @@ describe("engine events", () => {
           Connection: "Upgrade",
           Upgrade: "websocket",
           "Sec-WebSocket-Version": "13",
+          "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
           // A fresh nonce, as RFC 6455 asks.
           "Sec-WebSocket-Key": randomBytes(16).toString("base64"),
         },
@@ -130,6 +145,7 @@ describe("engine events", () => {
     });
 
     assert.equal(response.statusCode, 101);
+    assert.equal(response.headers["sec-websocket-extensions"], "permessage-deflate");
     assert.deepEqual(response.headers["set-cookie"], ["io-test=1; Path=/"]);
     assert.equal(response.headers["x-engine"], "php");
   });

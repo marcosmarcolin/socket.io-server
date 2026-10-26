@@ -26,9 +26,9 @@ final class WorkermanWebSocketConnection implements WebSocketConnection
     {
     }
 
-    public function send(string $data, bool $binary): void
+    public function send(string $data, bool $binary, bool $compress = false): void
     {
-        WebSocket::send($this->connection, $data, $binary);
+        WebSocket::send($this->connection, $data, $binary, $compress);
     }
 
     /**

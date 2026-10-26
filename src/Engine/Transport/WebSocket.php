@@ -13,8 +13,14 @@ use Marcolin\SocketIO\Engine\Parser;
  */
 final class WebSocket extends Transport
 {
-    public function __construct(private readonly WebSocketConnection $connection)
-    {
+    /**
+     * @param int|null $deflateThreshold deflate messages of at least this many bytes, when the connection
+     *        negotiated permessage-deflate; null never does
+     */
+    public function __construct(
+        private readonly WebSocketConnection $connection,
+        private readonly ?int $deflateThreshold = null,
+    ) {
         $connection->onMessage(function (string $data, bool $binary): void {
             try {
                 $packet = Parser::decodePacket($data, $binary);
@@ -39,7 +45,11 @@ final class WebSocket extends Transport
     public function send(array $packets): void
     {
         foreach ($packets as $packet) {
-            $this->connection->send(Parser::encodePacket($packet), $packet->binary);
+            $data = Parser::encodePacket($packet);
+            $compress = $this->deflateThreshold !== null
+                && $packet->compress
+                && strlen($data) >= $this->deflateThreshold;
+            $this->connection->send($data, $packet->binary, $compress);
         }
         $this->dispatch('drain');
     }

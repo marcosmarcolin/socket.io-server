@@ -143,7 +143,8 @@ final class Server extends Emitter
             return;
         }
 
-        $transport = new WebSocket($connection);
+        $deflate = $this->webSocketExtension($request) !== null ? $this->options->perMessageDeflate : null;
+        $transport = new WebSocket($connection, $deflate);
         $sid = $request->query('sid');
         if ($sid !== null) {
             $this->sessions[$sid]->maybeUpgrade($transport);
@@ -152,6 +153,41 @@ final class Server extends Emitter
         }
 
         $this->dispatch('connection', $this->open($transport, $request));
+    }
+
+    /**
+     * The Sec-WebSocket-Extensions value of the 101: permessage-deflate when the option is on and the client
+     * offers it with parameters the server can honor, or null.
+     *
+     * The deflate context is kept across messages with a 15-bit window, so offers that ask the server to reset
+     * it (server_no_context_takeover) or to use a smaller window are declined, as RFC 7692 allows.
+     */
+    public function webSocketExtension(Request $request): ?string
+    {
+        if ($this->options->perMessageDeflate === null) {
+            return null;
+        }
+        foreach (explode(',', $request->header('Sec-WebSocket-Extensions') ?? '') as $offer) {
+            $parameters = array_map('trim', explode(';', $offer));
+            if (strtolower((string) array_shift($parameters)) !== 'permessage-deflate') {
+                continue;
+            }
+            $acceptable = true;
+            foreach ($parameters as $parameter) {
+                $pair = explode('=', $parameter, 2);
+                $value = trim($pair[1] ?? '', " \t\"");
+                $acceptable = $acceptable && match (strtolower(trim($pair[0]))) {
+                    'client_max_window_bits', 'client_no_context_takeover' => true,
+                    'server_max_window_bits' => $value === '15',
+                    default => false,
+                };
+            }
+            if ($acceptable) {
+                return 'permessage-deflate';
+            }
+        }
+
+        return null;
     }
 
     public function session(string $sid): ?Socket
