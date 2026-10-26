@@ -1,7 +1,5 @@
 # Several processes
 
-**English** · [Português (Brasil)](multiple-processes.pt-BR.md)
-
 Broadcasts and the socket helpers reach the other processes through an adapter, set in `workerStart` on every process:
 
 - `ChannelAdapter`, on a [workerman/channel](https://github.com/walkor/channel) server: nothing else to run, good for one machine.

@@ -1,7 +1,5 @@
 # Migrating from phpsocket.io
 
-**English** · [Português (Brasil)](migrating-from-phpsocket.io.pt-BR.md)
-
 For applications on [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io) 2.x or 3.0. The server-side API keeps phpsocket.io's shape, so most code moves with small edits. The real change is on the client side.
 
 ## 1. Plan the client switch

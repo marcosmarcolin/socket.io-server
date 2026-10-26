@@ -1,7 +1,5 @@
 # Performance and limits
 
-**English** · [Português (Brasil)](performance.pt-BR.md)
-
 How much one process holds, what it needs to get there, and how to measure it on your own machine.
 
 ## What a process needs

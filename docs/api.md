@@ -1,7 +1,5 @@
 # API reference
 
-**English** · [Português (Brasil)](api.pt-BR.md)
-
 ## `SocketIO`
 
 | | |
