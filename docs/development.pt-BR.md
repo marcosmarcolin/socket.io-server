@@ -14,6 +14,7 @@ tests/Integration/run.sh                       # o socket.io-client oficial cont
 tests/Integration/run.sh multi-process         # o mesmo com dois processos e um servidor de canal
 tests/Integration/run.sh multi-process-redis   # os mesmos dois processos, ligados pelo Redis
 tests/Integration/run.sh examples              # todos os exemplos, cada um contra o seu teste
+tests/Load/run.sh                              # o teste de carga; veja docs/performance.pt-BR.md
 ```
 
 ## Varredura de segredos

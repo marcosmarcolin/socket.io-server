@@ -20,12 +20,23 @@ Ele fala os protocolos atuais, Engine.IO v4 e Socket.IO v5, então navegadores e
 - Vários processos e máquinas, pelo [workerman/channel](https://github.com/walkor/channel) ou pelo Redis.
 - Um `Emitter` que envia para os clientes a partir de qualquer código PHP, como um request do PHP-FPM.
 - CORS com cookies, um gancho para recusar conexões antes do handshake, e TLS.
+- Compressão das respostas de polling e das mensagens WebSocket, e um log de depuração.
+- Cerca de 30 KB por conexão: 10.000 clientes WebSocket num processo ocupam 300 MB (veja [Desempenho e limites](docs/performance.pt-BR.md)).
 - Uma API no formato da do [phpsocket.io](https://github.com/walkor/phpsocket.io), para facilitar a migração.
+
+## Compatibilidade
+
+| | |
+|---|---|
+| Protocolos | Engine.IO v4 e Socket.IO v5 |
+| Clientes | `socket.io-client` v3 e v4; o CI roda o 4.8.4 em HTTP long-polling, WebSocket e no upgrade. Outros clientes desses protocolos, como os oficiais de Java e Swift, devem funcionar, mas não são testados aqui. |
+| Conformidade | as suítes oficiais de teste do [Engine.IO](https://github.com/socketio/socket.io/tree/main/docs/engine.io-protocol/v4-test-suite) (25 de 25) e do [Socket.IO](https://github.com/socketio/socket.io/tree/main/docs/socket.io-protocol/v5-test-suite) (32 de 32), em todo pull request |
+| Não suportado | `socket.io-client` 1.x e 2.x (Engine.IO v3): use o [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io) |
 
 ## Requisitos
 
 - PHP 8.1 ou mais recente, com a extensão `json`, e `pcntl` e `posix` para rodar o Workerman.
-- [Workerman](https://github.com/walkor/workerman) 5.2.
+- [Workerman](https://github.com/walkor/workerman) 5.2, e a extensão `event` para mais de cerca de 1.000 conexões por processo (veja [Desempenho e limites](docs/performance.pt-BR.md)).
 - No cliente: `socket.io-client` v3 ou v4. Para os clientes 1.x e 2.x, use o [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io).
 
 ## Instalação
@@ -101,6 +112,7 @@ Cada um roda com `php examples/<nome>/start.php start`; depois abra http://local
 - [Referência da API](docs/api.pt-BR.md): `SocketIO`, namespaces, sockets, acknowledgements, broadcast, dados JSON e binários.
 - [Vários processos](docs/multiple-processes.pt-BR.md): `ChannelAdapter`, `RedisAdapter` e o `Emitter`.
 - [Atrás de um proxy reverso](docs/reverse-proxy.pt-BR.md): nginx e HAProxy, TLS e sticky sessions para o polling.
+- [Desempenho e limites](docs/performance.pt-BR.md): quanto um processo aguenta, a extensão `event`, e o teste de carga.
 - [Migrando do phpsocket.io](docs/migrating-from-phpsocket.io.pt-BR.md): como mover uma aplicação e os seus clientes.
 - [Desenvolvimento](docs/development.pt-BR.md): testes, linters e as suítes de conformidade, tudo no Docker.
 - [Changelog](CHANGELOG.md), em inglês.

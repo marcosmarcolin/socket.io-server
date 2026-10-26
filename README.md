@@ -20,12 +20,23 @@ It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and 
 - Several processes and machines, through [workerman/channel](https://github.com/walkor/channel) or Redis.
 - An `Emitter` that sends to the clients from any PHP code, such as a PHP-FPM request.
 - CORS with cookies, a hook to refuse connections before the handshake, and TLS.
+- Compression of polling answers and WebSocket messages, and a debug log.
+- About 30 KB per connection: 10,000 WebSocket clients in one process take 300 MB (see [Performance and limits](docs/performance.md)).
 - An API shaped like [phpsocket.io](https://github.com/walkor/phpsocket.io)'s, to ease migration.
+
+## Compatibility
+
+| | |
+|---|---|
+| Protocols | Engine.IO v4 and Socket.IO v5 |
+| Clients | `socket.io-client` v3 and v4; CI runs 4.8.4 over HTTP long-polling, WebSocket and the upgrade. Other clients of these protocols, such as the official Java and Swift ones, should work, but aren't tested here. |
+| Conformance | the official [Engine.IO](https://github.com/socketio/socket.io/tree/main/docs/engine.io-protocol/v4-test-suite) (25 of 25) and [Socket.IO](https://github.com/socketio/socket.io/tree/main/docs/socket.io-protocol/v5-test-suite) (32 of 32) test suites, on every pull request |
+| Not supported | `socket.io-client` 1.x and 2.x (Engine.IO v3): use [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io) |
 
 ## Requirements
 
 - PHP 8.1 or later, with the `json` extension, and `pcntl` and `posix` to run Workerman.
-- [Workerman](https://github.com/walkor/workerman) 5.2.
+- [Workerman](https://github.com/walkor/workerman) 5.2, and the `event` extension for more than about 1,000 connections per process (see [Performance and limits](docs/performance.md)).
 - On the client: `socket.io-client` v3 or v4. For the 1.x and 2.x clients, use [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io).
 
 ## Installation
@@ -101,6 +112,7 @@ Each one runs with `php examples/<name>/start.php start`; then open http://local
 - [API reference](docs/api.md): `SocketIO`, namespaces, sockets, acknowledgements, broadcasting, JSON and binary data.
 - [Several processes](docs/multiple-processes.md): `ChannelAdapter`, `RedisAdapter`, and the `Emitter`.
 - [Behind a reverse proxy](docs/reverse-proxy.md): nginx and HAProxy, TLS, and sticky sessions for polling.
+- [Performance and limits](docs/performance.md): what a process holds, the `event` extension, and the load test.
 - [Migrating from phpsocket.io](docs/migrating-from-phpsocket.io.md): moving an app and its clients.
 - [Development](docs/development.md): tests, linters and the compliance suites, all in Docker.
 - [Changelog](CHANGELOG.md).

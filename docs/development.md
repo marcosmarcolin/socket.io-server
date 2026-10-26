@@ -14,6 +14,7 @@ tests/Integration/run.sh                       # the official socket.io-client a
 tests/Integration/run.sh multi-process         # the same over two processes and a channel server
 tests/Integration/run.sh multi-process-redis   # the same two processes, joined by Redis
 tests/Integration/run.sh examples              # every example, each against its test
+tests/Load/run.sh                              # the load test; see docs/performance.md
 ```
 
 ## Secret scanning

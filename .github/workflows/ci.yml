@@ -73,6 +73,16 @@ jobs:
 
       - run: tests/Integration/run.sh multi-process-redis
 
+  load:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: docker compose run --rm php composer install --no-interaction
+
+      # A small run, so the load test keeps working; the numbers come from local runs.
+      - run: CLIENTS=200 ROUNDS=5 tests/Load/run.sh
+
   examples:
     runs-on: ubuntu-latest
     steps:
