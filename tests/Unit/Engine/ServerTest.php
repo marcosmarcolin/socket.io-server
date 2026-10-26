@@ -237,6 +237,23 @@ final class ServerTest extends TestCase
         self::assertCount(1, $closes);
     }
 
+    public function testALatePingDoesNotPutOffTheDeadline(): void
+    {
+        $this->handshake();
+        $closes = [];
+        $this->connections[0]->on('close', static function (CloseReason $reason) use (&$closes): void {
+            $closes[] = $reason;
+        });
+
+        // The ping's timer fires 5 ms late, as Swoole's timers can.
+        $this->scheduler->elapse(self::PING_INTERVAL + 5);
+        $this->scheduler->advance(0);
+        $this->scheduler->elapse(self::PING_TIMEOUT - 5);
+
+        $this->assertRejected($this->poll(), ServerError::UnknownSid);
+        self::assertSame([CloseReason::PingTimeout], $closes);
+    }
+
     public function testAPollJustBeforeTheDeadlineStillGetsThePing(): void
     {
         $this->handshake();

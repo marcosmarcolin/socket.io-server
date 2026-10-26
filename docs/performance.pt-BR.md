@@ -23,10 +23,10 @@ Um processo, clientes WebSocket do `socket.io-client` oficial, medidos com `test
 
 | Clientes | Event loop | Memória por conexão | RSS total | Conectar todos | Ecos por segundo (p50 / p99) | Entregas de broadcast por segundo |
 |---|---|---|---|---|---|---|
-| 900 | `select()` | 22 KB | 33 MB | 0,25 s | 56.000 (14 / 44 ms) | 324.000 |
-| 1.000 | `event` | 23 KB | 38 MB | 0,25 s | 59.000 (15 / 30 ms) | 346.000 |
-| 5.000 | `event` | 24 KB | 129 MB | 0,71 s | 74.000 (61 / 116 ms) | 234.000 |
-| 10.000 | `event` | 24 KB | 247 MB | 1,29 s | 67.000 (141 / 215 ms) | 206.000 |
+| 900 | `select()` | 22 KB | 36 MB | 0,22 s | 54.000 (14 / 34 ms) | 343.000 |
+| 1.000 | `event` | 23 KB | 40 MB | 0,21 s | 64.000 (14 / 27 ms) | 369.000 |
+| 5.000 | `event` | 24 KB | 133 MB | 0,88 s | 70.000 (63 / 125 ms) | 230.000 |
+| 10.000 | `event` | 24 KB | 249 MB | 1,24 s | 65.000 (135 / 222 ms) | 200.000 |
 
 - **A memória** cresce de forma linear: cerca de 24 KB por conexão, tanto no heap do PHP quanto na memória residente do processo. Disso, cerca de 14 KB são objetos deste pacote (a sessão Engine.IO, a requisição, o client e o socket) e o resto é a conexão do Workerman e os seus buffers.
 - **Os ecos** são acknowledgements: cada cliente envia 20, um após o outro, todos os clientes ao mesmo tempo. A latência é sob essa carga total, não a de um servidor ocioso.
@@ -38,22 +38,46 @@ O mesmo teste de carga contra o servidor oficial `socket.io` 4.8.4 (`tests/Load/
 
 | Clientes | Servidor | RSS total | Ecos por segundo (p50 / p99) | Entregas de broadcast por segundo |
 |---|---|---|---|---|
-| 1.000 | Node.js | 100 MB | 62.000 (15 / 39 ms) | 518.000 |
-| 1.000 | este servidor | 38 MB | 59.000 (15 / 30 ms) | 346.000 |
-| 5.000 | Node.js | 201 MB | 89.000 (50 / 106 ms) | 572.000 |
-| 5.000 | este servidor | 129 MB | 74.000 (61 / 116 ms) | 234.000 |
-| 10.000 | Node.js | 288 MB | 91.000 (105 / 139 ms) | 520.000 |
-| 10.000 | este servidor | 247 MB | 67.000 (141 / 215 ms) | 206.000 |
+| 1.000 | Node.js | 99 MB | 61.000 (14 / 30 ms) | 493.000 |
+| 1.000 | este servidor | 40 MB | 64.000 (14 / 27 ms) | 369.000 |
+| 5.000 | Node.js | 194 MB | 83.000 (52 / 106 ms) | 502.000 |
+| 5.000 | este servidor | 133 MB | 70.000 (63 / 125 ms) | 230.000 |
+| 10.000 | Node.js | 289 MB | 91.000 (106 / 156 ms) | 475.000 |
+| 10.000 | este servidor | 249 MB | 65.000 (135 / 222 ms) | 200.000 |
 
 - **A memória é menor em todos os tamanhos.** Este servidor começa menor (cerca de 13 MB contra os 64 MB do Node) e fica abaixo dele: 14% menos com 10.000 clientes.
-- **Os acknowledgements empatam** com 1.000 clientes; o Node responde cerca de 20% mais por segundo com 5.000 e 35% mais com 10.000.
-- **No broadcast o Node lidera**, de 1,5 vez com 1.000 clientes até 2,5 vezes com 10.000. O `emit()` do Node retorna assim que os frames entram na fila, e o event loop dele os escreve depois; aqui cada frame é escrito no seu socket durante o emit, uma chamada de sistema por cliente.
+- **Os acknowledgements empatam** com 1.000 clientes; o Node responde cerca de 20% mais por segundo com 5.000 e 40% mais com 10.000.
+- **No broadcast o Node lidera**, de 1,3 vez com 1.000 clientes até 2,4 vezes com 10.000. O `emit()` do Node retorna assim que os frames entram na fila, e o event loop dele os escreve depois; aqui cada frame é escrito no seu socket durante o emit, uma chamada de sistema por cliente.
 
 As rodadas variam até cerca de 10% de uma sessão para outra, nos dois servidores, então compare números da mesma sessão.
 
 ```sh
 SERVER=node CLIENTS=10000 tests/Load/run.sh
 ```
+
+## No event loop do Swoole
+
+O Workerman 5 também pode rodar no event loop da extensão [Swoole](https://github.com/swoole/swoole-src). Este servidor funciona nele: as suítes oficiais e os testes de integração também passam nele, no CI. Escolha-o antes do `Worker::runAll()`:
+
+```php
+use Workerman\Events\Swoole;
+use Workerman\Worker;
+
+Worker::$eventLoopClass = Swoole::class;
+```
+
+A extensão se instala com `pecl install swoole`; o Swoole 6.2 exige PHP 8.2, e o 6.1 é a última linha para PHP 8.1. O mesmo teste de carga, na mesma sessão das tabelas acima:
+
+| Clientes | Event loop | RSS total | Ecos por segundo (p50 / p99) | Entregas de broadcast por segundo |
+|---|---|---|---|---|
+| 1.000 | `event` | 40 MB | 64.000 (14 / 27 ms) | 369.000 |
+| 1.000 | Swoole | 44 MB | 58.000 (15 / 34 ms) | 269.000 |
+| 5.000 | `event` | 133 MB | 70.000 (63 / 125 ms) | 230.000 |
+| 5.000 | Swoole | 141 MB | 65.000 (71 / 127 ms) | 230.000 |
+| 10.000 | `event` | 249 MB | 65.000 (135 / 222 ms) | 200.000 |
+| 10.000 | Swoole | 262 MB | 58.000 (170 / 231 ms) | 204.000 |
+
+**Ele não é mais rápido que o `event`:** cerca de 10% menos ecos por segundo, os mesmos broadcasts a partir de 5.000 clientes, e cerca de 5% mais memória. O Workerman usa só o loop e os timers do Swoole: as conexões, o HTTP e o WebSocket continuam sendo o código PHP do Workerman, e cada callback roda numa corrotina nova. A velocidade do próprio Swoole vem do servidor dele escrito em C, que este pacote não usa. Prefira o `event`, a não ser que a aplicação já rode no Swoole pelas corrotinas.
 
 ## Para onde vão o tempo e a memória
 
@@ -70,7 +94,7 @@ Todos os números acima vêm de uma máquina, com o servidor e os clientes no Do
 |---|---|
 | Máquina | Mac16,7 (MacBook Pro), Apple M4 Pro, 14 núcleos, 24 GB de memória, macOS 27.2 |
 | Docker | Docker Desktop, engine 29.9.2; VM Linux com 14 CPUs e 8 GB, kernel 7.0.14 |
-| Servidor PHP | PHP 8.1.34 (a imagem do projeto), Workerman 5.2.3, `event` 3.1.4 no `LOOP=event`, `memory_limit=1G` |
+| Servidor PHP | PHP 8.1.34, Workerman 5.2.3, `event` 3.1.4 e Swoole 6.1.11 (`tests/Load/Dockerfile`), `memory_limit=1G` |
 | Servidor Node.js | Node.js 24.21.0, `socket.io` 4.8.4 |
 | Clientes | Node.js 24.21.0, `socket.io-client` 4.8.4, só WebSocket, num contêiner próprio que compartilha a rede do servidor |
 
@@ -81,6 +105,7 @@ Os seus números vão ser outros; a forma, não.
 ```sh
 tests/Load/run.sh                              # 500 clientes no select()
 LOOP=event CLIENTS=10000 tests/Load/run.sh     # a extensão event, 10.000 clientes
+LOOP=swoole CLIENTS=10000 tests/Load/run.sh    # o event loop do Swoole
 ```
 
 `CLIENTS`, `ROUNDS` (ecos por cliente), `MESSAGES` (broadcasts) e `SIZE` (bytes por broadcast) ajustam a rodada. Cada rodada imprime uma linha de JSON e um resumo.

@@ -36,7 +36,7 @@ Ele fala os protocolos atuais, Engine.IO v4 e Socket.IO v5, então navegadores e
 ## Requisitos
 
 - PHP 8.1 ou mais recente, com a extensão `json`, e `pcntl` e `posix` para rodar o Workerman.
-- [Workerman](https://github.com/walkor/workerman) 5.2, e a extensão `event` para mais de cerca de 1.000 conexões por processo (veja [Desempenho e limites](docs/performance.pt-BR.md)).
+- [Workerman](https://github.com/walkor/workerman) 5.2, e a extensão `event` para mais de cerca de 1.000 conexões por processo; o event loop do Swoole também funciona (veja [Desempenho e limites](docs/performance.pt-BR.md)).
 - No cliente: `socket.io-client` v3 ou v4. Para os clientes 1.x e 2.x, use o [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io).
 
 ## Instalação

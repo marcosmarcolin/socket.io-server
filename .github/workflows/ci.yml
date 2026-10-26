@@ -83,6 +83,21 @@ jobs:
       # A small run, so the load test keeps working; the numbers come from local runs.
       - run: CLIENTS=200 ROUNDS=5 tests/Load/run.sh
 
+  swoole:
+    runs-on: ubuntu-latest
+    env:
+      LOOP: swoole
+    steps:
+      - uses: actions/checkout@v7
+
+      - run: docker compose run --rm php composer install --no-interaction
+
+      # The same suites and integration tests, on Workerman's Swoole event loop (tests/Load/Dockerfile).
+      - run: tests/Compliance/engine-io.sh
+      - run: tests/Compliance/socket-io.sh
+      - run: tests/Integration/run.sh
+      - run: tests/Integration/run.sh multi-process
+
   examples:
     runs-on: ubuntu-latest
     steps:

@@ -48,7 +48,8 @@ final class FakeScheduler implements Scheduler
         while (($id = $this->nextDue($target)) !== null) {
             $timer = $this->timers[$id];
             unset($this->timers[$id]);
-            $this->now = $timer['due'];
+            // A timer that fires late, after elapse(), runs at the current time.
+            $this->now = max($this->now, $timer['due']);
             ($timer['callback'])();
         }
         $this->now = $target;

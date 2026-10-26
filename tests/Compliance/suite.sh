@@ -1,6 +1,7 @@
 #!/bin/sh
 # Shared runner for the official compliance suites; sourced by engine-io.sh and socket-io.sh.
-# Everything runs in Docker: the server in the php service, the suite in Node.
+# Everything runs in Docker: the server in the php service (or on another event loop with LOOP, see
+# tests/php-server.sh), the suite in Node.
 #
 # The caller sets:
 #   SUITE_DIR     the suite's directory in socketio/socket.io
@@ -30,7 +31,8 @@ echo "$SUITE_FILES" | while read -r sum file; do
 done
 
 cd "$root"
-server=$(docker compose run -d --rm php php "$SERVER" start)
+. "$root/tests/php-server.sh"
+server=$(php_server "$SERVER" start)
 trap 'docker stop -t 2 "$server" >/dev/null 2>&1 || true' EXIT
 
 # The suites target localhost:3000, so Node shares the server container's network.

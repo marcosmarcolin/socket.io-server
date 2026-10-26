@@ -6,6 +6,7 @@
 #   tests/Integration/run.sh multi-process-redis  the same two processes, joined by a Redis server
 #   tests/Integration/run.sh example <name>   the example in examples/<name>
 #   tests/Integration/run.sh examples         every example, one after the other
+# LOOP=select|event|swoole runs the server on that Workerman event loop (tests/php-server.sh).
 set -eu
 
 if [ "${1:-}" = "examples" ]; then
@@ -37,8 +38,9 @@ REDIS_PASSWORD="integration"
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-server=$(docker compose run -d --rm -e ADAPTER="${redis:+redis}" \
-    -e REDIS_URL="redis://:$REDIS_PASSWORD@127.0.0.1:6379" php php "$server_script" start)
+. "$root/tests/php-server.sh"
+server=$(php_server -e ADAPTER="${redis:+redis}" -e REDIS_URL="redis://:$REDIS_PASSWORD@127.0.0.1:6379" \
+    "$server_script" start)
 redis_server=""
 trap 'docker stop -t 2 "$server" $redis_server >/dev/null 2>&1 || true' EXIT
 if [ -n "$redis" ]; then
