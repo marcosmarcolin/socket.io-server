@@ -15,7 +15,7 @@ Do lado do cliente, siga a [migração do Socket.IO de 2.x para 3.0](https://soc
 - `io()` conecta em `/` explicitamente: não existe mais conexão implícita ao namespace principal.
 - As credenciais vão na opção `auth`, e o servidor as lê em `$socket->handshake['auth']`, em vez de irem na query string.
 - Com vários processos no servidor, conecte com `transports: ['websocket']`.
-- **Cookies**: o cliente 2.x envia cookies entre origens por padrão, e o phpsocket.io aceita qualquer origem com credenciais. O cliente v3/v4 só os envia com `withCredentials: true`, e este servidor precisa de `'cors' => ['origin' => ..., 'credentials' => true]` com uma lista de origens ou um `Closure` (veja [Cookies entre origens](../README.pt-BR.md#cookies-entre-origens)). Sem os dois, um login por cookie para de funcionar sem nenhum erro aparente.
+- **Cookies**: o cliente 2.x envia cookies entre origens por padrão, e o phpsocket.io aceita qualquer origem com credenciais. O cliente v3/v4 só os envia com `withCredentials: true`, e este servidor precisa de `'cors' => ['origin' => ..., 'credentials' => true]` com uma lista de origens ou um `Closure` (veja [Cookies entre origens](configuration.pt-BR.md#cookies-entre-origens)). Sem os dois, um login por cookie para de funcionar sem nenhum erro aparente.
 
 ## 2. Requisitos e Composer
 
@@ -34,7 +34,7 @@ O `workerman/channel` continua sendo o jeito de rodar vários processos, e conti
 |---|---|
 | `use PHPSocketIO\SocketIO;` | `use Marcolin\SocketIO\SocketIO;` |
 | `new SocketIO(2026)` | igual |
-| `new SocketIO(2026, ['ssl' => [...]])`: o segundo argumento é o contexto do socket | o segundo argumento traz as [opções do servidor](../README.pt-BR.md#opções-do-servidor). Para TLS, crie o worker com o contexto, defina `$worker->transport = 'ssl'` e chame `$io->attach($worker)` ([TLS](../README.pt-BR.md#tls)) |
+| `new SocketIO(2026, ['ssl' => [...]])`: o segundo argumento é o contexto do socket | o segundo argumento traz as [opções do servidor](configuration.pt-BR.md#opções-do-servidor). Para TLS, crie o worker com o contexto, defina `$worker->transport = 'ssl'` e chame `$io->attach($worker)` ([TLS](configuration.pt-BR.md#tls)) |
 | `['host' => '::1']` | `$io->attach(new Worker('tcp://[::1]:2026'))` |
 | `['origins' => 'http://a.com:80']`, `$io->origins(...)` | `['cors' => ['origin' => ['http://a.com']]]`, mais `'credentials' => true` para cookies |
 | `['nsp' => MyNsp::class, 'socket' => MySocket::class]` | não suportado: as classes são finais. Use middlewares e `$socket->data` |

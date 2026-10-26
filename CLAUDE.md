@@ -39,7 +39,7 @@ A change is done only when all of these hold:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers (`tests/Compliance/socket-io-server.php`, run by `tests/Compliance/socket-io.sh`).
 4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh`, `tests/Integration/run.sh multi-process` and `tests/Integration/run.sh multi-process-redis`).
-5. **The docs are current:** both READMEs (with the API reference), the migration guide in `docs/`, CLAUDE.md and examples match the behavior, and `CHANGELOG.md` lists every user-visible change under `[Unreleased]`. Each example has a test with the official client (`tests/Integration/client/examples/`) that CI runs, so an example that stops working fails the build.
+5. **The docs are current:** both READMEs, the user guides in `docs/` (configuration, API reference, several processes, migration, development), CLAUDE.md and examples match the behavior, and `CHANGELOG.md` lists every user-visible change under `[Unreleased]`. Each example has a test with the official client (`tests/Integration/client/examples/`) that CI runs, so an example that stops working fails the build.
 
 ## Code rules
 
@@ -62,6 +62,7 @@ A change is done only when all of these hold:
 - No production dependencies besides Workerman. `workerman/channel` is optional (in `suggest`).
 - Everything in English: code, comments, docs, commits, PRs. The exceptions are the Brazilian Portuguese translations of the user documentation: `README.pt-BR.md` and `docs/*.pt-BR.md`.
 - **`CHANGELOG.md`** follows Keep a Changelog, in English only, like the commits it summarizes. A PR that changes behavior, the API or the requirements adds its line under `[Unreleased]`. A release renames that section to the version and date.
+- **The README stays short:** what the package is, features, requirements, installation, a quick start, the examples and links to `docs/`. Details go in the guides in `docs/`.
 - **User docs in two languages, always in sync.** `README.md` and `docs/*.md` (English) are the reference. Every change to one goes to its `.pt-BR.md` translation in the same PR, and neither has content the other lacks. Code blocks are identical in both, except the comments of shell commands.
 
 ## Verification
@@ -87,6 +88,22 @@ Both scripts share `tests/Compliance/suite.sh`, which downloads the suite at a p
 ## Examples
 
 `examples/<name>/` holds a `start.php` (Socket.IO on port 3000, its page on port 3001 through a plain Workerman HTTP worker) and an `index.html` that loads `socket.io-client` 4.8.4 from `cdn.socket.io` with its SRI hash. Examples are code: phpcs and PHPStan check them, they follow the code rules, and `tests/Integration/client/examples/<name>.test.js` checks each one. Run one with `tests/Integration/run.sh example <name>`.
+
+## Documentation
+
+User docs live in the README and in `docs/`, each in English (the reference) and Brazilian Portuguese (`.pt-BR.md`), updated together in the same PR as the change they describe:
+
+| File | Covers | Update it when |
+|---|---|---|
+| `README.md` | what the package is, features, requirements, installation, a short quick start, the examples table, links to `docs/` | a feature, requirement or example is added or removed; keep it short, details go to `docs/` |
+| `docs/configuration.md` | server options, CORS and cookies, `allowRequest`, TLS | an option or its behavior changes |
+| `docs/api.md` | `SocketIO`, `Nsp`, `Socket`, events and disconnect reasons, acknowledgements, broadcasting, errors, JSON and binary data | the public API or its behavior changes |
+| `docs/multiple-processes.md` | `ChannelAdapter`, `RedisAdapter`, what crosses processes and the limits | an adapter or cross-process behavior changes |
+| `docs/migrating-from-phpsocket.io.md` | moving an app and its clients from phpsocket.io | a change affects how phpsocket.io code maps to ours |
+| `docs/development.md` | the Docker commands, the test suites, secret scanning | a test command, suite or tool changes |
+| `CHANGELOG.md` | every user-visible change, English only | always, under `[Unreleased]` |
+
+Docs link to each other with relative paths and anchors; check them after moving or renaming a heading. A new guide goes in this table and in the README's Documentation list.
 
 ## Workflow
 
@@ -241,7 +258,7 @@ src/
   - With a list or a `Closure`, an allowed origin is echoed with `Vary: Origin`, and any other origin gets no `Access-Control-Allow-Origin`, so the browser blocks it. The `Closure` runs only when the request has an `Origin`, and only `true` allows.
   - `'*'` with `credentials` throws: browsers reject that pair, and the `cors` package would send it anyway.
   - The preflight answers 204 with `GET, POST, OPTIONS` and echoes `Access-Control-Request-Headers`. With CORS disabled, `OPTIONS` is an ordinary request and gets code 2.
-  - CORS doesn't cover WebSocket, in browsers or in the reference. The README shows the middleware that checks `Origin` on every transport.
+  - CORS doesn't cover WebSocket, in browsers or in the reference. `docs/configuration.md` shows the middleware that checks `Origin` on every transport.
 
 ### Socket.IO
 
@@ -372,7 +389,7 @@ Worker::runAll();
   - Messages are `serialize()`d, as workerman/channel does, and read back with `allowed_classes => false` and `max_depth`; a payload that isn't a serialized array is ignored, without warnings. Messages for a channel just unsubscribed are ignored.
   - **Reconnection:** a dropped or refused connection retries every second (`RedisConnection::RECONNECT_DELAY`, through the `Scheduler`). The subscriber subscribes every current channel again once ready. While not ready, a connection keeps up to 1,000 commands (`MAX_QUEUED`) and drops the rest; subscriptions aren't queued, since they are renewed on login. Publishes lost while disconnected are lost, as with any Redis pub/sub.
   - **Errors** go to `onError` as exceptions, never `echo`: a failure to connect once until the next login, a lost connection, a refused login, Redis error replies, a malformed reply (which also closes the connection), and exceptions thrown by listeners.
-- With several processes on the same port, clients must use `transports: ['websocket']`, because polling breaks across processes without sticky sessions. Document this in the README.
+- With several processes on the same port, clients must use `transports: ['websocket']`, because polling breaks across processes without sticky sessions. `docs/multiple-processes.md` says so.
 - **Multi-process tests** (`tests/Integration/multi-process-server.php`): two processes with `reusePort`, so the kernel spreads connections, plus a `Channel\Server`; or, with `ADAPTER=redis` (`run.sh multi-process-redis`), `RedisAdapter` on a pinned Redis image with a password, so the login is covered too. The `redis` example runs against the same Redis.
   - The tests first make sure clients landed on both processes, and that a broadcast crosses (retrying while the workers connect to the broker).
   - They cover emits, rooms, several rooms at once, `except` and `broadcast` across processes.
