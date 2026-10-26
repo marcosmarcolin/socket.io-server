@@ -62,6 +62,38 @@ abstract class Emitter
     }
 
     /**
+     * The events that have listeners, as the reference's EventEmitter::eventNames().
+     *
+     * @return list<string>
+     */
+    public function eventNames(): array
+    {
+        return array_map('strval', array_keys($this->listeners));
+    }
+
+    /**
+     * The same as off() with a listener, under the reference's name.
+     */
+    public function removeListener(string $event, Closure $listener): static
+    {
+        return $this->off($event, $listener);
+    }
+
+    /**
+     * Removes the event's listeners, or every listener without an event, under the reference's name.
+     */
+    public function removeAllListeners(?string $event = null): static
+    {
+        if ($event === null) {
+            $this->listeners = [];
+
+            return $this;
+        }
+
+        return $this->off($event);
+    }
+
+    /**
      * Calls the event's listeners in registration order. Exceptions from a listener propagate.
      *
      * @return bool whether the event had listeners

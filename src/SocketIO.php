@@ -9,7 +9,9 @@ use InvalidArgumentException;
 use LogicException;
 use Marcolin\SocketIO\Adapter\Adapter;
 use Marcolin\SocketIO\Adapter\InMemoryAdapter;
+use Marcolin\SocketIO\Engine\CloseReason;
 use Marcolin\SocketIO\Engine\RandomSessionIdGenerator;
+use Marcolin\SocketIO\Engine\Request as EngineRequest;
 use Marcolin\SocketIO\Engine\Scheduler;
 use Marcolin\SocketIO\Engine\Server;
 use Marcolin\SocketIO\Engine\ServerOptions;
@@ -26,7 +28,8 @@ use Workerman\Worker;
  * The Socket.IO server.
  *
  * Listeners belong to the main namespace, as $io->sockets->on() would, and so do the broadcast methods and
- * serverSideEmit(); only the server's own events, `workerStart` and `workerStop` (Worker), stay here.
+ * serverSideEmit(); only the server's own events, `workerStart` and `workerStop` (Worker), stay here. As in the
+ * reference, the main namespace emits `new_namespace` (Nsp) when another namespace is created.
  *
  * @property-read BroadcastOperator $volatile broadcasts that skip sockets whose transport is busy
  * @property-read BroadcastOperator $local broadcasts and socket helpers on the main namespace, for this process only
@@ -44,6 +47,8 @@ final class SocketIO extends Emitter
     /** Milliseconds a connection may wait before connecting to a namespace. */
     public readonly int $connectTimeout;
 
+    private readonly Logger $logger;
+
     private readonly Encoder $encoder;
 
     /** @var array<string, Nsp> */
@@ -59,7 +64,8 @@ final class SocketIO extends Emitter
 
     /**
      * @param int|null $port listens on this port, on all IPv4 interfaces; without it, call attach() with a worker
-     * @param array<string, mixed> $options connectTimeout, plus the Engine.IO options of ServerOptions::fromArray()
+     * @param array<string, mixed> $options connectTimeout, logger (a Closure(string $scope, string $message)), plus
+     *        the Engine.IO options of ServerOptions::fromArray()
      */
     public function __construct(
         ?int $port = null,
@@ -74,6 +80,12 @@ final class SocketIO extends Emitter
         }
         unset($options['connectTimeout']);
         $this->connectTimeout = $connectTimeout;
+        $logger = $options['logger'] ?? null;
+        if ($logger !== null && ! $logger instanceof Closure) {
+            throw new InvalidArgumentException('The "logger" option must be a Closure(string $scope, string $message)');
+        }
+        unset($options['logger']);
+        $this->logger = new Logger($logger);
 
         $this->engine = new Server(
             ServerOptions::fromArray($options),
@@ -88,6 +100,9 @@ final class SocketIO extends Emitter
         $this->engine->on('connection', function (EngineSocket $connection): void {
             $this->clients[$connection] = new Client($this, $connection);
         });
+        if ($this->logger->enabled()) {
+            $this->logEngine();
+        }
 
         if ($port !== null) {
             $this->attach(new Worker('tcp://0.0.0.0:' . $port));
@@ -157,17 +172,89 @@ final class SocketIO extends Emitter
             throw new InvalidArgumentException(sprintf('A namespace name can\'t contain a comma, got "%s"', $name));
         }
 
-        return $this->namespaces[$name] ??= new Nsp($this, $name);
+        $nsp = $this->namespaces[$name] ?? null;
+        if ($nsp === null) {
+            $nsp = $this->namespaces[$name] = new Nsp($this, $name);
+            // On the main namespace, as the reference does, so $io->on('new_namespace') gets it.
+            if ($name !== '/') {
+                $this->sockets->announce($nsp);
+            }
+        }
+
+        return $nsp;
+    }
+
+    /**
+     * The server's own events, which stay here; every other listener belongs to the main namespace.
+     */
+    private static function isOwnEvent(string $event): bool
+    {
+        return $event === 'workerStart' || $event === 'workerStop';
     }
 
     public function on(string $event, Closure $listener): static
     {
-        if ($event === 'workerStart' || $event === 'workerStop') {
+        if (self::isOwnEvent($event)) {
             return parent::on($event, $listener);
         }
         $this->sockets->on($event, $listener);
 
         return $this;
+    }
+
+    public function once(string $event, Closure $listener): static
+    {
+        if (self::isOwnEvent($event)) {
+            return parent::once($event, $listener);
+        }
+        $this->sockets->once($event, $listener);
+
+        return $this;
+    }
+
+    public function off(string $event, ?Closure $listener = null): static
+    {
+        if (self::isOwnEvent($event)) {
+            return parent::off($event, $listener);
+        }
+        $this->sockets->off($event, $listener);
+
+        return $this;
+    }
+
+    public function listeners(string $event): array
+    {
+        return self::isOwnEvent($event) ? parent::listeners($event) : $this->sockets->listeners($event);
+    }
+
+    /**
+     * The server's own events with listeners, then the main namespace's.
+     */
+    public function eventNames(): array
+    {
+        return [...parent::eventNames(), ...$this->sockets->eventNames()];
+    }
+
+    /**
+     * Without an event, removes the server's own listeners and the main namespace's.
+     */
+    public function removeAllListeners(?string $event = null): static
+    {
+        if ($event === null) {
+            $this->sockets->removeAllListeners();
+
+            return parent::removeAllListeners();
+        }
+
+        return $this->off($event);
+    }
+
+    /**
+     * @internal
+     */
+    public function logger(): Logger
+    {
+        return $this->logger;
     }
 
     /**
@@ -349,5 +436,38 @@ final class SocketIO extends Emitter
     public function newSocketId(): string
     {
         return $this->socketIds->generate();
+    }
+
+    /**
+     * Logs the Engine.IO sessions from their events: opened, refused, upgraded and closed.
+     */
+    private function logEngine(): void
+    {
+        $this->engine->on('connection_error', function (EngineRequest $request, int $code, string $message): void {
+            $this->logger->debug('engine', sprintf('refused %s: code %d, %s', $request->uri, $code, $message));
+        });
+        $this->engine->on('connection', function (EngineSocket $connection): void {
+            $this->logger->debug('engine', sprintf(
+                'session %s opened over %s from %s',
+                $connection->id,
+                $connection->transport()->name(),
+                $connection->request->remoteAddress,
+            ));
+            $connection->on('upgrade', function () use ($connection): void {
+                $this->logger->debug('engine:socket', sprintf(
+                    'session %s upgraded to %s',
+                    $connection->id,
+                    $connection->transport()->name(),
+                ));
+            });
+            $connection->on('close', function (CloseReason $reason, ?\Throwable $error) use ($connection): void {
+                $this->logger->debug('engine:socket', sprintf(
+                    'session %s closed: %s%s',
+                    $connection->id,
+                    $reason->value,
+                    $error === null ? '' : ' (' . $error->getMessage() . ')',
+                ));
+            });
+        });
     }
 }

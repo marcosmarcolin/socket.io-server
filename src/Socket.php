@@ -419,6 +419,12 @@ final class Socket extends Emitter
         if (! $this->isConnected) {
             return;
         }
+        $this->nsp->server->logger()->debug('socket.io:socket', sprintf(
+            'socket %s left %s: %s',
+            $this->id,
+            $this->nsp->name,
+            $reason->value,
+        ));
         $this->dispatch('disconnecting', $reason->value, $description);
         $this->cleanup();
         $this->client->remove($this);
@@ -529,6 +535,13 @@ final class Socket extends Emitter
             }
             $called = true;
             if ($error !== null) {
+                $name = $event[0] ?? null;
+                $this->nsp->server->logger()->debug('socket.io:socket', sprintf(
+                    'socket %s: a middleware stopped "%s": %s',
+                    $this->id,
+                    is_string($name) || is_int($name) ? $name : '',
+                    $error->getMessage(),
+                ));
                 $this->dispatch('error', $error);
 
                 return;

@@ -14,6 +14,8 @@
 | `$io->sockets` | O namespace principal, `/`. |
 | `on('connection', fn (Socket $socket))` | O evento `connection` do namespace principal; qualquer outro evento, menos `workerStart` e `workerStop`, também é do namespace principal, como os do `serverSideEmit()`. |
 | `on('workerStart' \| 'workerStop', fn (Worker $worker))` | Cada processo iniciando ou parando. |
+| `on('new_namespace', fn (Nsp $nsp))` | Um namespace diferente de `/` foi criado, por exemplo para dar um middleware a todo namespace. |
+| `once()`, `off()`, `listeners()`, `eventNames()`, `removeListener()`, `removeAllListeners()` | Como o `on()`: os listeners do namespace principal, menos `workerStart` e `workerStop`. |
 | `use(fn (Socket $socket, Closure $next))` | Um middleware em `/`. |
 | `adapter(fn (Nsp $nsp): Adapter)` | Como os namespaces guardam as salas e fazem broadcast, por exemplo `ChannelAdapter::factory()` ou `RedisAdapter::factory()`. `$nsp->adapter()` devolve o adapter de um namespace, com os seus [eventos](#eventos-do-adapter). |
 | `close()` | Desliga o servidor: cada socket sai com `server shutting down`, as conexões fecham, e o worker para de aceitar novas neste processo. |
@@ -45,6 +47,7 @@
 | `$socket->nsp`, `$socket->request`, `$socket->conn` | O namespace, o request HTTP que abriu a conexão e a sessão Engine.IO. |
 | `on(string $event, Closure $listener)` | Um evento do cliente. O listener recebe os argumentos, mais um `Closure` de acknowledgement no fim quando o cliente pediu um; ele responde uma vez só. |
 | `emit(string $event, ...$args)`, `send(...$args)` | Envia um evento; um `Closure` como último argumento pede ao cliente que o confirme. |
+| `once()`, `off()`, `listeners()`, `eventNames()`, `removeListener()`, `removeAllListeners()` | Os outros métodos de listeners, com os nomes da referência. |
 | `onAny(Closure $listener)`, `prependAny()`, `offAny(?Closure $listener = null)`, `listenersAny()` | Todo evento do cliente, antes dos listeners do próprio evento. O listener recebe o nome do evento, depois os argumentos, com o `Closure` de acknowledgement no fim quando o cliente pediu um. `offAny()` sem listener remove todos. |
 | `onAnyOutgoing(Closure $listener)`, `prependAnyOutgoing()`, `offAnyOutgoing()`, `listenersAnyOutgoing()` | Todo evento enviado a este cliente, por `emit()` ou por um broadcast (inclusive de outros processos), antes de ser escrito: o nome do evento, depois os argumentos, sem o callback de acknowledgement. |
 | `use(fn (array $event, Closure $next))` | Um middleware para os eventos do cliente, depois dos listeners `onAny()` e antes dos do próprio evento; veja [Middlewares do socket](#middlewares-do-socket). |
@@ -127,6 +130,8 @@ $socket->on('sum', function (array $numbers, Closure $ack): void {
     $ack(array_sum($numbers));
 });
 ```
+
+PHP não tem promises, então o `emitWithAck()` e o `serverSideEmitWithAck()` da referência viram um callback: `$socket->timeout(5000)->emit('event', $callback)` e `$io->serverSideEmit('event', $callback)`.
 
 Um broadcast aceita um callback de acknowledgement depois de `timeout()`. O callback recebe uma resposta por socket alcançado, na ordem em que chegam: o primeiro argumento do acknowledgement de cada cliente.
 

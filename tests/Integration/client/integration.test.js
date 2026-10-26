@@ -251,6 +251,14 @@ for (const mode of Object.keys(MODES)) {
       assert.equal(Object.keys(manager.nsps).length, 2);
     });
 
+    test("a new_namespace listener put a middleware on /admin", TIMEOUT, async () => {
+      const admin = client(mode, "/admin");
+
+      const [checkedBy] = await next(admin, "admin-checked");
+
+      assert.equal(checkedBy, "new_namespace:/admin");
+    });
+
     test("refuses an unknown namespace", TIMEOUT, async () => {
       const socket = client(mode, "/unknown");
 
@@ -291,6 +299,22 @@ for (const mode of Object.keys(MODES)) {
       // The listener starts in the connection handler, after the CONNECT answer; the acknowledgement that carries
       // this list is written after it is built.
       assert.deepEqual(await socket.emitWithAck("created"), ['2["said","hello"]']);
+    });
+
+    test("the logger option sees the session open, join and upgrade", TIMEOUT, async () => {
+      const socket = await connected(mode);
+      // The upgrade may already be done by now.
+      if (mode === "upgrade" && socket.io.engine.transport.name !== "websocket") {
+        await next(socket.io.engine, "upgrade");
+      }
+      const sid = socket.io.engine.id;
+
+      const lines = await socket.emitWithAck("debug-log");
+
+      const first = mode === "websocket" ? "websocket" : "polling";
+      assert.match(lines[0], new RegExp(`^engine: session ${sid} opened over ${first} from `));
+      assert.ok(lines.includes(`socket.io:socket: socket ${socket.id} joined / over session ${sid}`));
+      assert.equal(lines.includes(`engine:socket: session ${sid} upgraded to websocket`), mode === "upgrade");
     });
 
     test("lets the server see every event both ways with onAny and onAnyOutgoing", TIMEOUT, async () => {

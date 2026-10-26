@@ -6,6 +6,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- **The `new_namespace` event**: `$io->on('new_namespace', fn (Nsp $nsp) => ...)` runs when a namespace other than `/` is created, as in the reference, such as to give every namespace a middleware.
+- **The reference's listener methods**: `eventNames()`, `removeListener()` and `removeAllListeners()` on every emitter, and `once()`, `off()` and `listeners()` on `SocketIO` reach the main namespace, as `on()` does.
+- **`maxHttpBufferSize`**, the reference's name, as an alias of the `maxPayload` option.
+- **The `logger` option**: a `Closure(string $scope, string $message)` that gets a debug log of each connection's life, in the reference's `debug` scopes (`engine`, `engine:socket`, `socket.io:client`, `socket.io:socket`, `socket.io:adapter`).
 - **HTTP compression**, as the reference's `httpCompression`, on by default: polling answers of 1 KB or more are compressed with gzip or deflate when the client accepts them. `compress(false)` on an emit or a broadcast now keeps it plain, instead of doing nothing.
 - **The `packetCreate` session event**: `$socket->conn->on('packetCreate', fn (Packet $packet) => ...)` sees each message and ping the server writes, before it is buffered, as in the reference.
 - **Adapter room events**, as the reference's adapter: `$nsp->adapter()->on('create-room' | 'delete-room' | 'join-room' | 'leave-room', ...)` reports when the rooms of the current process change, with any adapter.
