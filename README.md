@@ -102,6 +102,7 @@ Each one runs with `php examples/<name>/start.php start`; then open http://local
 | [acks](examples/acks) | acknowledgements both ways, and the server's `timeout()` |
 | [namespaces](examples/namespaces) | `/public` and `/admin`, a middleware with a token, `ConnectionError` |
 | [binary](examples/binary) | file upload and download with `Binary` |
+| [pong](examples/pong) | multiplayer Pong: a queue pairs players, one room per match, the game loop on the server at 30 frames a second with `volatile` state |
 | [dashboard](examples/dashboard) | live dashboards: a server timer pushes new numbers every few seconds to the viewers of each one |
 | [multi-process](examples/multi-process) | four processes and `ChannelAdapter` |
 | [emitter](examples/emitter) | a plain PHP endpoint sending notifications to the clients with the `Emitter`; it needs a Redis server |
