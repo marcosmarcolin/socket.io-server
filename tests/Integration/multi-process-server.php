@@ -60,11 +60,11 @@ $io->on('connection', static function (Socket $socket) use ($io): void {
         $socket->broadcast->emit('broadcast-message', $message);
     });
     $socket->on('join-all', static function (string $room, Closure $ack) use ($io): void {
-        $io->sockets->socketsJoin($room);
+        $io->socketsJoin($room);
         $ack(true);
     });
     $socket->on('leave-all', static function (string $room, Closure $ack) use ($io): void {
-        $io->sockets->socketsLeave($room);
+        $io->socketsLeave($room);
         $ack(true);
     });
     $socket->on('kick', static function (string $socketId) use ($io): void {
