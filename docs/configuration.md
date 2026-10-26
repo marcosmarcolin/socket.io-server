@@ -17,6 +17,7 @@
 | `transports` | `['polling', 'websocket']` | The transports clients may use. With `['websocket']`, polling requests are refused, so clients need `transports: ['websocket']` too (otherwise they get `xhr poll error`). With `['polling']`, no upgrade is offered. |
 | `cors` | `['origin' => '*']` | `origin` is `'*'`, a list of allowed origins, a `Closure` that decides per request, or `null` to send no CORS headers. `credentials` (`false` by default) lets browsers send cookies. |
 | `allowUpgrades` | `true` | With `false`, the handshake offers no upgrade, so clients that start on polling stay on it; clients with `transports: ['websocket']` still connect over WebSocket. |
+| `cookie` | `false` | With `true`, the polling handshake sets the cookie `io=<session id>` (`Path=/; HttpOnly; SameSite=Lax`), which a load balancer can use for sticky sessions; see [Behind a reverse proxy](reverse-proxy.md). An array changes its attributes: `name`, `path`, `domain`, `httpOnly`, `secure`, `sameSite`, `maxAge` (seconds). |
 | `allowRequest` | `null` | A `Closure` that accepts or refuses each handshake before the session opens. See [Refusing a connection before the handshake](#refusing-a-connection-before-the-handshake). |
 
 Unknown options and wrong types throw `InvalidArgumentException`.
@@ -47,6 +48,8 @@ $io->on('connection', function (Socket $socket): void {
 ```
 
 With `credentials`, `origin` can't be `'*'`: browsers reject that pair, so it throws.
+
+The [session-auth example](../examples/session-auth) puts it together: a page on another port logs in with a PHP session, and a middleware lets in only the sockets of logged-in sessions.
 
 CORS only covers HTTP long-polling: browsers don't apply it to WebSocket, so a page on another site can open a WebSocket to your server, with your cookies if they are `SameSite=None`. To refuse other origins on every transport, check the `Origin` header in a middleware too:
 

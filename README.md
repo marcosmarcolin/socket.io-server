@@ -18,6 +18,7 @@ It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and 
 - HTTP long-polling and WebSocket on one port, with the upgrade from polling to WebSocket.
 - Namespaces, middlewares, rooms, acknowledgements (broadcasts with a timeout too), binary data and catch-all listeners.
 - Several processes and machines, through [workerman/channel](https://github.com/walkor/channel) or Redis.
+- An `Emitter` that sends to the clients from any PHP code, such as a PHP-FPM request.
 - CORS with cookies, a hook to refuse connections before the handshake, and TLS.
 - An API shaped like [phpsocket.io](https://github.com/walkor/phpsocket.io)'s, to ease migration.
 
@@ -83,6 +84,7 @@ Each one runs with `php examples/<name>/start.php start`; then open http://local
 | Example | Shows |
 |---|---|
 | [chat](examples/chat) | a chat room: names, typing indicator, join and leave notices |
+| [session-auth](examples/session-auth) | login with a PHP session, and a middleware that lets in only logged-in sessions' sockets |
 | [private-messaging](examples/private-messaging) | private messages to every tab of a user through a room per user, sessions kept across reconnections, and who is online |
 | [rooms](examples/rooms) | `join`, `leave`, messages to a room, live member lists |
 | [acks](examples/acks) | acknowledgements both ways, and the server's `timeout()` |
@@ -90,13 +92,15 @@ Each one runs with `php examples/<name>/start.php start`; then open http://local
 | [binary](examples/binary) | file upload and download with `Binary` |
 | [dashboard](examples/dashboard) | live dashboards: a server timer pushes new numbers every few seconds to the viewers of each one |
 | [multi-process](examples/multi-process) | four processes and `ChannelAdapter` |
+| [emitter](examples/emitter) | a plain PHP endpoint sending notifications to the clients with the `Emitter`; it needs a Redis server |
 | [redis](examples/redis) | four processes and `RedisAdapter`; it needs a Redis server |
 
 ## Documentation
 
 - [Configuration](docs/configuration.md): server options, CORS and cookies, refusing connections, TLS.
 - [API reference](docs/api.md): `SocketIO`, namespaces, sockets, acknowledgements, broadcasting, JSON and binary data.
-- [Several processes](docs/multiple-processes.md): `ChannelAdapter` and `RedisAdapter`.
+- [Several processes](docs/multiple-processes.md): `ChannelAdapter`, `RedisAdapter`, and the `Emitter`.
+- [Behind a reverse proxy](docs/reverse-proxy.md): nginx and HAProxy, TLS, and sticky sessions for polling.
 - [Migrating from phpsocket.io](docs/migrating-from-phpsocket.io.md): moving an app and its clients.
 - [Development](docs/development.md): tests, linters and the compliance suites, all in Docker.
 - [Changelog](CHANGELOG.md).

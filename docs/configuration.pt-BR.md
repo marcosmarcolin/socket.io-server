@@ -17,6 +17,7 @@
 | `transports` | `['polling', 'websocket']` | Os transportes que os clientes podem usar. Com `['websocket']`, requests de polling são recusados, então os clientes também precisam de `transports: ['websocket']` (senão recebem `xhr poll error`). Com `['polling']`, nenhum upgrade é oferecido. |
 | `cors` | `['origin' => '*']` | `origin` é `'*'`, uma lista de origens permitidas, um `Closure` que decide a cada request, ou `null` para não enviar cabeçalhos CORS. `credentials` (`false` por padrão) deixa o navegador enviar cookies. |
 | `allowUpgrades` | `true` | Com `false`, o handshake não oferece upgrade, então clientes que começam no polling continuam nele; clientes com `transports: ['websocket']` continuam conectando por WebSocket. |
+| `cookie` | `false` | Com `true`, o handshake de polling grava o cookie `io=<id da sessão>` (`Path=/; HttpOnly; SameSite=Lax`), que um load balancer pode usar para sticky sessions; veja [Atrás de um proxy reverso](reverse-proxy.pt-BR.md). Um array muda os atributos: `name`, `path`, `domain`, `httpOnly`, `secure`, `sameSite`, `maxAge` (segundos). |
 | `allowRequest` | `null` | Um `Closure` que aceita ou recusa cada handshake antes de a sessão abrir. Veja [Recusar uma conexão antes do handshake](#recusar-uma-conexão-antes-do-handshake). |
 
 Opções desconhecidas e tipos errados lançam `InvalidArgumentException`.
@@ -47,6 +48,8 @@ $io->on('connection', function (Socket $socket): void {
 ```
 
 Com `credentials`, `origin` não pode ser `'*'`: o navegador recusa esse par, então isso lança exceção.
+
+O [exemplo session-auth](../examples/session-auth) junta tudo: uma página em outra porta faz login com sessão PHP, e um middleware só deixa entrar os sockets de sessões logadas.
 
 O CORS só cobre o HTTP long-polling: o navegador não o aplica ao WebSocket, então uma página de outro site pode abrir um WebSocket para o seu servidor, com os seus cookies se forem `SameSite=None`. Para recusar outras origens em qualquer transporte, verifique o cabeçalho `Origin` também num middleware:
 

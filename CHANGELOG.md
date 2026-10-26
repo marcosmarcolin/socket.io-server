@@ -17,6 +17,12 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - **`Socket::use()`**: middlewares for the events a socket receives, as the reference's `socket.use()`. `$next($error)` stops the event and emits `error` on the socket.
 - **Engine events** on `$io->engine`, as the reference's: `initial_headers` and `headers` let listeners change a session's response headers through `ResponseHeaders`, such as to set a cookie, over polling and in the WebSocket 101; `connection_error` reports each refused request with its code and message.
 - **The `local` flag**: `$io->local`, `$nsp->local`, `$socket->local` and `->local` on a broadcast keep a broadcast, the socket helpers or `fetchSockets()` in the current process, whatever the adapter, as in the reference.
+- **`fetchSockets()`, `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` on `SocketIO`**, acting on the main namespace, as the reference's `io` has them.
+- **The `cookie` option**: `'cookie' => true` makes the polling handshake set `io=<session id>`, as the reference does, for load balancers with sticky sessions; an array changes its attributes.
+- **The guide "Behind a reverse proxy"** (`docs/reverse-proxy.md`): nginx and HAProxy configurations, with TLS and sticky sessions for polling over several processes, one port each.
+- **`Emitter`**: sends to the clients from any PHP code that isn't a server, such as a PHP-FPM request, as the reference's emitter packages: `Emitter::redis($url)->to('user:42')->emit('event', $data)`, with `of()`, `except()`, `volatile`, the socket helpers and `serverSideEmit()`. It uses blocking I/O, so it needs no event loop.
+- **The `emitter` example**: a plain PHP endpoint sending notifications to the open tabs through the `Emitter`.
+- **The `session-auth` example**: a page logs in with a PHP session, and a middleware lets in only the sockets whose cookie belongs to a logged-in session, across origins with `withCredentials`.
 - **The `private-messaging` example**: a room per user carries private messages to every tab of the recipient and of the sender, a session id in `auth` keeps the user across reconnections, and "user connected"/"user disconnected" follow each user's first and last tab.
 - **The `dashboard` example**: live dashboards, where a timer started in `workerStart` pushes new numbers every few seconds to the viewers of each dashboard, as a room.
 

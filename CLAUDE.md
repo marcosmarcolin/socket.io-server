@@ -55,7 +55,7 @@ A change is done only when all of these hold:
   - network I/O stays behind small interfaces that tests can replace with fakes.
 - Classes are `final` by default. Inheritance only where there's a documented extension point, such as adapters.
 - **No dynamic properties**, neither on our classes nor on Workerman objects. Per-connection state goes in a `WeakMap` or in `$connection->context`.
-- Magic only where the public API requires it and it's documented: `__get` for `broadcast`, `volatile` and `local`, for the read-only `connected`, `disconnected` and `rooms` of `Socket`, and for `$io->worker`, annotated with `@property-read`.
+- Magic only where the public API requires it and it's documented: `__get` for `broadcast`, `volatile` and `local` (and `volatile` on the `Emitter`), for the read-only `connected`, `disconnected` and `rooms` of `Socket`, and for `$io->worker`, annotated with `@property-read`.
 - PHPStan at level `max`. No new `ignoreErrors` without a written justification. Third-party docblocks PHPStan can't read are corrected with stubs in `phpstan-stubs/`, each explaining why.
 - Short comments, one line, only to explain why.
 - No `echo`/`print`. Errors become exceptions or `error` events.
@@ -87,7 +87,7 @@ Both scripts share `tests/Compliance/suite.sh`, which downloads the suite at a p
 
 ## Examples
 
-`examples/<name>/` holds a `start.php` (Socket.IO on port 3000, its page on port 3001 through a plain Workerman HTTP worker) and an `index.html` that loads `socket.io-client` 4.8.4 from `cdn.socket.io` with its SRI hash. Examples are code: phpcs and PHPStan check them, they follow the code rules, and `tests/Integration/client/examples/<name>.test.js` checks each one. Run one with `tests/Integration/run.sh example <name>`.
+`examples/<name>/` holds a `start.php` (Socket.IO on port 3000, its page on port 3001 through a plain Workerman HTTP worker) and an `index.html` that loads `socket.io-client` 4.8.4 from `cdn.socket.io` with its SRI hash. Examples are code: phpcs and PHPStan check them, they follow the code rules, and `tests/Integration/client/examples/<name>.test.js` checks each one. Run one with `tests/Integration/run.sh example <name>`; `run.sh` starts a Redis next to the `redis` and `emitter` examples.
 
 Examples show the API users will write, so they use Workerman directly where users would, such as `Workerman\Timer::add()` in `workerStart` for periodic work (the `dashboard` example). The `Scheduler` rule applies to `src/`, whose timing tests replace.
 
@@ -100,6 +100,7 @@ User docs live in the README and in `docs/`, each in English (the reference) and
 | `README.md` | what the package is, features, requirements, installation, a short quick start, the examples table, links to `docs/` | a feature, requirement or example is added or removed; keep it short, details go to `docs/` |
 | `docs/configuration.md` | server options, CORS and cookies, `allowRequest`, TLS | an option or its behavior changes |
 | `docs/api.md` | `SocketIO`, `Nsp`, `Socket`, events and disconnect reasons, acknowledgements, broadcasting, errors, JSON and binary data | the public API or its behavior changes |
+| `docs/reverse-proxy.md` | nginx and HAProxy in front of the server: TLS, the upgrade headers, the read timeout, client addresses, and sticky sessions with one port per process | the `cookie` option, transports or anything a proxy must know changes; its configs were checked with nginx 1.27 and HAProxy 3.0 in Docker, and are checked again when they change |
 | `docs/multiple-processes.md` | `ChannelAdapter`, `RedisAdapter`, what crosses processes and the limits | an adapter or cross-process behavior changes |
 | `docs/migrating-from-phpsocket.io.md` | moving an app and its clients from phpsocket.io | a change affects how phpsocket.io code maps to ours |
 | `docs/development.md` | the Docker commands, the test suites, secret scanning | a test command, suite or tool changes |
@@ -137,7 +138,8 @@ src/
     SessionIdGenerator.php, RandomSessionIdGenerator.php  20-character base64url session ids
     Socket.php                  session: state, heartbeat, upgrade, write buffer
     SocketState.php, CloseReason.php  session state; close reasons with the reference's strings
-    ServerOptions.php           pingInterval, pingTimeout, maxPayload, upgradeTimeout, path, cors, transports, allowRequest, allowUpgrades; fromArray()
+    ServerOptions.php           pingInterval, pingTimeout, maxPayload, upgradeTimeout, path, cors, transports, allowRequest, allowUpgrades, cookie; fromArray()
+    Cookie.php                  the cookie option: io=<sid> on the polling handshake, for sticky sessions
     Transport/Transport.php     base transport (Emitter): packet, ready, drain, error, close
     Transport/Polling.php       pending GET, POST, noop on upgrade
     Transport/WebSocket.php     one packet per frame, text or binary
@@ -158,6 +160,7 @@ src/
   BroadcastOperator.php         to/in/except/compress/volatile/timeout/emit and the socket helpers, immutable
   RemoteSocket.php              a socket on another server, from fetchSockets() with a callback
   AckCollector.php              the answers to one broadcast with acknowledgement, until all arrive or the timeout
+  Emitter.php                   sends to the servers' clients from outside them (PHP-FPM), through a Publisher
   Parser/                       socket.io-parser (protocol v5)
     Encoder.php                 Packet → list<string|Binary>: the text part, then one Binary per attachment
     Decoder.php                 one per connection: add(string|Binary): ?Packet, reset()
@@ -167,7 +170,9 @@ src/
     BroadcastOptions.php        rooms, except and volatile of a broadcast
     InMemoryAdapter.php         local rooms and broadcast; not final, the base of other adapters
     PubSubAdapter.php           the cluster protocol through a PubSub; abstract, the base of the two below
-    Cluster/                    MessageType (the reference's numbers), Nodes (server count), Request (waiting for responses)
+    Cluster/                    MessageType (the reference's numbers), Nodes (server count), Request (waiting for responses),
+                                Channels and Wire (channel names and message shapes, shared with the Emitter)
+    Publisher.php               publish only: what the Emitter needs; PubSub extends it
     ChannelAdapter.php          PubSubAdapter on workerman/channel; final, only adds factory()
     RedisAdapter.php            PubSubAdapter on Redis; final, only adds factory()
     PubSub.php                  publish/subscribe between processes, faked in tests
@@ -179,6 +184,7 @@ src/
       RedisUrl.php              redis://[[user]:password@]host[:port][/database]
       Dialer.php, Link.php      TCP I/O interfaces, faked in tests
       WorkermanDialer.php, WorkermanLink.php  the same on AsyncTcpConnection
+      BlockingRedisPublisher.php  a Publisher with blocking I/O, for the Emitter outside the event loop
 ```
 
 ### Workerman 5 integration
@@ -265,6 +271,7 @@ src/
   - `'*'` with `credentials` throws: browsers reject that pair, and the `cors` package would send it anyway.
   - The preflight answers 204 with `GET, POST, OPTIONS` and echoes `Access-Control-Request-Headers`. With CORS disabled, `OPTIONS` is an ordinary request and gets code 2.
   - CORS doesn't cover WebSocket, in browsers or in the reference. `docs/configuration.md` shows the middleware that checks `Origin` on every transport.
+- **`cookie` option**, as the reference's: `false` by default; `true` or an array of attributes (`name` `io`, `path` `/`, `domain`, `httpOnly` `true`, `secure` `false`, `sameSite` `Lax`, `maxAge`) makes the polling handshake answer set `<name>=<sid>`, serialized in the order of the reference's `cookie` package, before `initial_headers` runs, so its listeners see it. Later answers and the WebSocket 101 get none, as in the reference. Values that would break the header throw.
 - **Engine events** on `Engine\Server` (`$io->engine`), as the reference's:
   - `initial_headers` and `headers` get a mutable `ResponseHeaders` and the `Request`. `initial_headers` runs for a request without `sid` (the polling handshake, or a WebSocket that opens a session), then `headers` runs for it too. Over polling, `HeadersHttpExchange` runs them for each `200` answer of a session (the data and `ok` answers), not for errors or the CORS preflight. Over WebSocket, `ServerBinding` asks `Server::webSocketHeaders()` once `verifyWebSocket()` accepted, and writes the result into the 101.
   - `ResponseHeaders` validates names (header tokens) and values (no CR, LF or NUL); `append()` keeps one line per value, for several `Set-Cookie`. `HttpExchange::respond()` takes `string|list<string>` values.
@@ -363,7 +370,7 @@ $io->on('connection', function (Socket $socket) use ($io): void {
 Worker::runAll();
 ```
 
-- `SocketIO`: `$io->engine` (its `initial_headers`, `headers` and `connection_error` events), `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- `SocketIO`: `$io->engine` (its `initial_headers`, `headers` and `connection_error` events), `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `fetchSockets(?Closure)`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()` (all on `/`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
 - **`close()`**, as the reference's:
   1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
   2. each adapter's `close()` runs (`PubSubAdapter` unsubscribes from its channels);
@@ -407,6 +414,11 @@ Worker::runAll();
   - **Broadcast acks:** `BroadcastOptions` carries the `timeout`. `PubSubAdapter::broadcastWithAck()` publishes the packet with a `requestId` to the namespace channel (never a room's: every counted server must report), then delivers locally. Each other server decodes it, sends it under an ack id of its own namespace, and answers on the requester's response channel with `BroadcastClientCount`, then one `BroadcastAck` per answer (its first argument, as an `ACK` packet). Both sides drop the request after the timeout: the requester forgets the `requestId`, the others make their sockets forget the ack id. A server that never reports (gone without `AdapterClose`) makes the wait end with the timeout.
   - **The `local` flag** (`$io->local`, `$nsp->local`, `$socket->local`, and `->local` on an operator), as the reference's: `BroadcastOptions::$local` makes `PubSubAdapter` publish nothing, so broadcasts, the socket helpers and `fetchSockets(Closure)` act on this process only. A local broadcast with an ack waits for this server's count only (the reference still waits for `serverCount()` reports and times out). `$socket->local` leaves the socket out, as `broadcast` does.
   - **Not yet:** `allSockets` reads the local process (it is deprecated in the reference).
+- **`Emitter`**, as the reference's `@socket.io/redis-emitter` and `@socket.io/postgres-emitter`: sends from code that isn't a server.
+  - It publishes through a `Publisher` exactly what `PubSubAdapter` would, with the uid `emitter` (`Emitter::UID`), using `Cluster\Channels` and `Cluster\Wire`, so the two can't drift. Servers never count that uid as a node, as `ClusterAdapterWithHeartbeat` skips `EMITTER_UID`.
+  - API: `of()`, `to()`/`in()`, `except()`, `volatile` (each returns a copy), `emit()`, `send()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`, `serverSideEmit()`. A `Closure` argument throws (no acks, no `fetchSockets`), and so do reserved names.
+  - `Emitter::redis($url, $key, $timeout)` builds it on `BlockingRedisPublisher`: `stream_socket_client`, `AUTH` first when the URL has a password, `serialize()` as `RedisPubSub` does. It connects lazily, keeps the connection, and reconnects once when a kept connection dropped; a fresh connection that fails, an error reply or a refused login throws `RuntimeException`, never with the password. Replies read ahead are queued for their commands.
+  - The Channel adapter has no emitter: `Channel\Client` needs the event loop.
 - **Setup:** in `workerStart`, call `$io->adapter(ChannelAdapter::factory($host, $port))` with a `Channel\Server` worker running, or `$io->adapter(RedisAdapter::factory($url, $key, $onError))`. `PubSub` is the seam that keeps the static `Channel\Client` and the Redis connections out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
 - **`RedisAdapter`** has its own client, on Workerman's `AsyncTcpConnection`, so it adds no dependency. `workerman/redis` doesn't fit: after its first `SUBSCRIBE` it sends no other command, so rooms couldn't subscribe or unsubscribe, and it prints errors with `echo`.
   - `factory()` arguments, all optional: `url` (`redis://127.0.0.1:6379`), `key` (`socket.io`; apps sharing one Redis need different keys), and `onError` (`Worker::log` by default). An invalid URL throws `InvalidArgumentException` before the event loop check; the message never includes the URL, which may hold a password.
@@ -418,7 +430,7 @@ Worker::runAll();
 - With several processes on the same port, clients must use `transports: ['websocket']`, because polling breaks across processes without sticky sessions. `docs/multiple-processes.md` says so.
 - **Multi-process tests** (`tests/Integration/multi-process-server.php`): two processes with `reusePort`, so the kernel spreads connections, plus a `Channel\Server`; or, with `ADAPTER=redis` (`run.sh multi-process-redis`), `RedisAdapter` on a pinned Redis image with a password, so the login is covered too. The `redis` example runs against the same Redis.
   - The tests first make sure clients landed on both processes, and that a broadcast crosses (retrying while the workers connect to the broker).
-  - They cover emits, rooms, several rooms at once, `except`, `broadcast`, `socketsJoin`/`socketsLeave`, `disconnectSockets`, `serverSideEmit` with an ack, and `fetchSockets` with a callback plus `RemoteSocket::emit()`, broadcasts with an ack, and a `RemoteSocket` ack across processes.
+  - They cover emits, rooms, several rooms at once, `except`, `broadcast`, `socketsJoin`/`socketsLeave`, `disconnectSockets`, `serverSideEmit` with an ack, and `fetchSockets` with a callback plus `RemoteSocket::emit()`, broadcasts with an ack, a `RemoteSocket` ack, and, on Redis, the `Emitter` run from another PHP process (`tests/Integration/emitter.php`), across processes.
   - The **scale check** has 200 WebSocket clients get 20 broadcasts each: every client must get every message once and in order, and the time is printed. It catches loss and duplication, not performance.
 
 ## Roadmap

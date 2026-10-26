@@ -18,6 +18,7 @@ Ele fala os protocolos atuais, Engine.IO v4 e Socket.IO v5, então navegadores e
 - HTTP long-polling e WebSocket na mesma porta, com o upgrade de polling para WebSocket.
 - Namespaces, middlewares, salas, acknowledgements (também em broadcasts com timeout), dados binários e listeners para todos os eventos.
 - Vários processos e máquinas, pelo [workerman/channel](https://github.com/walkor/channel) ou pelo Redis.
+- Um `Emitter` que envia para os clientes a partir de qualquer código PHP, como um request do PHP-FPM.
 - CORS com cookies, um gancho para recusar conexões antes do handshake, e TLS.
 - Uma API no formato da do [phpsocket.io](https://github.com/walkor/phpsocket.io), para facilitar a migração.
 
@@ -83,6 +84,7 @@ Cada um roda com `php examples/<nome>/start.php start`; depois abra http://local
 | Exemplo | Mostra |
 |---|---|
 | [chat](examples/chat) | uma sala de chat: nomes, indicador de digitação, avisos de entrada e saída |
+| [session-auth](examples/session-auth) | login com sessão PHP, e um middleware que só deixa entrar os sockets de sessões logadas |
 | [private-messaging](examples/private-messaging) | mensagens privadas para todas as abas de um usuário com uma sala por usuário, sessão mantida entre reconexões, e quem está online |
 | [rooms](examples/rooms) | `join`, `leave`, mensagens para uma sala, lista de membros ao vivo |
 | [acks](examples/acks) | acknowledgements nos dois sentidos, e o `timeout()` do servidor |
@@ -90,13 +92,15 @@ Cada um roda com `php examples/<nome>/start.php start`; depois abra http://local
 | [binary](examples/binary) | upload e download de arquivo com `Binary` |
 | [dashboard](examples/dashboard) | dashboards ao vivo: um timer no servidor manda números novos a cada poucos segundos para quem vê cada um |
 | [multi-process](examples/multi-process) | quatro processos e `ChannelAdapter` |
+| [emitter](examples/emitter) | um endpoint PHP comum enviando notificações aos clientes com o `Emitter`; precisa de um servidor Redis |
 | [redis](examples/redis) | quatro processos e `RedisAdapter`; precisa de um servidor Redis |
 
 ## Documentação
 
 - [Configuração](docs/configuration.pt-BR.md): opções do servidor, CORS e cookies, recusar conexões, TLS.
 - [Referência da API](docs/api.pt-BR.md): `SocketIO`, namespaces, sockets, acknowledgements, broadcast, dados JSON e binários.
-- [Vários processos](docs/multiple-processes.pt-BR.md): `ChannelAdapter` e `RedisAdapter`.
+- [Vários processos](docs/multiple-processes.pt-BR.md): `ChannelAdapter`, `RedisAdapter` e o `Emitter`.
+- [Atrás de um proxy reverso](docs/reverse-proxy.pt-BR.md): nginx e HAProxy, TLS e sticky sessions para o polling.
 - [Migrando do phpsocket.io](docs/migrating-from-phpsocket.io.pt-BR.md): como mover uma aplicação e os seus clientes.
 - [Desenvolvimento](docs/development.pt-BR.md): testes, linters e as suítes de conformidade, tudo no Docker.
 - [Changelog](CHANGELOG.md), em inglês.

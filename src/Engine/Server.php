@@ -69,8 +69,6 @@ final class Server extends Emitter
 
             return;
         }
-        $exchange = new HeadersHttpExchange($exchange, $this->prepareHeaders(...));
-
         $sid = $exchange->query('sid');
         if ($sid !== null) {
             $transport = $this->sessions[$sid]->transport();
@@ -80,14 +78,24 @@ final class Server extends Emitter
 
                 return;
             }
-            $transport->handleRequest($exchange);
+            $transport->handleRequest(new HeadersHttpExchange($exchange, $this->prepareHeaders(...)));
 
             return;
         }
 
         $polling = new Polling($this->scheduler, maxPayload: $this->options->maxPayload);
         $socket = $this->open($polling, $exchange->request());
-        $polling->handleRequest($exchange);
+        $cookie = $this->options->cookie;
+        $polling->handleRequest(new HeadersHttpExchange(
+            $exchange,
+            function (ResponseHeaders $headers, Request $request) use ($cookie, $socket): void {
+                // Before initial_headers, so its listeners see the cookie, as in the reference.
+                if ($cookie !== null) {
+                    $headers->append('Set-Cookie', $cookie->header($socket->id));
+                }
+                $this->prepareHeaders($headers, $request);
+            },
+        ));
         $this->dispatch('connection', $socket);
     }
 

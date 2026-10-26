@@ -230,6 +230,27 @@ describe("multiple processes", () => {
     assert.deepEqual(got.map((messages) => messages.length), [1, 1, 0, 0]);
   });
 
+  test("the Emitter in another PHP process reaches a room on every process", TIMEOUT, async (t) => {
+    const [[a1, a2], [b1, b2]] = [...byProcess.values()];
+    await a1.emitWithAck("join", "emitted");
+    await b1.emitWithAck("join", "emitted");
+    const got = [a1, a2, b1, b2].map((socket) => record(socket, "from-emitter"));
+
+    const result = await a2.emitWithAck("emit-from-another-process", "emitted", "hello from php");
+    if (result.skipped) {
+      t.skip("the Emitter needs Redis");
+      return;
+    }
+    assert.deepEqual([result.status, result.output], [0, ""]);
+    await sleep(300);
+
+    const counts = got.map((messages) => messages.length);
+    assert.deepEqual(counts, [1, 0, 1, 0]);
+    const [[message, pid]] = got[0];
+    assert.equal(message, "hello from php");
+    assert.ok(![a1.pid, b1.pid].includes(pid), "the emitter ran in its own process");
+  });
+
   test("scale: 200 clients get 20 broadcasts each, once and in order", { timeout: 60_000 }, async () => {
     const CLIENTS = 200;
     const MESSAGES = 20;

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sending from your PHP app</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    #log { list-style: none; padding: .5rem; border: 1px solid #ddd; border-radius: 6px; min-height: 200px; }
+    #log li { padding: .2rem 0; }
+    form { display: flex; gap: .5rem; margin: .5rem 0; flex-wrap: wrap; }
+    input { flex: 1; padding: .5rem; font: inherit; }
+    button { padding: .5rem 1rem; font: inherit; }
+    .muted { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Sending from your PHP app</h1>
+  <p class="muted">The form posts to a plain PHP endpoint, which uses the Emitter; every open tab gets the notification through Socket.IO.</p>
+  <form id="send"><input id="text" placeholder="Notification text" required><button>Send</button></form>
+  <ul id="log"></ul>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const socket = io(`http://${location.hostname}:3000`);
+    function log(text) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      document.getElementById("log").append(item);
+    }
+    socket.on("connect", () => log("connected"));
+    socket.on("notification", ({ text, at }) => log(`${at} ${text}`));
+    document.getElementById("send").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = document.getElementById("text");
+      // A plain HTTP request to the PHP app, not a Socket.IO emit.
+      await fetch("/notify", { method: "POST", body: new URLSearchParams({ text: input.value }) });
+      input.value = "";
+    });
+  </script>
+</body>
+</html>
