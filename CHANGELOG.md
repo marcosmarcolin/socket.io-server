@@ -6,11 +6,13 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- **HTTP compression**, as the reference's `httpCompression`, on by default: polling answers of 1 KB or more are compressed with gzip or deflate when the client accepts them. `compress(false)` on an emit or a broadcast now keeps it plain, instead of doing nothing.
 - **The `packetCreate` session event**: `$socket->conn->on('packetCreate', fn (Packet $packet) => ...)` sees each message and ping the server writes, before it is buffered, as in the reference.
 - **Adapter room events**, as the reference's adapter: `$nsp->adapter()->on('create-room' | 'delete-room' | 'join-room' | 'leave-room', ...)` reports when the rooms of the current process change, with any adapter.
 
 ### Changed
 
+- **Polling answers of 1 KB or more are compressed by default**, as in the reference, when the client sends `Accept-Encoding`. `'httpCompression' => false` keeps them plain.
 - **For custom adapters:** the `Adapter` interface has `on()` and `off()`, for the room events. `InMemoryAdapter` now extends the package's event emitter, so adapters that extend it get them; ones that implement the interface directly must add them.
 
 ## [0.3.0] - 2026-10-26
