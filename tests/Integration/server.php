@@ -10,6 +10,8 @@ declare(strict_types=1);
 
 use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\ConnectionError;
+use Marcolin\SocketIO\Engine\Request;
+use Marcolin\SocketIO\Engine\ResponseHeaders;
 use Marcolin\SocketIO\Socket;
 use Marcolin\SocketIO\SocketIO;
 use Workerman\Worker;
@@ -18,12 +20,28 @@ require __DIR__ . '/../../vendor/autoload.php';
 
 $io = new SocketIO(options: ['pingInterval' => 1000, 'pingTimeout' => 1000, 'connectTimeout' => 2000]);
 
+// A cookie on each session's first answer, and a header on every answer.
+$io->engine->on('initial_headers', static function (ResponseHeaders $headers): void {
+    $headers->append('Set-Cookie', 'io-test=1; Path=/');
+});
+$io->engine->on('headers', static function (ResponseHeaders $headers): void {
+    $headers->set('X-Engine', 'php');
+});
+// The last refused request, for the client to read back.
+$lastConnectionError = null;
+$io->engine->on(
+    'connection_error',
+    static function (Request $request, int $code, string $message) use (&$lastConnectionError): void {
+        $lastConnectionError = ['code' => $code, 'message' => $message, 'transport' => $request->query('transport')];
+    },
+);
+
 $io->use(static function (Socket $socket, Closure $next): void {
     $refused = ($socket->handshake['auth']['token'] ?? null) === 'refuse';
     $next($refused ? new ConnectionError('refused', ['reason' => 'bad token']) : null);
 });
 
-$io->on('connection', static function (Socket $socket) use ($io): void {
+$io->on('connection', static function (Socket $socket) use ($io, &$lastConnectionError): void {
     // A socket middleware stops the events named "forbidden", and the error listener tells the client.
     $socket->use(static function (array $event, Closure $next): void {
         $next($event[0] === 'forbidden' ? new RuntimeException('forbidden event') : null);
@@ -33,6 +51,9 @@ $io->on('connection', static function (Socket $socket) use ($io): void {
     });
     $socket->on('forbidden', static function () use ($socket): void {
         $socket->emit('let-through');
+    });
+    $socket->on('last-connection-error', static function (Closure $ack) use (&$lastConnectionError): void {
+        $ack($lastConnectionError);
     });
 
     // Answers with the arguments it got, through the acknowledgement or as an event.

@@ -17,7 +17,7 @@ final class FakeHttpExchange implements HttpExchange
 
     public ?string $responseBody = null;
 
-    /** @var array<string, string> */
+    /** @var array<string, string|list<string>> */
     public array $responseHeaders = [];
 
     /** @var list<Closure(): void> */
