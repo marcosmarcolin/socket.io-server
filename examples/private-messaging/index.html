@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Private messages</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    main { display: grid; grid-template-columns: minmax(140px, 1fr) 3fr; gap: 1rem; }
+    #users { list-style: none; padding: 0; margin: 0; border: 1px solid #ddd; border-radius: 6px; }
+    #users li { padding: .5rem; cursor: pointer; border-bottom: 1px solid #eee; }
+    #users li[aria-selected="true"] { background: #f0f4ff; }
+    .dot { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; background: #bbb; margin-right: .4rem; }
+    .online .dot { background: #16a34a; }
+    #messages { list-style: none; padding: .5rem; border: 1px solid #ddd; border-radius: 6px; min-height: 220px; margin: 0; }
+    #messages li { padding: .2rem 0; }
+    form { display: flex; gap: .5rem; margin: .5rem 0; flex-wrap: wrap; }
+    input { flex: 1; padding: .5rem; font: inherit; }
+    button { padding: .5rem 1rem; font: inherit; }
+    .muted { color: #888; }
+    @media (max-width: 520px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>Private messages</h1>
+  <p class="muted" id="status">Pick a name to start. Each tab of a user gets their messages.</p>
+  <form id="join"><input id="username" placeholder="Your name" required><button>Join</button></form>
+  <main>
+    <ul id="users"></ul>
+    <section>
+      <ul id="messages"></ul>
+      <form id="send"><input id="text" placeholder="Private message" required><button>Send</button></form>
+    </section>
+  </main>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const socket = io(`http://${location.hostname}:3000`, { autoConnect: false });
+    const users = new Map();
+    const conversations = new Map();
+    let me = null;
+    let selected = null;
+
+    function render() {
+      const list = document.getElementById("users");
+      list.replaceChildren(...[...users.values()].filter((user) => user.userId !== me).map((user) => {
+        const item = document.createElement("li");
+        item.className = user.connected ? "online" : "";
+        item.setAttribute("aria-selected", String(user.userId === selected));
+        item.innerHTML = '<span class="dot"></span><span class="name"></span>';
+        item.querySelector(".name").textContent = user.username;
+        item.addEventListener("click", () => {
+          selected = user.userId;
+          render();
+        });
+        return item;
+      }));
+      const messages = document.getElementById("messages");
+      messages.replaceChildren(...(conversations.get(selected) ?? []).map(({ fromSelf, content }) => {
+        const item = document.createElement("li");
+        item.textContent = `${fromSelf ? "you" : users.get(selected)?.username}: ${content}`;
+        return item;
+      }));
+    }
+
+    function remember(userId, message) {
+      conversations.set(userId, [...(conversations.get(userId) ?? []), message]);
+      render();
+    }
+
+    // A stored session id brings this browser back as the same user, in every tab.
+    const sessionId = localStorage.getItem("sessionId");
+    if (sessionId) {
+      socket.auth = { sessionId };
+      socket.connect();
+    }
+
+    document.getElementById("join").addEventListener("submit", (event) => {
+      event.preventDefault();
+      socket.auth = { username: document.getElementById("username").value };
+      socket.connect();
+    });
+    document.getElementById("send").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = document.getElementById("text");
+      if (selected === null) {
+        return;
+      }
+      socket.emit("private message", selected, input.value);
+      remember(selected, { fromSelf: true, content: input.value });
+      input.value = "";
+    });
+
+    socket.on("session", ({ sessionId, userId }) => {
+      localStorage.setItem("sessionId", sessionId);
+      socket.auth = { sessionId };
+      me = userId;
+      document.getElementById("join").hidden = true;
+    });
+    socket.on("connect_error", (error) => {
+      document.getElementById("status").textContent = `Refused: ${error.message}`;
+    });
+    socket.on("users", (list) => {
+      list.forEach((user) => users.set(user.userId, user));
+      document.getElementById("status").textContent = `Connected. Click someone to talk.`;
+      render();
+    });
+    socket.on("user connected", (user) => {
+      users.set(user.userId, { ...user, connected: true });
+      render();
+    });
+    socket.on("user disconnected", (userId) => {
+      const user = users.get(userId);
+      if (user) {
+        user.connected = false;
+        render();
+      }
+    });
+    socket.on("private message", ({ content, from, to }) => {
+      // From another user, or from one of this user's other tabs.
+      const fromSelf = from === me;
+      remember(fromSelf ? to : from, { fromSelf, content });
+    });
+  </script>
+</body>
+</html>
