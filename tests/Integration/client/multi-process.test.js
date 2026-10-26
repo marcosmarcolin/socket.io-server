@@ -1,5 +1,5 @@
 // Multi-process tests with the official socket.io-client, against tests/Integration/multi-process-server.php:
-// two worker processes on one port, joined by ChannelAdapter over workerman/channel.
+// two worker processes on one port, joined by ChannelAdapter over workerman/channel, or by RedisAdapter.
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { io } from "socket.io-client";
@@ -51,7 +51,7 @@ async function clientsOnEveryProcess(perProcess) {
 before(async () => {
   await clientsOnEveryProcess(2);
 
-  // The workers connect to the channel server as they start: retry until a broadcast crosses.
+  // The workers connect to the broker as they start: retry until a broadcast crosses.
   const [[sender], [receiver]] = [...byProcess.values()];
   for (let attempt = 0; ; attempt++) {
     const token = `warmup-${attempt}`;

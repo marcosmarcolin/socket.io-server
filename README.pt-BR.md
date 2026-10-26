@@ -38,7 +38,7 @@ Ele fala os protocolos atuais, Engine.IO v4 e Socket.IO v5, então navegadores e
 - [Workerman](https://github.com/walkor/workerman) 5.2.
 - No cliente: `socket.io-client` v3 ou v4. Para os clientes 1.x e 2.x, use o [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io).
 
-Fora do escopo: WebTransport, polling JSONP, parsers customizados (msgpack), namespaces dinâmicos, recuperação de estado de conexão e um adapter Redis.
+Fora do escopo: WebTransport, polling JSONP, parsers customizados (msgpack), namespaces dinâmicos e recuperação de estado de conexão.
 
 ## Instalação
 
@@ -205,7 +205,7 @@ Um middleware faz o mesmo papel um passo depois, com a sessão já aberta: ele p
 | `on('connection', fn (Socket $socket))` | O evento `connection` do namespace principal. |
 | `on('workerStart' \| 'workerStop', fn (Worker $worker))` | Cada processo iniciando ou parando. |
 | `use(fn (Socket $socket, Closure $next))` | Um middleware em `/`. |
-| `adapter(fn (Nsp $nsp): Adapter)` | Como os namespaces guardam as salas e fazem broadcast, por exemplo `ChannelAdapter::factory()`. |
+| `adapter(fn (Nsp $nsp): Adapter)` | Como os namespaces guardam as salas e fazem broadcast, por exemplo `ChannelAdapter::factory()` ou `RedisAdapter::factory()`. |
 | `close()` | Desliga o servidor: cada socket sai com `server shutting down`, as conexões fecham, e o worker para de aceitar novas neste processo. |
 | `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcast em `/`, como num namespace. |
 
@@ -269,7 +269,7 @@ $io->to('room1')->timeout(5000)->emit('vote', function (?Throwable $error, array
 - Sem `timeout()`, passar um `Closure` lança exceção, já que um socket que nunca responde deixaria o callback esperando para sempre.
 - Sem nenhum socket a alcançar, o callback roda na hora com `[]`.
 - Com `volatile`, um socket pulado por ter o transporte ocupado continua contando, então a espera termina no timeout.
-- Funciona dentro de um processo: o `ChannelAdapter` lança exceção.
+- Funciona dentro de um processo: o `ChannelAdapter` e o `RedisAdapter` lançam exceção.
 
 ### Broadcast: `BroadcastOperator`
 
@@ -313,7 +313,14 @@ $io->attach($worker);
 
 ## Vários processos
 
-O broadcast chega aos outros processos pelo `ChannelAdapter` e por um servidor [workerman/channel](https://github.com/walkor/channel):
+O broadcast chega aos outros processos por um adapter, definido no `workerStart` de cada processo:
+
+- `ChannelAdapter`, sobre um servidor [workerman/channel](https://github.com/walkor/channel): nada mais para rodar, bom para uma máquina.
+- `RedisAdapter`, sobre um servidor Redis: para várias máquinas, ou quando você já usa Redis. Não precisa de nenhum pacote extra.
+
+Os dois funcionam do mesmo jeito: cada broadcast é codificado uma vez e publicado uma vez, e cada processo o entrega aos seus próprios sockets.
+
+### workerman/channel
 
 ```sh
 composer require workerman/channel
@@ -347,9 +354,51 @@ $io->attach($worker);
 Worker::runAll();
 ```
 
-- Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem. Definir `'transports' => ['websocket']` também no servidor recusa o polling de vez.
+### Redis
+
+```php
+<?php
+
+use Marcolin\SocketIO\Adapter\RedisAdapter;
+use Marcolin\SocketIO\SocketIO;
+use Workerman\Worker;
+
+require __DIR__ . '/vendor/autoload.php';
+
+$io = new SocketIO(options: ['cors' => ['origin' => ['https://example.com']]]);
+
+// The adapter connects to Redis, which needs each process's event loop. It reconnects by itself.
+$io->on('workerStart', function () use ($io): void {
+    $io->adapter(RedisAdapter::factory('redis://:password@10.0.0.5:6379'));
+});
+
+$worker = new Worker('tcp://0.0.0.0:3000');
+$worker->count = 4;
+$worker->reusePort = true;
+$io->attach($worker);
+
+Worker::runAll();
+```
+
+Todos os argumentos são opcionais:
+
+```php
+RedisAdapter::factory(
+    url: 'redis://127.0.0.1:6379',   // redis://[[user]:password@]host[:port]
+    key: 'socket.io',                // the first part of every channel name
+    onError: null,                   // fn (Throwable $error): connection failures and Redis errors
+);
+```
+
+- A URL padrão é `redis://127.0.0.1:6379`. Caracteres reservados no usuário ou na senha vão com percent-encoding; um número de banco é aceito e ignorado, porque os canais de publish e subscribe são compartilhados por todos os bancos. TLS (`rediss://`) ainda não é suportado.
+- Servidores de apps diferentes no mesmo Redis precisam de `key`s diferentes, senão recebem os broadcasts uns dos outros.
+- Quando o Redis está inacessível, o adapter tenta de novo a cada segundo e informa a falha uma vez ao `onError` (`Worker::log` por padrão). Até 1.000 publicações esperam a conexão; mensagens publicadas enquanto um processo estava desconectado se perdem, como sempre no pub/sub do Redis.
+
+### Limites
+
+- Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem. Definir `'transports' => ['websocket']` também no servidor recusa o polling de vez. Entre máquinas, um load balancer com sticky sessions permite o polling.
 - Só o broadcast atravessa processos (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` e `disconnectSockets` agem no processo atual.
-- Broadcasts com acknowledgement (`timeout()->emit(..., $callback)`) ainda não atravessam processos: o `ChannelAdapter` lança exceção.
+- Broadcasts com acknowledgement (`timeout()->emit(..., $callback)`) ainda não atravessam processos: os dois adapters lançam exceção.
 
 ## Exemplos
 
@@ -363,6 +412,7 @@ Cada um roda com `php examples/<nome>/start.php start`; depois abra http://local
 | [namespaces](examples/namespaces) | `/public` e `/admin`, um middleware com token, `ConnectionError` |
 | [binary](examples/binary) | upload e download de arquivo com `Binary` |
 | [multi-process](examples/multi-process) | quatro processos e `ChannelAdapter` |
+| [redis](examples/redis) | quatro processos e `RedisAdapter`; precisa de um servidor Redis |
 
 ## Migrando do phpsocket.io
 
@@ -385,6 +435,7 @@ As mudanças estão listadas no [CHANGELOG.md](CHANGELOG.md), em inglês.
 | A suíte oficial do Socket.IO v5 rodando no CI (32 de 32 passando) | Pronto |
 | Testes de integração com o `socket.io-client` 4.8.4 oficial: polling, WebSocket, upgrade, namespaces, salas, acks, binário | Pronto |
 | Broadcast entre processos: `ChannelAdapter` sobre o `workerman/channel` | Pronto |
+| Broadcast entre processos no Redis: `RedisAdapter`, com cliente próprio | Pronto |
 | Testes de integração com vários processos e verificação de escala (200 clientes, 4.000 entregas) | Pronto |
 | Exemplos: chat, salas, acknowledgements, namespaces, dados binários, vários processos | Pronto |
 | README completo com referência da API, e guia de migração do phpsocket.io | Pronto |
@@ -402,6 +453,7 @@ tests/Compliance/engine-io.sh                  # a suíte oficial do Engine.IO v
 tests/Compliance/socket-io.sh                  # a suíte oficial do Socket.IO v5
 tests/Integration/run.sh                       # o socket.io-client oficial contra este servidor
 tests/Integration/run.sh multi-process         # o mesmo com dois processos e um servidor de canal
+tests/Integration/run.sh multi-process-redis   # os mesmos dois processos, ligados pelo Redis
 tests/Integration/run.sh examples              # todos os exemplos, cada um contra o seu teste
 ```
 

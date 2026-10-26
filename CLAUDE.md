@@ -13,7 +13,8 @@ This file is the specification of how the package works. Behavior changes start 
 
 **It is not** (out of scope; don't implement without an explicit decision):
 - A server for `socket.io-client` 1.x/2.x (Engine.IO v3). Those clients have [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io).
-- WebTransport, JSONP, custom parsers (msgpack), dynamic namespaces (regex or callback), connection state recovery, a Redis adapter.
+- WebTransport, JSONP, custom parsers (msgpack), dynamic namespaces (regex or callback), connection state recovery.
+- Compatibility with the Node adapters (`@socket.io/redis-adapter`, `@socket.io/redis-emitter`): `RedisAdapter` speaks only to other servers of this package.
 
 ## Sources of truth
 
@@ -37,7 +38,7 @@ A change is done only when all of these hold:
 3. **The protocol suites pass in CI**, once they exist:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers (`tests/Compliance/socket-io-server.php`, run by `tests/Compliance/socket-io.sh`).
-4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh` and `tests/Integration/run.sh multi-process`).
+4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh`, `tests/Integration/run.sh multi-process` and `tests/Integration/run.sh multi-process-redis`).
 5. **The docs are current:** both READMEs (with the API reference), the migration guide in `docs/`, CLAUDE.md and examples match the behavior, and `CHANGELOG.md` lists every user-visible change under `[Unreleased]`. Each example has a test with the official client (`tests/Integration/client/examples/`) that CI runs, so an example that stops working fails the build.
 
 ## Code rules
@@ -75,6 +76,7 @@ tests/Compliance/engine-io.sh                  # official Engine.IO v4 suite, in
 tests/Compliance/socket-io.sh                  # official Socket.IO v5 suite, in Docker
 tests/Integration/run.sh                       # the official socket.io-client against our server, in Docker
 tests/Integration/run.sh multi-process         # the same over two processes and a channel server
+tests/Integration/run.sh multi-process-redis   # the same two processes, joined by a Redis server
 tests/Integration/run.sh examples              # every example in examples/, each against its test
 ```
 
@@ -143,9 +145,18 @@ src/
     Adapter.php                 the extension point for other processes
     BroadcastOptions.php        rooms, except and volatile of a broadcast
     InMemoryAdapter.php         local rooms and broadcast; not final, the base of other adapters
-    ChannelAdapter.php          cross-process broadcast through a PubSub; final
+    PubSubAdapter.php           cross-process broadcast through a PubSub; abstract, the base of the two below
+    ChannelAdapter.php          PubSubAdapter on workerman/channel; final, only adds factory()
+    RedisAdapter.php            PubSubAdapter on Redis; final, only adds factory()
     PubSub.php                  publish/subscribe between processes, faked in tests
     WorkermanChannelPubSub.php  PubSub on workerman/channel: the only class touching the static Channel\Client
+    Redis/                      our own Redis pub/sub client, on Workerman only
+      RedisPubSub.php           PubSub over two connections, a publisher and a subscriber
+      RedisConnection.php       one connection: login, queue until ready, reconnect
+      Resp.php, RedisError.php  RESP2 commands out, replies in
+      RedisUrl.php              redis://[[user]:password@]host[:port][/database]
+      Dialer.php, Link.php      TCP I/O interfaces, faked in tests
+      WorkermanDialer.php, WorkermanLink.php  the same on AsyncTcpConnection
 ```
 
 ### Workerman 5 integration
@@ -246,7 +257,7 @@ src/
 - **One socket per namespace and connection:** a second `CONNECT` to a joined namespace, or a packet for a namespace the connection didn't join, closes the connection. After leaving a namespace (either side), the client can connect to it again with a new id.
 - **Flags without hidden state:** `timeout()`, `volatile` and `compress()` on a `Socket` return an immutable `SocketEmitter`; the socket itself keeps no flags. `compress()` exists for API compatibility and has no effect: the server doesn't compress. `volatile` drops the emit when the transport can't take it right now.
 - **Disconnect reasons** (`DisconnectReason`, given to listeners as strings): the Engine.IO close reasons, plus `server namespace disconnect`, `client namespace disconnect`, `forced server close` and `server shutting down`. `disconnecting` fires while the socket still has its rooms, `disconnect` after it left them.
-- **Ids:** a socket id differs from its Engine.IO session id and differs per namespace. Format: 24 lowercase hex characters, which `ChannelAdapter` relies on to recognize sid rooms.
+- **Ids:** a socket id differs from its Engine.IO session id and differs per namespace. Format: 24 lowercase hex characters, which `PubSubAdapter` relies on to recognize sid rooms.
 - **Strict parser validation** (any violation throws `Parser\InvalidPacketException`, which closes the connection), with the reference's error messages:
   - the type must be 0 to 6;
   - binary types require `N-`, with `N` from 1 to `maxAttachments` (10 by default, as in the reference);
@@ -277,7 +288,7 @@ src/
 - **Catch-all listeners**, as in the reference:
   - `onAny`/`prependAny`/`offAny`/`listenersAny` get each received event of a connected socket as `(string $event, ...$args)`, with the ack `Closure` last, before the event's own listeners; those are skipped if an `onAny` listener disconnected the socket. Numeric event names arrive as strings, as with `on()`.
   - `onAnyOutgoing` and its family get each event sent to the socket, without the ack callback, before it is written: from `emit()`/`send()`, and from the adapter for every socket a broadcast reaches (with or without ack).
-  - The adapter asks for the event's data only when a reached socket has an outgoing listener, once per broadcast. `ChannelAdapter` decodes another process's parts for it then; parts that aren't one event notify nobody.
+  - The adapter asks for the event's data only when a reached socket has an outgoing listener, once per broadcast. `PubSubAdapter` decodes another process's parts for it then; parts that aren't one event notify nobody.
   - Listeners added or removed while listeners run take effect from the next event.
 - **Reserved names** (`Packet::RESERVED_EVENTS`): `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` and `removeListener` can't be emitted to the client; doing so throws. A received event with one of these names is invalid, as in the reference.
 
@@ -322,7 +333,7 @@ Worker::runAll();
 - `SocketIO`: `of()`, `on()` (including `workerStart`/`workerStop`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
 - **`close()`**, as the reference's:
   1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
-  2. each adapter's `close()` runs (`ChannelAdapter` unsubscribes from its channels);
+  2. each adapter's `close()` runs (`PubSubAdapter` unsubscribes from its channels);
   3. `Engine\Server::close()` closes every session at once (`Engine\Socket::close(true)`, dropping what is buffered; a pending poll gets `1`);
   4. the attached worker stops accepting connections in this process (`unlisten()`, as `httpServer.close()`).
 
@@ -342,21 +353,28 @@ Worker::runAll();
 ## Multiple processes
 
 - `InMemoryAdapter` is the default.
-- `ChannelAdapter` uses `workerman/channel`. It carries over phpsocket.io 3.x's fixes:
-  - per-namespace channels (`socket.io#<nsp>#` and `socket.io#<nsp>#<room>#`), with one callback per channel via `Client::on()`;
+- `PubSubAdapter` holds the cross-process logic, on any `PubSub`; `ChannelAdapter` (workerman/channel) and `RedisAdapter` (Redis) only add a `factory()`. It carries over phpsocket.io 3.x's `ChannelAdapter` fixes:
+  - per-namespace channels (`<key>#<nsp>#` and `<key>#<nsp>#<room>#`, the key `socket.io` by default), with one listener per channel;
   - sid rooms are detected by their shape (24 hex characters) and go through the namespace's default channel instead of getting their own;
   - a channel is unsubscribed only once its room is empty in the process;
   - creating the adapter outside the event loop throws a clear error (the right place is `workerStart`).
 - **How a broadcast crosses processes:**
-  - `ChannelAdapter` delivers it to this process's sockets first, then publishes it already encoded, so no other process encodes it again;
+  - `PubSubAdapter` delivers it to this process's sockets first, then publishes it already encoded, so no other process encodes it again;
   - each adapter has a random id and ignores its own messages, since a publisher receives them too;
-  - the message is an array of scalars (`sender`, `parts` as `['text'|'binary', string]`, `rooms`, `except`, `volatile`), never objects. `unserialize()` then creates no class of ours, and the channel server needs none of our code. Malformed messages are ignored.
+  - the message is an array of scalars (`sender`, `parts` as `['text'|'binary', string]`, `rooms`, `except`, `volatile`), never objects. `unserialize()` then creates no class of ours, and the broker needs none of our code. Malformed messages are ignored.
 - **One publish per broadcast.** A single room goes to its room channel. Several rooms, a sid room, or no room go once to the namespace channel, and each process filters by the rooms itself. phpsocket.io publishes to each room's channel, so a process with members in two of the rooms delivers twice; this fixes it.
-- **Only broadcasts cross processes.** `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the local process, as in `InMemoryAdapter`. Broadcasts with an ack throw in `ChannelAdapter`: collecting answers across processes needs the reference's `ClusterAdapter` protocol (client counts per process and a known server count), not built yet.
-- **Setup:** run a `Channel\Server` worker, and in `workerStart` call `$io->adapter(ChannelAdapter::factory($host, $port))`. `PubSub` is the seam that keeps the static `Channel\Client` out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
+- **Only broadcasts cross processes.** `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the local process, as in `InMemoryAdapter`. Broadcasts with an ack throw in `PubSubAdapter`, naming the adapter: collecting answers across processes needs the reference's `ClusterAdapter` protocol (client counts per process and a known server count), not built yet.
+- **Setup:** in `workerStart`, call `$io->adapter(ChannelAdapter::factory($host, $port))` with a `Channel\Server` worker running, or `$io->adapter(RedisAdapter::factory($url, $key, $onError))`. `PubSub` is the seam that keeps the static `Channel\Client` and the Redis connections out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
+- **`RedisAdapter`** has its own client, on Workerman's `AsyncTcpConnection`, so it adds no dependency. `workerman/redis` doesn't fit: after its first `SUBSCRIBE` it sends no other command, so rooms couldn't subscribe or unsubscribe, and it prints errors with `echo`.
+  - `factory()` arguments, all optional: `url` (`redis://127.0.0.1:6379`), `key` (`socket.io`; apps sharing one Redis need different keys), and `onError` (`Worker::log` by default). An invalid URL throws `InvalidArgumentException` before the event loop check; the message never includes the URL, which may hold a password.
+  - URLs: `redis://[[user]:password@]host[:port][/database]`, percent-decoded. A user without a password, a path other than a database number, a query or another scheme (`rediss://` included: TLS isn't supported yet) throws. The database is ignored: pub/sub channels are shared by every database.
+  - Two connections per process, shared by every namespace: a subscribed connection can't publish. Each speaks RESP2 and logs in with `AUTH` first when the URL has a password.
+  - Messages are `serialize()`d, as workerman/channel does, and read back with `allowed_classes => false` and `max_depth`; a payload that isn't a serialized array is ignored, without warnings. Messages for a channel just unsubscribed are ignored.
+  - **Reconnection:** a dropped or refused connection retries every second (`RedisConnection::RECONNECT_DELAY`, through the `Scheduler`). The subscriber subscribes every current channel again once ready. While not ready, a connection keeps up to 1,000 commands (`MAX_QUEUED`) and drops the rest; subscriptions aren't queued, since they are renewed on login. Publishes lost while disconnected are lost, as with any Redis pub/sub.
+  - **Errors** go to `onError` as exceptions, never `echo`: a failure to connect once until the next login, a lost connection, a refused login, Redis error replies, a malformed reply (which also closes the connection), and exceptions thrown by listeners.
 - With several processes on the same port, clients must use `transports: ['websocket']`, because polling breaks across processes without sticky sessions. Document this in the README.
-- **Multi-process tests** (`tests/Integration/multi-process-server.php`): two processes with `reusePort`, so the kernel spreads connections, plus a `Channel\Server`.
-  - The tests first make sure clients landed on both processes, and that a broadcast crosses (retrying while the workers connect to the channel server).
+- **Multi-process tests** (`tests/Integration/multi-process-server.php`): two processes with `reusePort`, so the kernel spreads connections, plus a `Channel\Server`; or, with `ADAPTER=redis` (`run.sh multi-process-redis`), `RedisAdapter` on a pinned Redis image with a password, so the login is covered too. The `redis` example runs against the same Redis.
+  - The tests first make sure clients landed on both processes, and that a broadcast crosses (retrying while the workers connect to the broker).
   - They cover emits, rooms, several rooms at once, `except` and `broadcast` across processes.
   - The **scale check** has 200 WebSocket clients get 20 broadcasts each: every client must get every message once and in order, and the time is printed. It catches loss and duplication, not performance.
 
@@ -372,3 +390,5 @@ Worker::runAll();
 8. [x] `ChannelAdapter`, with a multi-process integration test and a scale check.
 9. [x] Complete README, examples, and a migration guide from phpsocket.io 3.x.
 10. [x] First release, `v0.1.0`, on Packagist; the READMEs install with `composer require` and show its badges (version, downloads, PHP version).
+11. [x] `RedisAdapter`, with its own Redis client, the multi-process tests on Redis and an example.
+12. [ ] The reference's cluster protocol on `PubSub`: `fetchSockets`, `socketsJoin`/`socketsLeave`, `disconnectSockets`, `serverSideEmit` and broadcast acks across processes, for both adapters.

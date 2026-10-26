@@ -7,8 +7,7 @@ namespace Marcolin\SocketIO\Adapter;
 use Channel\Client;
 use Closure;
 use LogicException;
-use TypeError;
-use Workerman\Worker;
+use Marcolin\SocketIO\Engine\Workerman\EventLoop;
 
 /**
  * PubSub on a workerman/channel server. The only class that touches Channel\Client, which is static.
@@ -25,7 +24,7 @@ final class WorkermanChannelPubSub implements PubSub
         if (! class_exists(Client::class)) {
             throw new LogicException('ChannelAdapter needs workerman/channel: composer require workerman/channel');
         }
-        if (! self::eventLoopRuns()) {
+        if (! EventLoop::runs()) {
             throw new LogicException(
                 'ChannelAdapter needs the running Workerman event loop. Set it in workerStart: '
                 . '$io->on(\'workerStart\', fn () => $io->adapter(ChannelAdapter::factory()));',
@@ -53,17 +52,5 @@ final class WorkermanChannelPubSub implements PubSub
     public function publish(string $channel, array $message): void
     {
         Client::publish($channel, $message);
-    }
-
-    private static function eventLoopRuns(): bool
-    {
-        try {
-            Worker::getEventLoop();
-
-            return true;
-        } catch (TypeError) {
-            // Workerman declares a non-null return, and fails this way before the loop exists.
-            return false;
-        }
     }
 }
