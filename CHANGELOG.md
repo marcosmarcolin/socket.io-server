@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-26
+
+Broadcasts about twice as fast, and a multiplayer Pong example.
+
 ### Added
 
 - **A `pong` example**: multiplayer Pong, with a queue that pairs players, one room per match, and the game loop on the server at 30 frames a second, sending the state `volatile`.
@@ -169,7 +173,8 @@ The first release.
 - Across processes, only broadcasts travel; the socket helpers (`fetchSockets`, `socketsJoin`...) act on the current process.
 - With several processes on one port, clients must use `transports: ['websocket']`.
 
-[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.2.0...v0.3.0
