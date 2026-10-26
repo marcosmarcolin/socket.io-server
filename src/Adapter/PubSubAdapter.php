@@ -19,7 +19,6 @@ use Marcolin\SocketIO\Parser\PacketType;
 use Marcolin\SocketIO\RemoteSocket;
 use Marcolin\SocketIO\Socket;
 use Marcolin\SocketIO\TimeoutException;
-use ReflectionClass;
 
 /**
  * Runs a namespace over several servers through publish and subscribe, with the reference's cluster protocol: the
@@ -29,6 +28,8 @@ use ReflectionClass;
  *   process writes them to its own sockets without encoding them again.
  * - socketsJoin, socketsLeave and disconnectSockets apply on every server.
  * - fetchClusterSockets asks every server for its selected sockets, and gets them as RemoteSocket.
+ * - Broadcasts with an acknowledgement reach every server, which reports how many sockets it reached and relays
+ *   their answers.
  * - serverSideEmit reaches the namespace on the other servers, and may wait for one response from each.
  * - Each server publishes a heartbeat when it has published nothing for HEARTBEAT_INTERVAL, so the others know how
  *   many servers there are; one silent for HEARTBEAT_TIMEOUT, or that closed its adapter, is gone.
@@ -72,6 +73,9 @@ abstract class PubSubAdapter extends InMemoryAdapter
     /** @var array<string, Request> requests waiting for responses, by id */
     private array $requests = [];
 
+    /** @var array<string, array{Closure(int): void, Closure(mixed...): void}> broadcasts waiting for acks, by id */
+    private array $ackRequests = [];
+
     /**
      * @param string $key the first part of every channel name, which keeps apps sharing a broker apart
      */
@@ -90,7 +94,10 @@ abstract class PubSubAdapter extends InMemoryAdapter
     }
 
     /**
-     * Not supported across processes yet: the answers of other processes' sockets wouldn't come back.
+     * Reaches the sockets of every server. Each other server reports its client count and relays its sockets'
+     * answers until the timeout, after which they are dropped.
+     *
+     * @throws LogicException without a timeout in the options
      */
     final public function broadcastWithAck(
         Packet $packet,
@@ -98,8 +105,19 @@ abstract class PubSubAdapter extends InMemoryAdapter
         Closure $clientCount,
         Closure $ack,
     ): void {
-        $adapter = (new ReflectionClass($this))->getShortName();
-        throw new LogicException($adapter . ' doesn\'t support broadcasting with an acknowledgement yet');
+        $timeout = $options->timeout ?? throw new LogicException('A broadcast with an acknowledgement needs a timeout');
+        $requestId = bin2hex(random_bytes(8));
+        $this->ackRequests[$requestId] = [$clientCount, $ack];
+        $this->scheduler->after($timeout, function () use ($requestId): void {
+            unset($this->ackRequests[$requestId]);
+        });
+        // Not a room channel: every counted server must report, members or not.
+        $this->publish($this->prefix, MessageType::Broadcast, [
+            'opts' => self::wireOptions($options),
+            'parts' => self::wireParts($this->encode($packet)),
+            'requestId' => $requestId,
+        ]);
+        parent::broadcastWithAck($packet, $options, $clientCount, $ack);
     }
 
     final public function broadcast(Packet $packet, BroadcastOptions $options): void
@@ -316,13 +334,14 @@ abstract class PubSubAdapter extends InMemoryAdapter
 
         match ($type) {
             MessageType::InitialHeartbeat => $this->publish($this->prefix, MessageType::Heartbeat),
-            MessageType::Broadcast => $this->onBroadcast($message),
+            MessageType::Broadcast => $this->onBroadcast($uid, $message),
             MessageType::SocketsJoin, MessageType::SocketsLeave => $this->onRooms($type, $message),
             MessageType::DisconnectSockets => $this->onDisconnectSockets($message),
             MessageType::ServerSideEmit => $this->onServerSideEmit($uid, $message),
             MessageType::ServerSideEmitResponse => $this->onServerSideEmitResponse($uid, $message),
             MessageType::FetchSockets => $this->onFetchSockets($uid, $message),
             MessageType::FetchSocketsResponse => $this->onFetchSocketsResponse($uid, $message),
+            MessageType::BroadcastClientCount, MessageType::BroadcastAck => $this->onBroadcastResponse($type, $message),
             default => null,
         };
     }
@@ -332,11 +351,19 @@ abstract class PubSubAdapter extends InMemoryAdapter
      *
      * @param array<mixed> $message
      */
-    private function onBroadcast(array $message): void
+    private function onBroadcast(string $uid, array $message): void
     {
         $options = self::options($message['opts'] ?? null);
         $parts = self::parts($message['parts'] ?? null);
         if ($options === null || $parts === null) {
+            return;
+        }
+        $requestId = $message['requestId'] ?? null;
+        if ($requestId !== null) {
+            if (is_string($requestId)) {
+                $this->onBroadcastWithAck($uid, $requestId, $parts, $options);
+            }
+
             return;
         }
         $this->deliver($parts, $options, static function () use ($parts): array {
@@ -345,6 +372,71 @@ abstract class PubSubAdapter extends InMemoryAdapter
             // The decoder gives binary events the plain Event type.
             return $packet?->type === PacketType::Event && is_array($packet->data) ? array_values($packet->data) : [];
         });
+    }
+
+    /**
+     * Sends another server's broadcast with an acknowledgement to the sockets of this one, under an ack id of this
+     * namespace, and reports back to that server: the client count, then each answer's first argument.
+     *
+     * @param list<string|Binary> $parts
+     */
+    private function onBroadcastWithAck(string $uid, string $requestId, array $parts, BroadcastOptions $options): void
+    {
+        $packet = self::decode($parts);
+        $timeout = $options->timeout;
+        if ($packet?->type !== PacketType::Event || ! is_array($packet->data) || $timeout === null || $timeout <= 0) {
+            return;
+        }
+        $id = $this->nsp->nextAckId();
+        $channel = $this->responseChannel($uid);
+        parent::broadcastWithAck(
+            new Packet(PacketType::Event, '/', array_values($packet->data), $id),
+            $options,
+            function (int $clientCount) use ($channel, $requestId): void {
+                $this->publish($channel, MessageType::BroadcastClientCount, [
+                    'requestId' => $requestId,
+                    'clientCount' => $clientCount,
+                ]);
+            },
+            function (mixed ...$args) use ($channel, $requestId): void {
+                $this->publish($channel, MessageType::BroadcastAck, [
+                    'requestId' => $requestId,
+                    'parts' => self::wireParts($this->encode(new Packet(PacketType::Ack, '/', [$args[0] ?? null], 0))),
+                ]);
+            },
+        );
+        // The requester stops listening after the timeout; so do these sockets.
+        $this->scheduler->after($timeout, function () use ($id): void {
+            foreach ($this->nsp->sockets() as $socket) {
+                $socket->forgetAck($id);
+            }
+        });
+    }
+
+    /**
+     * @param array<mixed> $message
+     */
+    private function onBroadcastResponse(MessageType $type, array $message): void
+    {
+        $requestId = $message['requestId'] ?? null;
+        $request = is_string($requestId) ? ($this->ackRequests[$requestId] ?? null) : null;
+        if ($request === null) {
+            return;
+        }
+        [$clientCount, $ack] = $request;
+        if ($type === MessageType::BroadcastClientCount) {
+            $count = $message['clientCount'] ?? null;
+            if (is_int($count) && $count >= 0) {
+                $clientCount($count);
+            }
+
+            return;
+        }
+        $parts = self::parts($message['parts'] ?? null);
+        $packet = $parts === null ? null : self::decode($parts);
+        if ($packet?->type === PacketType::Ack && is_array($packet->data)) {
+            $ack($packet->data[0] ?? null);
+        }
     }
 
     /**
@@ -505,11 +597,16 @@ abstract class PubSubAdapter extends InMemoryAdapter
     }
 
     /**
-     * @return array{rooms: list<string>, except: list<string>, volatile: bool}
+     * @return array{rooms: list<string>, except: list<string>, volatile: bool, timeout: int|null}
      */
     private static function wireOptions(BroadcastOptions $options): array
     {
-        return ['rooms' => $options->rooms, 'except' => $options->except, 'volatile' => $options->volatile];
+        return [
+            'rooms' => $options->rooms,
+            'except' => $options->except,
+            'volatile' => $options->volatile,
+            'timeout' => $options->timeout,
+        ];
     }
 
     private static function options(mixed $value): ?BroadcastOptions
@@ -520,11 +617,12 @@ abstract class PubSubAdapter extends InMemoryAdapter
         $rooms = self::strings($value['rooms'] ?? null);
         $except = self::strings($value['except'] ?? null);
         $volatile = $value['volatile'] ?? null;
-        if ($rooms === null || $except === null || ! is_bool($volatile)) {
+        $timeout = $value['timeout'] ?? null;
+        if ($rooms === null || $except === null || ! is_bool($volatile) || ($timeout !== null && ! is_int($timeout))) {
             return null;
         }
 
-        return new BroadcastOptions($rooms, $except, $volatile);
+        return new BroadcastOptions($rooms, $except, $volatile, $timeout);
     }
 
     /**

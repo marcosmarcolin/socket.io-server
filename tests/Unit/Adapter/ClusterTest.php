@@ -38,7 +38,7 @@ final class ClusterTest extends TestCase
     /** @var array<string, FakeScheduler> */
     private array $clocks = [];
 
-    /** @var array{?Throwable, array<mixed>}|null what the last serverSideEmit() callback got */
+    /** @var array{?Throwable, mixed}|null what the last callback got */
     private ?array $result = null;
 
     protected function setUp(): void
@@ -428,6 +428,7 @@ final class ClusterTest extends TestCase
         [$error, $sockets] = $this->callbackResult();
         self::assertInstanceOf(TimeoutException::class, $error);
         self::assertSame('timeout reached: missing 1 responses', $error->getMessage());
+        self::assertIsArray($sockets);
         self::assertSame([$a->id, $b->id], array_map(
             static fn (mixed $socket): ?string => $socket instanceof Socket || $socket instanceof RemoteSocket
                 ? $socket->id
@@ -458,6 +459,48 @@ final class ClusterTest extends TestCase
         $remote->disconnect();
         self::assertFalse($b->connected);
         self::assertSame(['1'], $bClient->received());
+    }
+
+    public function testARemoteSocketGetsOneAnswerAfterTimeout(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [$bClient] = $this->connect('B');
+        $remote = $this->firstRemote();
+
+        $remote->timeout(1000)->emit('ask', 'q', $this->recorder());
+        self::assertSame(['20["ask","q"]'], $bClient->received());
+        $bClient->send('30["answer"]');
+
+        self::assertSame([null, 'answer'], $this->callbackResult());
+    }
+
+    public function testARemoteSocketThatDoesNotAnswerTimesOut(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->connect('B');
+        $remote = $this->firstRemote();
+
+        $remote->timeout(1000)->emit('ask', $this->recorder());
+        $this->clocks['A']->advance(1000);
+
+        [$error, $answer] = $this->callbackResult();
+        self::assertInstanceOf(TimeoutException::class, $error);
+        self::assertNull($answer);
+    }
+
+    public function testARemoteSocketNeedsATimeoutForAnAcknowledgement(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->connect('B');
+
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('timeout()');
+
+        $this->firstRemote()->emit('ask', static function (): void {
+        });
     }
 
     /**
@@ -521,6 +564,134 @@ final class ClusterTest extends TestCase
         ]);
 
         return $fetched;
+    }
+
+    public function testABroadcastWithAckGetsTheAnswersOfEveryServer(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->server('C');
+        [$a] = $this->connect('A');
+        [$b1] = $this->connect('B');
+        [$b2] = $this->connect('B');
+        $this->connect('C');
+        $this->servers['C']->close();
+        $this->server('D');
+
+        $this->servers['A']->timeout(1000)->emit('ask', 1, $this->recorder());
+
+        // Each server numbers the acknowledgement from its own namespace's counter.
+        self::assertSame(['20["ask",1]'], $a->received());
+        self::assertSame(['20["ask",1]'], $b1->received());
+        self::assertSame(['20["ask",1]'], $b2->received());
+        $b2->send('30["b2"]');
+        $a->send('30[{"n":"a"}]');
+        self::assertNull($this->result);
+        $b1->send('30["b1","ignored"]');
+
+        self::assertSame([null, ['b2', ['n' => 'a'], 'b1']], $this->callbackResult());
+    }
+
+    public function testABroadcastWithAckToARoomWaitsForEveryServersCount(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [$aClient, $a] = $this->connect('A');
+        $a->join('lobby');
+        $this->connect('B');
+        $this->broker->published = [];
+
+        $this->servers['A']->to('lobby')->timeout(1000)->emit('ask', $this->recorder());
+        $aClient->received();
+        $aClient->send('30["yes"]');
+
+        // B has no member, but heard the request on the namespace channel and reported zero.
+        self::assertSame([null, ['yes']], $this->callbackResult());
+        self::assertSame('socket.io#/#', $this->published()[0][0]);
+    }
+
+    public function testABroadcastWithAckTimesOutWithTheAnswersSoFar(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [$aClient] = $this->connect('A');
+        [$bClient] = $this->connect('B');
+
+        $this->servers['A']->timeout(1000)->emit('ask', $this->recorder());
+        $aClient->send('30["a"]');
+        $this->clocks['A']->advance(1000);
+        $this->clocks['B']->advance(1000);
+
+        [$error, $answers] = $this->callbackResult();
+        self::assertInstanceOf(TimeoutException::class, $error);
+        self::assertSame(['a'], $answers);
+
+        // B's socket forgot the acknowledgement, so a late answer publishes nothing.
+        $this->broker->published = [];
+        $bClient->send('30["late"]');
+        self::assertSame([], $this->published());
+    }
+
+    public function testABroadcastWithAckWaitsForASilentServer(): void
+    {
+        $this->server('A');
+        [$aClient] = $this->connect('A');
+        // A server that heartbeats but never reports.
+        $this->broker->publish('socket.io#/#', ['uid' => 'mute', 'type' => 2]);
+
+        $this->servers['A']->timeout(1000)->emit('ask', $this->recorder());
+        $aClient->send('30["a"]');
+        self::assertNull($this->result);
+        $this->clocks['A']->advance(1000);
+
+        self::assertInstanceOf(TimeoutException::class, $this->callbackResult()[0]);
+    }
+
+    public function testABroadcastWithAckReachesBinaryAnswersAndVolatileSockets(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [$bClient] = $this->connect('B');
+
+        $this->servers['A']->volatile->timeout(1000)->emit('file', new Binary("\x01"), $this->recorder());
+        self::assertEquals(['51-0["file",{"_placeholder":true,"num":0}]', new Binary("\x01")], $bClient->received());
+        $bClient->send('61-0[{"_placeholder":true,"num":0}]');
+        $bClient->sendBinary("\x02");
+
+        self::assertEquals([null, [new Binary("\x02")]], $this->callbackResult());
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>}>
+     */
+    public static function malformedAckResponses(): iterable
+    {
+        yield 'a negative count' => [['type' => 11, 'clientCount' => -1]];
+        yield 'a count that is not an int' => [['type' => 11, 'clientCount' => '1']];
+        yield 'an answer that is not an ack' => [['type' => 12, 'parts' => [['text', '2["x"]']]]];
+        yield 'an answer without parts' => [['type' => 12]];
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     */
+    #[DataProvider('malformedAckResponses')]
+    public function testIgnoresMalformedAckResponses(array $response): void
+    {
+        $this->server('A');
+        $this->broker->publish('socket.io#/#', ['uid' => 'mute', 'type' => 2]);
+        $this->servers['A']->timeout(1000)->emit('ask', $this->recorder());
+        $published = $this->published();
+        $requestId = end($published)[1]['requestId'] ?? '';
+        $channel = $this->broker->channelsOf('A')[1];
+
+        $this->broker->publish($channel, ['uid' => 'mute', 'requestId' => $requestId] + $response);
+
+        self::assertNull($this->result);
+        // The valid count completes it: no client anywhere.
+        $count = ['uid' => 'mute', 'type' => 11, 'requestId' => $requestId, 'clientCount' => 0];
+        $this->broker->publish($channel, $count);
+        self::assertSame([null, []], $this->callbackResult());
     }
 
     public function testServerSideEmitRefusesTheNamespacesOwnEvents(): void
@@ -619,7 +790,23 @@ final class ClusterTest extends TestCase
     // Helpers
 
     /**
-     * @return array{?Throwable, array<mixed>}
+     * The first socket A fetches, which must be on another server.
+     */
+    private function firstRemote(): RemoteSocket
+    {
+        $remote = null;
+        $this->servers['A']->sockets->fetchSockets(
+            static function (?Throwable $error, array $sockets) use (&$remote): void {
+                $remote = $sockets[0] ?? null;
+            },
+        );
+        self::assertInstanceOf(RemoteSocket::class, $remote);
+
+        return $remote;
+    }
+
+    /**
+     * @return array{?Throwable, mixed}
      * @phpstan-impure
      */
     private function callbackResult(): array
@@ -630,11 +817,11 @@ final class ClusterTest extends TestCase
     }
 
     /**
-     * @return Closure(?Throwable, array<mixed>): void
+     * @return Closure(?Throwable, mixed): void
      */
     private function recorder(): Closure
     {
-        return function (?Throwable $error, array $responses): void {
+        return function (?Throwable $error, mixed $responses): void {
             $this->result = [$error, $responses];
         };
     }

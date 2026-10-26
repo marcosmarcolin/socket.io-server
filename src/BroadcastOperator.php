@@ -207,12 +207,19 @@ final class BroadcastOperator
     private function emitWithAck(Packet $packet, Closure $ack, int $timeout): void
     {
         $id = (int) $packet->id;
-        $collector = new AckCollector($ack, $this->nsp->server->scheduler(), $timeout, function () use ($id): void {
-            foreach ($this->nsp->sockets() as $socket) {
-                $socket->forgetAck($id);
-            }
-        });
-        $this->nsp->adapter()->broadcastWithAck(
+        $adapter = $this->nsp->adapter();
+        $collector = new AckCollector(
+            $ack,
+            $this->nsp->server->scheduler(),
+            $timeout,
+            function () use ($id): void {
+                foreach ($this->nsp->sockets() as $socket) {
+                    $socket->forgetAck($id);
+                }
+            },
+            $adapter->serverCount(),
+        );
+        $adapter->broadcastWithAck(
             $packet,
             $this->options(),
             $collector->expect(...),
@@ -222,7 +229,7 @@ final class BroadcastOperator
 
     private function options(): BroadcastOptions
     {
-        return new BroadcastOptions($this->rooms, $this->except, $this->volatile);
+        return new BroadcastOptions($this->rooms, $this->except, $this->volatile, $this->timeout);
     }
 
     /**

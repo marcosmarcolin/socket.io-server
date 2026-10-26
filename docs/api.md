@@ -69,7 +69,8 @@ $io->in('room1')->fetchSockets(function (?Throwable $error, array $sockets): voi
 | | |
 |---|---|
 | `id`, `handshake`, `rooms`, `data` | Copies, as the socket's server had them. `handshake` and `data` cross as JSON, so objects arrive as arrays. |
-| `emit(string $event, ...$args)` | Sends it an event; acknowledgements aren't supported yet. |
+| `emit(string $event, ...$args)` | Sends it an event. |
+| `timeout(int $ms)` | Lets `emit()` take a callback, which gets `(?Throwable $error, mixed $answer)` as with `Socket::timeout()`. Returns a new object. |
 | `join(string\|array $rooms)`, `leave(string $room)` | Its rooms, on its server. |
 | `disconnect(bool $close = false)` | Disconnects it from the namespace; with `true`, closes its connection. |
 
@@ -100,7 +101,7 @@ $io->to('room1')->timeout(5000)->emit('vote', function (?Throwable $error, array
 - Without `timeout()`, passing a `Closure` throws, since a socket that never answers would keep the callback waiting forever.
 - With no socket to reach, the callback runs at once with `[]`.
 - With `volatile`, a socket skipped because its transport was busy still counts, so the wait ends with the timeout.
-- It works within one process: `ChannelAdapter` and `RedisAdapter` throw.
+- With `ChannelAdapter` or `RedisAdapter`, it reaches the sockets of every process: the callback runs once every server reported how many sockets it reached and all of them answered.
 
 ## Broadcasting: `BroadcastOperator`
 

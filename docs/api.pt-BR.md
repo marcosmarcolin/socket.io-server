@@ -69,7 +69,8 @@ $io->in('room1')->fetchSockets(function (?Throwable $error, array $sockets): voi
 | | |
 |---|---|
 | `id`, `handshake`, `rooms`, `data` | Cópias, como o servidor do socket os tinha. `handshake` e `data` atravessam como JSON, então objetos chegam como arrays. |
-| `emit(string $event, ...$args)` | Envia um evento para ele; acknowledgements ainda não são suportados. |
+| `emit(string $event, ...$args)` | Envia um evento para ele. |
+| `timeout(int $ms)` | Deixa o `emit()` receber um callback, que recebe `(?Throwable $error, mixed $answer)` como no `Socket::timeout()`. Devolve um objeto novo. |
 | `join(string\|array $rooms)`, `leave(string $room)` | As salas dele, no servidor dele. |
 | `disconnect(bool $close = false)` | Desconecta-o do namespace; com `true`, fecha a conexão dele. |
 
@@ -100,7 +101,7 @@ $io->to('room1')->timeout(5000)->emit('vote', function (?Throwable $error, array
 - Sem `timeout()`, passar um `Closure` lança exceção, já que um socket que nunca responde deixaria o callback esperando para sempre.
 - Sem nenhum socket a alcançar, o callback roda na hora com `[]`.
 - Com `volatile`, um socket pulado por ter o transporte ocupado continua contando, então a espera termina no timeout.
-- Funciona dentro de um processo: o `ChannelAdapter` e o `RedisAdapter` lançam exceção.
+- Com o `ChannelAdapter` ou o `RedisAdapter`, alcança os sockets de todos os processos: o callback roda quando cada servidor informou quantos sockets alcançou e todos eles responderam.
 
 ## Broadcast: `BroadcastOperator`
 

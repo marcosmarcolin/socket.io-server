@@ -10,8 +10,9 @@ use Marcolin\SocketIO\Engine\Scheduler;
 /**
  * Collects the answers to one broadcast with acknowledgement, as the reference's BroadcastOperator does.
  *
- * The callback runs once: with null and every answer when all expected answers arrived, or with a
- * TimeoutException and the answers so far when the timeout fires first.
+ * Each server reports how many sockets it reached; the callback runs once: with null and every answer when every
+ * server reported and all those sockets answered, or with a TimeoutException and the answers so far when the
+ * timeout fires first.
  *
  * @internal
  */
@@ -20,7 +21,9 @@ final class AckCollector
     /** @var list<mixed> */
     private array $responses = [];
 
-    private ?int $expected = null;
+    private int $expected = 0;
+
+    private int $reported = 0;
 
     private bool $done = false;
 
@@ -29,12 +32,14 @@ final class AckCollector
     /**
      * @param Closure(?TimeoutException, list<mixed>): void $ack
      * @param Closure(): void $onTimeout stops the sockets from waiting for their answers
+     * @param int $servers how many servers will report their count
      */
     public function __construct(
         private readonly Closure $ack,
         private readonly Scheduler $scheduler,
         int $timeout,
         private readonly Closure $onTimeout,
+        private readonly int $servers = 1,
     ) {
         $this->timer = $scheduler->after($timeout, function (): void {
             $this->done = true;
@@ -44,11 +49,12 @@ final class AckCollector
     }
 
     /**
-     * How many sockets the broadcast reached, so how many answers to wait for.
+     * How many sockets one server reached, so how many more answers to wait for.
      */
     public function expect(int $clientCount): void
     {
-        $this->expected = $clientCount;
+        $this->expected += $clientCount;
+        ++$this->reported;
         $this->complete();
     }
 
@@ -63,7 +69,7 @@ final class AckCollector
 
     private function complete(): void
     {
-        if ($this->done || $this->expected !== count($this->responses)) {
+        if ($this->done || $this->reported < $this->servers || $this->expected !== count($this->responses)) {
             return;
         }
         $this->done = true;

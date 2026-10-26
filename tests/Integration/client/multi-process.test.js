@@ -21,6 +21,8 @@ async function connect() {
   open.add(socket);
   await next(socket, "connect");
   socket.pid = await socket.emitWithAck("whoami");
+  // Every client answers the server's questions with the pid of its process.
+  socket.on("question", (ack) => ack(socket.pid));
   return socket;
 }
 
@@ -199,6 +201,23 @@ describe("multiple processes", () => {
     const poked = [next(a1, "poked"), next(b1, "poked")];
     b1.emit("poke", "fetchable");
     assert.deepEqual(await Promise.all(poked), [[b1.pid], [b1.pid]]);
+  });
+
+  test("a broadcast with an acknowledgement gets the answers of every process", TIMEOUT, async () => {
+    const [[a1], [b1]] = [...byProcess.values()];
+    const connected = [...open].filter((socket) => socket.connected);
+
+    const { error, answers } = await a1.emitWithAck("ask-all");
+
+    assert.equal(error, null);
+    assert.equal(answers.length, connected.length);
+    assert.deepEqual(new Set(answers), new Set([a1.pid, b1.pid]));
+  });
+
+  test("a RemoteSocket gets an answer from its process", TIMEOUT, async () => {
+    const [[a1], [b1]] = [...byProcess.values()];
+
+    assert.deepEqual(await a1.emitWithAck("ask-one", b1.id), { error: null, answer: b1.pid });
   });
 
   test("scale: 200 clients get 20 broadcasts each, once and in order", { timeout: 60_000 }, async () => {
