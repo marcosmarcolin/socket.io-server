@@ -9,8 +9,13 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - **The `packetCreate` session event**: `$socket->conn->on('packetCreate', fn (Packet $packet) => ...)` sees each message and ping the server writes, before it is buffered, as in the reference.
 - **Adapter room events**, as the reference's adapter: `$nsp->adapter()->on('create-room' | 'delete-room' | 'join-room' | 'leave-room', ...)` reports when the rooms of the current process change, with any adapter.
 
+### Fixed
+
+- **A session whose ping timeout just ended no longer answers.** Workerman handles ready sockets before due timers, so a request or a pong arriving as the timeout ended found the session still open; the session now closes with `ping timeout` first, as the reference does. It made the official compliance suites fail now and then.
+
 ### Changed
 
+- **For custom schedulers:** the `Scheduler` interface has `now()`, a monotonic clock in milliseconds.
 - **For custom adapters:** the `Adapter` interface has `on()` and `off()`, for the room events. `InMemoryAdapter` now extends the package's event emitter, so adapters that extend it get them; ones that implement the interface directly must add them.
 
 ## [0.3.0] - 2026-10-26

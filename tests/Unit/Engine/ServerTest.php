@@ -6,6 +6,7 @@ namespace Marcolin\SocketIO\Tests\Unit\Engine;
 
 use Closure;
 use Marcolin\SocketIO\Binary;
+use Marcolin\SocketIO\Engine\CloseReason;
 use Marcolin\SocketIO\Engine\Cors;
 use Marcolin\SocketIO\Engine\Server;
 use Marcolin\SocketIO\Engine\ServerError;
@@ -215,6 +216,65 @@ final class ServerTest extends TestCase
         $this->scheduler->advance(self::PING_INTERVAL + self::PING_TIMEOUT);
 
         $this->assertRejected($this->poll(), ServerError::UnknownSid);
+    }
+
+    public function testAPollArrivingAsThePingTimeoutEndsFindsTheSessionGone(): void
+    {
+        $this->handshake();
+        $this->scheduler->advance(self::PING_INTERVAL);
+        $closes = [];
+        $this->connections[0]->on('close', static function (CloseReason $reason) use (&$closes): void {
+            $closes[] = $reason;
+        });
+
+        // The deadline passes, but the event loop handles the request before the due timer, as Workerman's does.
+        $this->scheduler->elapse(self::PING_TIMEOUT);
+
+        $this->assertRejected($this->poll(), ServerError::UnknownSid);
+        self::assertSame([CloseReason::PingTimeout], $closes);
+        // The timer that was due no longer fires.
+        $this->scheduler->advance(0);
+        self::assertCount(1, $closes);
+    }
+
+    public function testAPollJustBeforeTheDeadlineStillGetsThePing(): void
+    {
+        $this->handshake();
+        $this->scheduler->advance(self::PING_INTERVAL);
+
+        $this->scheduler->elapse(self::PING_TIMEOUT - 1);
+
+        $poll = $this->poll();
+        self::assertSame(200, $poll->status);
+        self::assertSame('2', $poll->responseBody);
+    }
+
+    public function testALatePongClosesTheSessionInsteadOfKeepingIt(): void
+    {
+        $connection = new FakeWebSocketConnection();
+        $this->server->handleWebSocket($this->webSocketRequest('/engine.io/?EIO=4&transport=websocket'), $connection);
+        $this->scheduler->advance(self::PING_INTERVAL);
+        $closes = [];
+        $this->connections[0]->on('close', static function (CloseReason $reason) use (&$closes): void {
+            $closes[] = $reason;
+        });
+
+        $this->scheduler->elapse(self::PING_TIMEOUT);
+        $connection->receive('3');
+
+        self::assertSame([CloseReason::PingTimeout], $closes);
+        self::assertNull($this->server->session('sid1'));
+    }
+
+    public function testAWebSocketUpgradeAfterTheDeadlineIsRefused(): void
+    {
+        $this->handshake();
+        $this->scheduler->advance(self::PING_INTERVAL);
+
+        $this->scheduler->elapse(self::PING_TIMEOUT);
+
+        $rejection = $this->server->verifyWebSocket($this->webSocketRequest(self::UPGRADE));
+        self::assertSame(ServerError::UnknownSid, $rejection?->error);
     }
 
     public function testAClosePacketClosesTheSession(): void

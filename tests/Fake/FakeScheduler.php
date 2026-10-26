@@ -59,6 +59,15 @@ final class FakeScheduler implements Scheduler
         return $this->now;
     }
 
+    /**
+     * Moves the clock forward without firing the timers that become due, as an event loop that handles ready
+     * sockets before due timers, such as Workerman's.
+     */
+    public function elapse(int $milliseconds): void
+    {
+        $this->now += $milliseconds;
+    }
+
     public function pending(): int
     {
         return count($this->timers);

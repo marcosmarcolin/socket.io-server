@@ -51,7 +51,7 @@ A change is done only when all of these hold:
   - generics and array shapes in PHPDoc where PHP's types can't express them.
 - **Everything is testable:**
   - dependencies are injected, never constructed deep inside;
-  - time goes through the `Scheduler` interface, never `Workerman\Timer` directly, and tests use a fake scheduler;
+  - time goes through the `Scheduler` interface (`after()`, `cancel()`, `now()`), never `Workerman\Timer` directly, and tests use a fake scheduler, whose `elapse()` moves the clock without firing timers, as Workerman handling I/O first;
   - network I/O stays behind small interfaces that tests can replace with fakes.
 - Classes are `final` by default. Inheritance only where there's a documented extension point, such as adapters.
 - **No dynamic properties**, neither on our classes nor on Workerman objects. Per-connection state goes in a `WeakMap` or in `$connection->context`.
@@ -243,7 +243,8 @@ src/
 - **Heartbeat:** the **server** sends `ping` every `pingInterval`. Without a `pong` within `pingTimeout`, the session closes with `ping timeout`.
   - the next `ping` is scheduled `pingInterval` after the `pong`;
   - any other packet received while waiting for the `pong` restarts the `pingTimeout` once per ping, as the reference does;
-  - a `ping` from the client closes the session with `transport error` (v4 heartbeats go from server to client only).
+  - a `ping` from the client closes the session with `transport error` (v4 heartbeats go from server to client only);
+  - **timers first, as Node:** Workerman's `Select` loop handles ready sockets before due timers, so a request or packet arriving as the ping timeout ends would find the session open (the official suites' "closes the session upon ping timeout" failed about once in 15 runs). The session keeps the timeout's deadline on `Scheduler::now()`; `Server` calls `Socket::expireIfOverdue()` before routing any request with a `sid` (HTTP or WebSocket), and `Socket` checks it before handling any packet, closing with `ping timeout` first.
 - **Session events** (`Engine\Socket`, `$socket->conn`): `message`, `packet` (each received packet), `packetCreate` (each packet `sendPacket()` buffers: the `open`, messages and pings, as the reference's `sendPacket`; the probe's `pong` and the upgrade's `noop` go straight to the transports and don't fire it), `heartbeat`, `drain`, `upgrading`, `upgrade`, `close`. `packetCreate` fires before the packet is buffered, and not once the session is closing.
 - **Close reasons** (`CloseReason`): `ping timeout`, `transport close`, `transport error`, `parse error` (malformed packet) and `forced close` (closed by the server). A `close` packet over WebSocket closes the session with `transport close`.
 - **Polling:**

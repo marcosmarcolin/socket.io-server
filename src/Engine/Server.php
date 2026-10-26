@@ -63,6 +63,7 @@ final class Server extends Emitter
             }
         }
 
+        $this->expireIfOverdue($exchange->request());
         $rejection = $this->verify($exchange->request(), $exchange->method(), false, true);
         if ($rejection !== null) {
             $this->reject($exchange, $rejection);
@@ -106,6 +107,7 @@ final class Server extends Emitter
      */
     public function verifyWebSocket(Request $request): ?Rejection
     {
+        $this->expireIfOverdue($request);
         $rejection = $this->verifyWebSocketRequest($request, true);
         if ($rejection !== null) {
             $this->dispatch('connection_error', $request, $rejection->error->value, $rejection->message);
@@ -148,6 +150,18 @@ final class Server extends Emitter
         }
 
         $this->dispatch('connection', $this->open($transport, $request));
+    }
+
+    /**
+     * Gives the request's session a chance to close first if its ping timeout already ended, as the reference's
+     * event loop would have, so the request finds it gone.
+     */
+    private function expireIfOverdue(Request $request): void
+    {
+        $sid = $request->query('sid');
+        if ($sid !== null) {
+            ($this->sessions[$sid] ?? null)?->expireIfOverdue();
+        }
     }
 
     public function session(string $sid): ?Socket

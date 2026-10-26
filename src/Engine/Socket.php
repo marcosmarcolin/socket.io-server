@@ -43,6 +43,9 @@ final class Socket extends Emitter
 
     private ?int $pingTimeoutTimer = null;
 
+    // When the running ping timeout ends, on the scheduler's clock.
+    private int $pingDeadline = 0;
+
     // The ping timeout is extended once if other packets arrive while waiting for the pong.
     private bool $pingTimeoutRefreshed = false;
 
@@ -210,7 +213,7 @@ final class Socket extends Emitter
 
     private function onPacket(Packet $packet): void
     {
-        if ($this->state !== SocketState::Open) {
+        if ($this->state !== SocketState::Open || $this->expireIfOverdue()) {
             return;
         }
         $this->dispatch('packet', $packet);
@@ -236,6 +239,26 @@ final class Socket extends Emitter
         };
     }
 
+    /**
+     * Closes the session if its ping timeout already ended but the timer hasn't fired yet, and says so.
+     *
+     * Workerman's event loop handles the sockets that are ready before the timers that are due, while the
+     * reference's Node handles timers first: a request or packet arriving as the timeout ends would otherwise find
+     * the session still open.
+     *
+     * @internal called by Server before routing a request to the session
+     */
+    public function expireIfOverdue(): bool
+    {
+        if ($this->pingTimeoutTimer === null || $this->scheduler->now() < $this->pingDeadline) {
+            return false;
+        }
+        $this->cancel($this->pingTimeoutTimer);
+        $this->onClose(CloseReason::PingTimeout);
+
+        return true;
+    }
+
     private function onPong(): void
     {
         $this->cancel($this->pingTimeoutTimer);
@@ -257,6 +280,7 @@ final class Socket extends Emitter
     private function startPingTimeout(): void
     {
         $this->cancel($this->pingTimeoutTimer);
+        $this->pingDeadline = $this->scheduler->now() + $this->options->pingTimeout;
         $this->pingTimeoutTimer = $this->scheduler->after($this->options->pingTimeout, function (): void {
             $this->pingTimeoutTimer = null;
             $this->onClose(CloseReason::PingTimeout);
