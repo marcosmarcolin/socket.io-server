@@ -17,6 +17,7 @@
 | `transports` | `['polling', 'websocket']` | Os transportes que os clientes podem usar. Com `['websocket']`, requests de polling são recusados, então os clientes também precisam de `transports: ['websocket']` (senão recebem `xhr poll error`). Com `['polling']`, nenhum upgrade é oferecido. |
 | `cors` | `['origin' => '*']` | `origin` é `'*'`, uma lista de origens permitidas, um `Closure` que decide a cada request, ou `null` para não enviar cabeçalhos CORS. `credentials` (`false` por padrão) deixa o navegador enviar cookies. |
 | `allowUpgrades` | `true` | Com `false`, o handshake não oferece upgrade, então clientes que começam no polling continuam nele; clientes com `transports: ['websocket']` continuam conectando por WebSocket. |
+| `cookie` | `false` | Com `true`, o handshake de polling grava o cookie `io=<id da sessão>` (`Path=/; HttpOnly; SameSite=Lax`), que um load balancer pode usar para sticky sessions; veja [Atrás de um proxy reverso](reverse-proxy.pt-BR.md). Um array muda os atributos: `name`, `path`, `domain`, `httpOnly`, `secure`, `sameSite`, `maxAge` (segundos). |
 | `allowRequest` | `null` | Um `Closure` que aceita ou recusa cada handshake antes de a sessão abrir. Veja [Recusar uma conexão antes do handshake](#recusar-uma-conexão-antes-do-handshake). |
 
 Opções desconhecidas e tipos errados lançam `InvalidArgumentException`.
