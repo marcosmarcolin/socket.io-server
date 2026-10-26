@@ -22,4 +22,9 @@ final class WorkermanScheduler implements Scheduler
     {
         Timer::del($id);
     }
+
+    public function now(): int
+    {
+        return intdiv(hrtime(true), 1_000_000);
+    }
 }
