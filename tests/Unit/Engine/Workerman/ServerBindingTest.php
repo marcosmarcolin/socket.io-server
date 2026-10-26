@@ -43,11 +43,14 @@ final class ServerBindingTest extends TestCase
 
     private ServerBinding $binding;
 
+    private FakeScheduler $scheduler;
+
     protected function setUp(): void
     {
+        $this->scheduler = new FakeScheduler();
         $this->server = new Server(
             new ServerOptions(maxPayload: self::MAX_PAYLOAD, path: '/engine.io/'),
-            new FakeScheduler(),
+            $this->scheduler,
             new SequentialSessionIdGenerator(),
         );
         $this->server->on('connection', function (Socket $socket): void {
@@ -102,7 +105,7 @@ final class ServerBindingTest extends TestCase
 
         $pair->write("GET /engine.io/?EIO=4&transport=polling HTTP/1.1\r\nHost: app.test:3000\r\n"
             . "Origin: https://app.test\r\nCookie: session=abc\r\n\r\n");
-        $response = $pair->read();
+        $response = $this->read($pair);
 
         self::assertStringStartsWith('HTTP/1.1 200 OK', $response);
         self::assertStringContainsStringIgnoringCase("Access-Control-Allow-Origin: https://app.test\r\n", $response);
@@ -196,7 +199,7 @@ final class ServerBindingTest extends TestCase
         self::assertSame([
             ['opcode' => 0x1, 'data' => '4hello'],
             ['opcode' => 0x2, 'data' => "\x01\x02"],
-        ], WebSocketFrames::parse($pair->read()));
+        ], WebSocketFrames::parse($this->read($pair)));
     }
 
     public function testWhatAMiddlewareAttachesBeforeThe101StaysOnTheSession(): void
@@ -219,7 +222,7 @@ final class ServerBindingTest extends TestCase
         $pair->write("GET /engine.io/?EIO=4&transport=websocket HTTP/1.1\r\n" . WebSocketFrames::upgradeHeaders()
             . "Sec-WebSocket-Protocol: chat, superchat\r\n\r\n");
 
-        [$head] = WebSocketFrames::afterHandshake($pair->read());
+        [$head] = WebSocketFrames::afterHandshake($this->read($pair));
 
         self::assertStringStartsWith('HTTP/1.1 101', $head);
         self::assertMatchesRegularExpression('/\r\nSec-WebSocket-Protocol: chat(\r\n|$)/', $head);
@@ -231,7 +234,7 @@ final class ServerBindingTest extends TestCase
 
         $pair->write("GET /engine.io/?transport=websocket HTTP/1.1\r\n" . WebSocketFrames::upgradeHeaders() . "\r\n");
 
-        $response = $pair->read();
+        $response = $this->read($pair);
         self::assertStringStartsWith('HTTP/1.1 400 Bad Request', $response);
         self::assertStringEndsWith("\r\n\r\nUnsupported protocol version", $response);
         self::assertTrue($pair->isClosed());
@@ -247,7 +250,7 @@ final class ServerBindingTest extends TestCase
             "GET /engine.io/?EIO=4&transport=websocket HTTP/1.1\r\n" . WebSocketFrames::upgradeHeaders() . "\r\n",
         );
 
-        $response = $pair->read();
+        $response = $this->read($pair);
         self::assertStringStartsWith('HTTP/1.1 400 Bad Request', $response);
         self::assertStringEndsWith("\r\n\r\nSessão inválida", $response);
         self::assertStringContainsString('Content-Length: ' . strlen('Sessão inválida') . "\r\n", $response);
@@ -309,7 +312,7 @@ final class ServerBindingTest extends TestCase
 
         $this->connections[0]->close();
 
-        self::assertSame([['opcode' => 0x8, 'data' => "\x03\xe8"]], WebSocketFrames::parse($pair->read()));
+        self::assertSame([['opcode' => 0x8, 'data' => "\x03\xe8"]], WebSocketFrames::parse($this->read($pair)));
         self::assertTrue($pair->isClosed());
     }
 
@@ -324,14 +327,14 @@ final class ServerBindingTest extends TestCase
         $webSocket->write(WebSocketFrames::client('2probe'));
 
         self::assertStringStartsWith('HTTP/1.1 101', $head);
-        self::assertSame([['opcode' => 0x1, 'data' => '3probe']], WebSocketFrames::parse($webSocket->read()));
-        self::assertStringEndsWith("\r\n\r\n6", $poll->read());
+        self::assertSame([['opcode' => 0x1, 'data' => '3probe']], WebSocketFrames::parse($this->read($webSocket)));
+        self::assertStringEndsWith("\r\n\r\n6", $this->read($poll));
 
         $webSocket->write(WebSocketFrames::client('5'));
         $webSocket->write(WebSocketFrames::client('4hello'));
 
         self::assertTrue($this->connections[0]->isUpgraded());
-        self::assertSame([['opcode' => 0x1, 'data' => '4hello']], WebSocketFrames::parse($webSocket->read()));
+        self::assertSame([['opcode' => 0x1, 'data' => '4hello']], WebSocketFrames::parse($this->read($webSocket)));
     }
 
     // Exceptions
@@ -393,6 +396,24 @@ final class ServerBindingTest extends TestCase
         self::assertCount(1, $this->errors);
     }
 
+    public function testWhatAHandlerSentBeforeThrowingStillGoesOut(): void
+    {
+        $pair = $this->connect();
+        $this->openWebSocket($pair, '/engine.io/?EIO=4&transport=websocket');
+        $socket = $this->connections[0];
+        // After the echo of setUp(), which sends the first frame of the pass at once: this one is grouped.
+        $socket->on('message', static function () use ($socket): void {
+            $socket->send('before the error');
+            throw new RuntimeException('boom');
+        });
+
+        $pair->write(WebSocketFrames::client('4hello'));
+
+        self::assertTrue($pair->isClosed());
+        $frames = WebSocketFrames::parse($pair->read());
+        self::assertSame(['4hello', '4before the error'], array_column(array_slice($frames, 0, 2), 'data'));
+    }
+
     // Helpers
 
     /**
@@ -421,6 +442,16 @@ final class ServerBindingTest extends TestCase
         return $this->connect();
     }
 
+    /**
+     * What the server wrote, once the event loop's pass ends: WebSocket frames are grouped until then.
+     */
+    private function read(SocketPairConnection $pair): string
+    {
+        $this->scheduler->advance(0);
+
+        return $pair->read();
+    }
+
     private function connect(): SocketPairConnection
     {
         return new SocketPairConnection($this->worker);
@@ -430,7 +461,7 @@ final class ServerBindingTest extends TestCase
     {
         $pair->write("GET $target HTTP/1.1\r\nHost: localhost\r\n\r\n");
 
-        return $pair->read();
+        return $this->read($pair);
     }
 
     private function post(SocketPairConnection $pair, string $target, string $body): string
@@ -438,7 +469,7 @@ final class ServerBindingTest extends TestCase
         $pair->write("POST $target HTTP/1.1\r\nHost: localhost\r\nContent-Type: text/plain\r\n"
             . 'Content-Length: ' . strlen($body) . "\r\n\r\n" . $body);
 
-        return $pair->read();
+        return $this->read($pair);
     }
 
     /**
@@ -448,6 +479,6 @@ final class ServerBindingTest extends TestCase
     {
         $pair->write("GET $target HTTP/1.1\r\n" . WebSocketFrames::upgradeHeaders() . "\r\n");
 
-        return WebSocketFrames::afterHandshake($pair->read());
+        return WebSocketFrames::afterHandshake($this->read($pair));
     }
 }

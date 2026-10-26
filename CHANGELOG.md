@@ -8,6 +8,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 - **A `pong` example**: multiplayer Pong, with a queue that pairs players, one room per match, and the game loop on the server at 30 frames a second, sending the state `volatile`.
 
+### Changed
+
+- **Broadcasts are about twice as fast:** a WebSocket connection writes the first frame of a pass of the event loop at once and groups the next ones into one write at the pass's end, so a burst of events costs two system calls per client instead of one per event. Under the load test, deliveries to 10,000 clients went from about 193,000 to 385,000 per second (the Node.js server does about 540,000), a single event to all of them got about 10% faster, and so did acknowledgements.
+
 ## [0.5.0] - 2026-10-26
 
 The official Admin UI works with this server, and connection state recovery works across processes with sticky sessions.
