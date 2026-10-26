@@ -144,6 +144,27 @@ final class ClusterTest extends TestCase
         self::assertSame([$b->id, 'everyone', 'vip', 'beta'], $b->rooms);
     }
 
+    public function testRoomEventsFireWhereTheSocketIs(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->connect('A');
+        [, $b] = $this->connect('B');
+        $seen = [];
+        foreach (['A', 'B'] as $name) {
+            $this->servers[$name]->sockets->adapter()->on(
+                'join-room',
+                static function (string $room, string $id) use (&$seen, $name): void {
+                    $seen[] = [$name, $room, $id];
+                },
+            );
+        }
+
+        $this->servers['A']->in($b->id)->socketsJoin('vip');
+
+        self::assertSame([['B', 'vip', $b->id]], $seen);
+    }
+
     public function testSocketsJoinOfOneRoomReachesTheServersWithItsMembers(): void
     {
         $this->server('A');

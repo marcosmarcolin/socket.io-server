@@ -15,7 +15,7 @@
 | `on('connection', fn (Socket $socket))` | O evento `connection` do namespace principal; qualquer outro evento, menos `workerStart` e `workerStop`, também é do namespace principal, como os do `serverSideEmit()`. |
 | `on('workerStart' \| 'workerStop', fn (Worker $worker))` | Cada processo iniciando ou parando. |
 | `use(fn (Socket $socket, Closure $next))` | Um middleware em `/`. |
-| `adapter(fn (Nsp $nsp): Adapter)` | Como os namespaces guardam as salas e fazem broadcast, por exemplo `ChannelAdapter::factory()` ou `RedisAdapter::factory()`. |
+| `adapter(fn (Nsp $nsp): Adapter)` | Como os namespaces guardam as salas e fazem broadcast, por exemplo `ChannelAdapter::factory()` ou `RedisAdapter::factory()`. `$nsp->adapter()` devolve o adapter de um namespace, com os seus [eventos](#eventos-do-adapter). |
 | `close()` | Desliga o servidor: cada socket sai com `server shutting down`, as conexões fecham, e o worker para de aceitar novas neste processo. |
 | `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `local`, `compress()`, `timeout()` | Broadcast em `/`, como num namespace. |
 | `serverSideEmit(string $event, ...$args)` | Um evento para `/` nos outros servidores; veja `Nsp`. |
@@ -141,6 +141,23 @@ $io->local->emit('reload');                       // this process only, whatever
 ```
 
 `compress()` existe por compatibilidade e não tem efeito: o servidor não comprime.
+
+## Eventos do adapter
+
+O adapter de cada namespace avisa quando as salas mudam, como o adapter da referência, sem nenhuma opção para ligar:
+
+```php
+$adapter = $io->of('/')->adapter();
+
+$adapter->on('create-room', function (string $room): void {});
+$adapter->on('delete-room', function (string $room): void {});
+$adapter->on('join-room', function (string $room, string $socketId): void {});
+$adapter->on('leave-room', function (string $room, string $socketId): void {});
+```
+
+- `create-room` vem antes do primeiro `join-room` de uma sala, e `delete-room` depois do último `leave-room`.
+- A sala própria de um socket, o id dele, também conta: conectar a cria e entra nela, e desconectar sai dela e a apaga.
+- Eles informam os sockets do processo atual, com qualquer adapter: com vários processos, cada um vê as salas dos seus próprios sockets.
 
 ## Erros
 

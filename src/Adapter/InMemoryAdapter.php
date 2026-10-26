@@ -7,14 +7,20 @@ namespace Marcolin\SocketIO\Adapter;
 use Closure;
 use LogicException;
 use Marcolin\SocketIO\Binary;
+use Marcolin\SocketIO\Event\Emitter;
 use Marcolin\SocketIO\Nsp;
 use Marcolin\SocketIO\Parser\Packet;
 use Marcolin\SocketIO\Socket;
 
 /**
  * Rooms of the current process. Not final: other adapters extend it to reach other processes.
+ *
+ * Events, as the reference's adapter, for the sockets of this process: `create-room` (string $room) and
+ * `delete-room` (string $room) when a room gets its first member or loses its last; `join-room` and `leave-room`
+ * (string $room, string $id) when a socket joins or leaves one, after `create-room` and before `delete-room`.
+ * A socket's own room counts too.
  */
-class InMemoryAdapter implements Adapter
+class InMemoryAdapter extends Emitter implements Adapter
 {
     /** @var array<string, array<string, true>> socket ids by room */
     protected array $rooms = [];
@@ -31,9 +37,14 @@ class InMemoryAdapter implements Adapter
         foreach ($rooms as $room) {
             $this->sids[$socketId][$room] = true;
             $created = ! isset($this->rooms[$room]);
+            $joined = ! isset($this->rooms[$room][$socketId]);
             $this->rooms[$room][$socketId] = true;
             if ($created) {
                 $this->roomCreated($room);
+                $this->dispatch('create-room', $room);
+            }
+            if ($joined) {
+                $this->dispatch('join-room', $room, $socketId);
             }
         }
     }
@@ -45,9 +56,11 @@ class InMemoryAdapter implements Adapter
             return;
         }
         unset($this->rooms[$room][$socketId]);
+        $this->dispatch('leave-room', $room, $socketId);
         if ($this->rooms[$room] === []) {
             unset($this->rooms[$room]);
             $this->roomDeleted($room);
+            $this->dispatch('delete-room', $room);
         }
     }
 
