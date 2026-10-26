@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-26
+
+The official Admin UI works with this server, and connection state recovery works across processes with sticky sessions.
+
 ### Added
 
 - **The Admin UI's server side**: `AdminUi::instrument($io, ['auth' => ...])` lets the official [Socket.IO Admin UI](https://socket.io/docs/v4/admin-ui/), hosted or self-hosted, show the servers, sockets, rooms and events live and act on them, as the reference's `@socket.io/admin-ui` 0.5. A guide (`docs/admin-ui.md`) and an `admin-ui` example.
@@ -157,7 +161,8 @@ The first release.
 - Across processes, only broadcasts travel; the socket helpers (`fetchSockets`, `socketsJoin`...) act on the current process.
 - With several processes on one port, clients must use `transports: ['websocket']`.
 
-[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.1.0...v0.2.0
