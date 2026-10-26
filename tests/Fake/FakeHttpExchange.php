@@ -23,6 +23,9 @@ final class FakeHttpExchange implements HttpExchange
     /** @var list<Closure(): void> */
     private array $abortCallbacks = [];
 
+    // One object per request, as WorkermanHttpExchange, so what engine middlewares attach stays on it.
+    private ?Request $request = null;
+
     /**
      * @param array<string, string> $headers
      * @param array<string, string> $query
@@ -109,10 +112,9 @@ final class FakeHttpExchange implements HttpExchange
     public function request(): Request
     {
         $query = http_build_query($this->query);
-
         $uri = $this->path . ($query === '' ? '' : '?' . $query);
 
-        return new Request($this->path, $this->query, $this->headers, $uri, '127.0.0.1');
+        return $this->request ??= new Request($this->path, $this->query, $this->headers, $uri, '127.0.0.1');
     }
 
     public function respond(int $status, string $body, array $headers = []): void

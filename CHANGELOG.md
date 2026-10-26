@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- **Engine middlewares**, as the reference's `engine.use()`: `$io->engine->use(fn (Request $request, Closure $next) => ...)` runs for every HTTP request, polling ones and the one that opens a WebSocket, and `$next($error)` refuses it with code 3. What a middleware puts in `$request->attributes` stays on `$socket->request`.
+- **The rest of the reference's server API:** `$io->engine->clientsCount()`, `$socket->conn->protocol` (always 4) and `$socket->client->request`. The guide documents custom session ids, the reference's `engine.generateId`, through a `SessionIdGenerator`.
 - **Connection state recovery**, as the reference's `connectionStateRecovery` option: a client whose connection dropped and that reconnects within `maxDisconnectionDuration` (2 minutes by default) gets back its socket id, rooms, `data`, and the events it missed; `$socket->recovered` says so. With the default adapter only.
 - **Redis over TLS**: `RedisAdapter` and the `Emitter` accept `rediss://` URLs, checking the server's certificate, and a `tls` argument with PHP's ssl context options (a private authority, a client certificate), for managed Redis services that require TLS. On Swoole's event loop the adapter refuses `rediss://`, since Workerman's TLS client connections hang there.
 - **A load test and the guide "Performance and limits"** (`docs/performance.md`): about 24 KB per WebSocket connection, 10,000 clients in one process, and what it takes past 1,000 connections (the `event` extension, `memory_limit`, `ulimit`). `tests/Load/run.sh` measures it on any machine.
@@ -23,6 +25,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
+- `Engine\Server::sessionCount()` is now `clientsCount()`, the reference's name.
 - **For custom adapters:** the `Adapter` interface has `persistSession()` and `restoreSession()`, for connection state recovery. Adapters that extend `InMemoryAdapter` get them; ones that implement the interface directly must add them (doing nothing and returning null opts out).
 - **Less memory per connection**: event listeners are stored in flat arrays per emitter, instead of an array per listener, which takes a WebSocket connection from about 30 KB to 24 KB and raises acknowledgements per second by about 10%.
 - **Polling answers of 1 KB or more are compressed by default**, as in the reference, when the client sends `Accept-Encoding`. `'httpCompression' => false` keeps them plain.

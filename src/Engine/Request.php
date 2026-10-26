@@ -9,6 +9,9 @@ namespace Marcolin\SocketIO\Engine;
  */
 final class Request
 {
+    /** @var array<string, mixed> what engine middlewares attach, as Node middlewares decorate req; free-form */
+    public array $attributes = [];
+
     /** @var array<string, string> header names in lower case */
     private readonly array $headers;
 

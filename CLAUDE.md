@@ -146,7 +146,7 @@ src/
     Rejection.php               a refused request: its ServerError and the message sent, which allowRequest may set
     Cors.php, CorsHttpExchange.php  CORS headers, added to every polling answer
     ResponseHeaders.php, HeadersHttpExchange.php  the `initial_headers`/`headers` events on a session's answers
-    Request.php                 an HTTP request: the session's handshake, or the one opening a WebSocket
+    Request.php                 an HTTP request: the session's handshake, or the one opening a WebSocket; `attributes` for middlewares
     SessionIdGenerator.php, RandomSessionIdGenerator.php  20-character base64url session ids
     Socket.php                  session: state, heartbeat, upgrade, write buffer
     SocketState.php, CloseReason.php  session state; close reasons with the reference's strings
@@ -297,6 +297,12 @@ src/
   - `initial_headers` and `headers` get a mutable `ResponseHeaders` and the `Request`. `initial_headers` runs for a request without `sid` (the polling handshake, or a WebSocket that opens a session), then `headers` runs for it too. Over polling, `HeadersHttpExchange` runs them for each `200` answer of a session (the data and `ok` answers), not for errors or the CORS preflight. Over WebSocket, `ServerBinding` asks `Server::webSocketHeaders()` once `verifyWebSocket()` accepted, and writes the result into the 101.
   - `ResponseHeaders` validates names (header tokens) and values (no CR, LF or NUL); `append()` keeps one line per value, for several `Set-Cookie`. `HttpExchange::respond()` takes `string|list<string>` values.
   - `connection_error` gets `(Request, int $code, string $message)` for every request `verify()` refuses, over HTTP (`reject()`) or before a 101 (`verifyWebSocket()`), with the message `allowRequest` returned. The reference passes one object with a `context` we don't build.
+- **Engine middlewares** (`$io->engine->use(Closure(Request, Closure(?Throwable=): void))`), as the reference's `engine.use()`:
+  - they run in order for every request: in `handleRequest()` after the CORS preflight and before `verify()`, polling requests with or without a sid, and in `verifyWebSocket()` before the 101 (not again in `handleWebSocket()`);
+  - `$next($error)` refuses with code 3 (`Bad request`, HTTP 400, `connection_error`), as the reference's `MIDDLEWARE_FAILURE`, and skips the later ones;
+  - unlike Node, `$next` must be called before the middleware returns (a WebSocket handshake is answered synchronously); returning without calling it refuses the same way. Exceptions propagate, as with `allowRequest`;
+  - `Request::$attributes` is a free-form array they decorate, as Node middlewares decorate `req`. A request keeps one `Request` object throughout: `WorkermanHttpExchange` copies it once, and `ServerBinding` keeps the one `verifyWebSocket()` saw for `handleWebSocket()` in a `WeakMap`, so the session's `$socket->request` has what was attached. The test fakes (`FakeHttpExchange`, `SocketIOClient`) do the same.
+- **Engine API parity:** `clientsCount()` (open sessions; the reference's `clientsCount`), `Engine\Socket::$protocol` (always 4) and `Client::$request` (the session's request). `engine.generateId` maps to the `SessionIdGenerator` given to the `SocketIO` constructor.
 
 ### Socket.IO
 

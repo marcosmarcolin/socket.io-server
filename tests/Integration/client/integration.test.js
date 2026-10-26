@@ -184,6 +184,19 @@ for (const mode of Object.keys(MODES)) {
       });
     }
 
+    test("an engine middleware refuses a request, or marks the one it lets through", TIMEOUT, async () => {
+      const blocked = client(mode, "/", { query: { blocked: "1" } });
+      const [error] = await next(blocked, "connect_error");
+      assert.ok(error instanceof Error);
+
+      const socket = await connected(mode);
+      assert.deepEqual(await socket.emitWithAck("engine-state"), {
+        attributes: { checkedBy: "engine middleware" },
+        protocol: 4,
+        sameRequest: true,
+      });
+    });
+
     test("receives a middleware refusal with its data", TIMEOUT, async () => {
       const socket = client(mode, "/", { auth: { token: "refuse" } });
 

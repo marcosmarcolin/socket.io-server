@@ -43,7 +43,8 @@
 | `$socket->data` | A free-form array for your own data. |
 | `$socket->recovered` | Whether the socket came back after a dropped connection, with its id, rooms, data and the missed events; see [Connection state recovery](configuration.md#connection-state-recovery). |
 | `$socket->rooms`, `$socket->connected`, `$socket->disconnected` | Its rooms (its own id included) and its state. |
-| `$socket->nsp`, `$socket->request`, `$socket->conn` | Its namespace, the HTTP request that opened the connection, and the Engine.IO session. |
+| `$socket->nsp`, `$socket->request`, `$socket->conn` | Its namespace, the HTTP request that opened the connection (with what [engine middlewares](configuration.md#engine-middlewares) attached), and the Engine.IO session, whose `protocol` is always `4`. |
+| `$socket->client` | The connection under the socket, shared by its namespaces: `conn` and `request`. |
 | `on(string $event, Closure $listener)` | An event from the client. The listener gets the arguments, plus an acknowledgement `Closure` last when the client asked for one; it answers once. |
 | `emit(string $event, ...$args)`, `send(...$args)` | Sends an event; a `Closure` as the last argument asks the client to acknowledge it. |
 | `once()`, `off()`, `listeners()`, `eventNames()`, `removeListener()`, `removeAllListeners()` | The other listener methods, with the reference's names. |

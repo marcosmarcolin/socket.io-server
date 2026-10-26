@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Marcolin\SocketIO\Tests\Unit\Engine\Workerman;
 
+use Closure;
 use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\Engine\CloseReason;
 use Marcolin\SocketIO\Engine\Cors;
@@ -83,7 +84,7 @@ final class ServerBindingTest extends TestCase
         self::assertStringContainsStringIgnoringCase("Content-Type: text/plain; charset=UTF-8\r\n", $response);
         self::assertStringContainsStringIgnoringCase("Access-Control-Allow-Origin: *\r\n", $response);
         self::assertStringContainsString("\r\n\r\n0{\"sid\":\"sid1\"", $response);
-        self::assertSame(1, $this->server->sessionCount());
+        self::assertSame(1, $this->server->clientsCount());
     }
 
     public function testCorsHeadersWithCredentialsReachTheWire(): void
@@ -143,7 +144,7 @@ final class ServerBindingTest extends TestCase
         $poll->closeClient();
 
         self::assertSame([CloseReason::TransportError], $reasons);
-        self::assertSame(0, $this->server->sessionCount());
+        self::assertSame(0, $this->server->clientsCount());
     }
 
     public function testClosingAConnectionWhoseRequestWasAnsweredKeepsTheSession(): void
@@ -153,7 +154,7 @@ final class ServerBindingTest extends TestCase
 
         $pair->closeClient();
 
-        self::assertSame(1, $this->server->sessionCount());
+        self::assertSame(1, $this->server->clientsCount());
     }
 
     public function testATooLargeBodyIsRefused(): void
@@ -165,7 +166,7 @@ final class ServerBindingTest extends TestCase
         $response = $this->post($pair, '/engine.io/?EIO=4&transport=polling&sid=sid1', $body);
 
         self::assertStringStartsWith('HTTP/1.1 413', $response);
-        self::assertSame(1, $this->server->sessionCount());
+        self::assertSame(1, $this->server->clientsCount());
     }
 
     public function testLimitsThePackageSizeFromMaxPayload(): void
@@ -196,6 +197,20 @@ final class ServerBindingTest extends TestCase
             ['opcode' => 0x1, 'data' => '4hello'],
             ['opcode' => 0x2, 'data' => "\x01\x02"],
         ], WebSocketFrames::parse($pair->read()));
+    }
+
+    public function testWhatAMiddlewareAttachesBeforeThe101StaysOnTheSession(): void
+    {
+        $this->server->use(static function (Request $request, Closure $next): void {
+            $request->attributes['user'] = 'ana';
+            $next();
+        });
+        $pair = $this->connect();
+
+        [$head] = $this->openWebSocket($pair, '/engine.io/?EIO=4&transport=websocket');
+
+        self::assertStringStartsWith('HTTP/1.1 101', $head);
+        self::assertSame(['user' => 'ana'], $this->server->session('sid1')?->request->attributes);
     }
 
     public function testAnInvalidRequestGetsAnHttpError(): void
@@ -272,7 +287,7 @@ final class ServerBindingTest extends TestCase
         $pair->closeClient();
 
         self::assertSame([CloseReason::TransportClose], $reasons);
-        self::assertSame(0, $this->server->sessionCount());
+        self::assertSame(0, $this->server->clientsCount());
     }
 
     public function testClosingTheSessionSendsACloseFrame(): void

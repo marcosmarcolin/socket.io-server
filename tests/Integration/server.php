@@ -54,6 +54,17 @@ $io->engine->on(
     },
 );
 
+// An engine middleware on every request: it refuses ?blocked=1 and marks the request it let through.
+$io->engine->use(static function (Request $request, Closure $next): void {
+    if ($request->query('blocked') === '1') {
+        $next(new RuntimeException('blocked'));
+
+        return;
+    }
+    $request->attributes['checkedBy'] = 'engine middleware';
+    $next();
+});
+
 // The adapter's room events: a room whose name starts with "watched:" is announced when it's created.
 $io->sockets->adapter()->on('create-room', static function (string $room) use ($io): void {
     if (str_starts_with($room, 'watched:')) {
@@ -100,6 +111,13 @@ $io->on('connection', static function (Socket $socket) use ($io, &$lastConnectio
     // The extensions the client offered when its WebSocket opened the session.
     $socket->on('ws-extensions', static function (Closure $ack) use ($socket): void {
         $ack($socket->conn->request->header('Sec-WebSocket-Extensions'));
+    });
+    $socket->on('engine-state', static function (Closure $ack) use ($socket): void {
+        $ack([
+            'attributes' => $socket->request->attributes,
+            'protocol' => $socket->conn->protocol,
+            'sameRequest' => $socket->client->request === $socket->request,
+        ]);
     });
     $socket->on('say', static function (string $word) use ($socket): void {
         $socket->emit('said', $word);
