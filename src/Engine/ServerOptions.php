@@ -27,6 +27,8 @@ final class ServerOptions
      * @param bool $allowUpgrades whether the handshake offers upgrades; without them, polling clients stay on polling
      * @param Cookie|null $cookie the cookie with the session id on the polling handshake, for sticky sessions
      * @param int|null $httpCompression compress polling answers of at least this many bytes; null never does
+     * @param int|null $perMessageDeflate deflate WebSocket messages of at least this many bytes, when the client
+     *        offers permessage-deflate; null, the default, never does
      */
     public function __construct(
         public readonly int $pingInterval = 25_000,
@@ -40,6 +42,7 @@ final class ServerOptions
         public readonly bool $allowUpgrades = true,
         public readonly ?Cookie $cookie = null,
         public readonly ?int $httpCompression = 1024,
+        public readonly ?int $perMessageDeflate = null,
     ) {
         self::assertPositive('pingInterval', $pingInterval);
         self::assertPositive('pingTimeout', $pingTimeout);
@@ -81,6 +84,7 @@ final class ServerOptions
             'allowUpgrades',
             'cookie',
             'httpCompression',
+            'perMessageDeflate',
         ];
         foreach (array_keys($options) as $key) {
             if (! in_array($key, $known, true)) {
@@ -131,14 +135,15 @@ final class ServerOptions
             allowRequest: $allowRequest,
             allowUpgrades: $allowUpgrades,
             cookie: Cookie::fromOption($options['cookie'] ?? false),
-            httpCompression: self::httpCompression($options['httpCompression'] ?? true),
+            httpCompression: self::threshold('httpCompression', $options['httpCompression'] ?? true),
+            perMessageDeflate: self::threshold('perMessageDeflate', $options['perMessageDeflate'] ?? false),
         );
     }
 
     /**
-     * The `httpCompression` option: true (1 KB threshold, the reference's default), false, or ['threshold' => n].
+     * A compression option: true (a 1 KB threshold, the reference's default), false, or ['threshold' => n].
      */
-    private static function httpCompression(mixed $option): ?int
+    private static function threshold(string $name, mixed $option): ?int
     {
         if (is_bool($option)) {
             return $option ? 1024 : null;
@@ -146,11 +151,14 @@ final class ServerOptions
         if (is_array($option) && array_keys($option) === ['threshold'] && is_int($option['threshold'])) {
             return $option['threshold'] >= 0
                 ? $option['threshold']
-                : throw new InvalidArgumentException('The httpCompression "threshold" can\'t be negative');
+                : throw new InvalidArgumentException(sprintf('The %s "threshold" can\'t be negative', $name));
         }
 
-        throw new InvalidArgumentException('The "httpCompression" option must be a boolean or ["threshold" => bytes]');
+        throw new InvalidArgumentException(
+            sprintf('The "%s" option must be a boolean or ["threshold" => bytes]', $name),
+        );
     }
+
 
     private static function corsFromArray(mixed $cors): ?Cors
     {

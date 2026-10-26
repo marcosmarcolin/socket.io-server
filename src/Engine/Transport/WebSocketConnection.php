@@ -12,9 +12,10 @@ use Closure;
 interface WebSocketConnection
 {
     /**
-     * Sends one frame, text or binary.
+     * Sends one frame, text or binary; with $compress, deflated, which only a connection that negotiated
+     * permessage-deflate may do.
      */
-    public function send(string $data, bool $binary): void;
+    public function send(string $data, bool $binary, bool $compress = false): void;
 
     public function close(): void;
 

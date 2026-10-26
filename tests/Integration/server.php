@@ -34,6 +34,8 @@ $io = new SocketIO(options: [
     'connectTimeout' => 2000,
     // The session id in a cookie on the polling handshake, for sticky sessions.
     'cookie' => true,
+    // WebSocket messages of 1 KB or more go deflated, when the client offers it (Node's ws does).
+    'perMessageDeflate' => true,
 ]);
 
 // A cookie on each session's first answer, and a header on every answer.
@@ -94,6 +96,10 @@ $io->on('connection', static function (Socket $socket) use ($io, &$lastConnectio
     // A big event, which a polling answer compresses unless told otherwise.
     $socket->on('big', static function (int $size, bool $compress) use ($socket): void {
         $socket->compress($compress)->emit('big', str_repeat('x', $size));
+    });
+    // The extensions the client offered when its WebSocket opened the session.
+    $socket->on('ws-extensions', static function (Closure $ack) use ($socket): void {
+        $ack($socket->conn->request->header('Sec-WebSocket-Extensions'));
     });
     $socket->on('say', static function (string $word) use ($socket): void {
         $socket->emit('said', $word);
