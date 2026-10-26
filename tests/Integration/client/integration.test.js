@@ -53,6 +53,45 @@ after(() => {
   }
 });
 
+describe("http compression", () => {
+  // A raw polling session: the handshake, a CONNECT to "/", then each request and its answer.
+  async function session() {
+    const base = `${URL}/socket.io/?EIO=4&transport=polling`;
+    const [, sid] = /"sid":"([^"]+)"/.exec(await (await fetch(base)).text());
+    const url = `${base}&sid=${sid}`;
+    await fetch(url, { method: "POST", body: "40" });
+    await (await fetch(url)).text();
+    return url;
+  }
+
+  async function bigAnswer(url, compress) {
+    await fetch(url, { method: "POST", body: `42["big",4000,${compress}]` });
+    const response = await fetch(url, { headers: { "Accept-Encoding": "gzip" } });
+    return { encoding: response.headers.get("content-encoding"), body: await response.text() };
+  }
+
+  test("a big polling answer is gzipped, and compress(false) leaves it plain", TIMEOUT, async () => {
+    const url = await session();
+
+    const compressed = await bigAnswer(url, true);
+    const plain = await bigAnswer(url, false);
+
+    assert.equal(compressed.encoding, "gzip");
+    assert.equal(compressed.body, `42["big","${"x".repeat(4000)}"]`);
+    assert.equal(plain.encoding, null);
+    assert.equal(plain.body, `42["big","${"x".repeat(4000)}"]`);
+  });
+
+  test("the official client reads compressed answers over polling", TIMEOUT, async () => {
+    const socket = await connected("polling");
+
+    const big = next(socket, "big");
+    socket.emit("big", 50000, true);
+
+    assert.equal((await big)[0], "x".repeat(50000));
+  });
+});
+
 describe("engine events", () => {
   test("initial_headers and headers change the polling answers, after the cookie option", TIMEOUT, async () => {
     const handshake = await fetch(`${URL}/socket.io/?EIO=4&transport=polling`);

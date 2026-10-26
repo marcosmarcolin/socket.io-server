@@ -87,7 +87,7 @@ final class Nsp extends Emitter
     }
 
     /**
-     * Kept for API compatibility: the server doesn't compress, so this has no effect.
+     * With false, the broadcast isn't compressed; see BroadcastOperator::compress().
      */
     public function compress(bool $compress): BroadcastOperator
     {

@@ -162,7 +162,7 @@ $io->volatile->emit('position', $x, $y);          // skipped where the transport
 $io->local->emit('reload');                       // this process only, whatever the adapter
 ```
 
-`compress()` existe por compatibilidade e não tem efeito: o servidor não comprime.
+`compress(false)` deixa um broadcast ou um emit sem compressão; por padrão, as respostas grandes de polling são comprimidas (veja a opção `httpCompression`).
 
 ## Eventos do adapter
 

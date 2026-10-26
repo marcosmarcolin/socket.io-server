@@ -16,6 +16,7 @@
 | `logger` | `null` | A `Closure(string $scope, string $message)` that gets the debug log; see [Debug log](#debug-log). |
 | `path` | `'/socket.io/'` | The URL path; the client's `path` option must match. |
 | `transports` | `['polling', 'websocket']` | The transports clients may use. With `['websocket']`, polling requests are refused, so clients need `transports: ['websocket']` too (otherwise they get `xhr poll error`). With `['polling']`, no upgrade is offered. |
+| `httpCompression` | `true` | Compresses polling answers of 1 KB or more with gzip or deflate, as the client's `Accept-Encoding` allows, as in the reference. `false` turns it off; `['threshold' => bytes]` changes the size. An answer whose packets were all sent with `compress(false)` stays plain. |
 | `cors` | `['origin' => '*']` | `origin` is `'*'`, a list of allowed origins, a `Closure` that decides per request, or `null` to send no CORS headers. `credentials` (`false` by default) lets browsers send cookies. |
 | `allowUpgrades` | `true` | With `false`, the handshake offers no upgrade, so clients that start on polling stay on it; clients with `transports: ['websocket']` still connect over WebSocket. |
 | `cookie` | `false` | With `true`, the polling handshake sets the cookie `io=<session id>` (`Path=/; HttpOnly; SameSite=Lax`), which a load balancer can use for sticky sessions; see [Behind a reverse proxy](reverse-proxy.md). An array changes its attributes: `name`, `path`, `domain`, `httpOnly`, `secure`, `sameSite`, `maxAge` (seconds). |

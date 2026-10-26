@@ -83,7 +83,11 @@ final class Server extends Emitter
             return;
         }
 
-        $polling = new Polling($this->scheduler, maxPayload: $this->options->maxPayload);
+        $polling = new Polling(
+            $this->scheduler,
+            maxPayload: $this->options->maxPayload,
+            compressionThreshold: $this->options->httpCompression,
+        );
         $socket = $this->open($polling, $exchange->request());
         $cookie = $this->options->cookie;
         $polling->handleRequest(new HeadersHttpExchange(
