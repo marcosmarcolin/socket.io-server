@@ -117,7 +117,7 @@ User docs live in the README and in `docs/`, in English only, updated in the sam
 | `docs/multiple-processes.md` | `ChannelAdapter`, `RedisAdapter`, what crosses processes and the limits | an adapter or cross-process behavior changes |
 | `docs/migrating-from-phpsocket.io.md` | moving an app and its clients from phpsocket.io | a change affects how phpsocket.io code maps to ours |
 | `docs/admin-ui.md` | the Admin UI: `AdminUi::instrument()`, its options, opening the official UI (hosted or self-hosted), what it shows | the admin protocol, its options or what it reports changes |
-| `docs/performance.md` | what one process holds (memory per connection, echoes and broadcasts per second), the `event` extension, `memory_limit` and `ulimit`, and how to run the load test | a change could move the numbers (the connection objects, the write path, the encoders): rerun `tests/Load/run.sh` and update the table and its environment line |
+| `docs/performance.md` | what one process holds (memory per connection, echoes and broadcasts per second), the `event` extension, `memory_limit` and `ulimit`, how to run the load test, and the soak test's results over a long run | a change could move the numbers (the connection objects, the write path, the encoders): rerun `tests/Load/run.sh` and update the table and its environment line |
 | `docs/development.md` | the Docker commands, the test suites, secret scanning | a test command, suite or tool changes |
 | `CHANGELOG.md` | every user-visible change, English only | always, under `[Unreleased]` |
 

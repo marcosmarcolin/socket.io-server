@@ -77,6 +77,27 @@ The extension is installed with `pecl install swoole`; Swoole 6.2 needs PHP 8.2,
 
 **It is about as fast as `event`:** broadcasts 3 to 12% faster, echoes about the same, and about 7% more memory. Workerman uses only Swoole's loop and timers: the connections, HTTP and WebSocket stay Workerman's PHP code, and each callback runs in a new coroutine. Swoole's own speed comes from its server written in C, which this package doesn't use. Either loop does; Swoole fits when the application already runs on it for its coroutines.
 
+## Long runs: the soak test
+
+A server runs for days, so memory must stay flat while clients come and go. `tests/Soak/run.sh` keeps thousands of clients connecting and leaving for as long as asked: each lives 10 to 60 seconds over WebSocket, polling or the upgrade, echoes with acknowledgements, sends binary, joins and leaves rooms, and 30% drop their transport on the way to recover it. A numbered broadcast goes out every 200 ms, and every client checks it for lost, repeated or reordered messages. The server samples what it holds every 30 seconds.
+
+20 minutes, 2,000 clients (about 1,850 connected at a time), `event`, recovery on with a 30-second window:
+
+| | |
+|---|---|
+| Connections opened | 81,615 (about 68 a second) |
+| Transports dropped and recovered | 17,615 dropped, 17,560 recovered, none failed (the rest ended their life first) |
+| Numbered messages received | 11,012,036: none lost, repeated or reordered |
+| Acknowledgements | 441,559 echoes and 132,192 binary answers, all right; 118 timed out, from clients that left while waiting |
+| Heap while running | 53.1 to 54.8 MB, flat from the first sample to the last |
+| Heap once the clients left | 7.8 MB, one control socket left |
+
+Version 0.5.1 and earlier leaked about 7 KB per closed connection: the same run grew from 66 MB to 812 MB in 17 minutes, and the CPU reached 100%. The resident memory (RSS) stays at its peak after the clients leave, as PHP keeps freed memory for reuse instead of returning it to the system.
+
+```sh
+DURATION=1200 CLIENTS=2000 tests/Soak/run.sh
+```
+
 ## Where the time and the memory go
 
 Profiled with the same server, one connection or one broadcast at a time:
