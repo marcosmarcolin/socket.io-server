@@ -138,5 +138,5 @@ $emitter->serverSideEmit('cache-clear', 'users');                 // the servers
 
 - With several processes on one port, clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee. Setting `'transports' => ['websocket']` on the server too refuses polling outright. Behind a proxy with sticky sessions and one port per process, polling works; see [Behind a reverse proxy](reverse-proxy.md).
 - `fetchSockets()` without a callback and `allSockets()` read the current process.
-- [Connection state recovery](configuration.md#connection-state-recovery) works with the default adapter only: `ChannelAdapter` and `RedisAdapter` keep no sessions, as the reference's pub/sub adapters, since a client may come back on another process.
+- [Connection state recovery](configuration.md#connection-state-recovery) recovers a client that comes back to the process it left, so it needs sticky sessions, such as one port per process behind a proxy. With recovery on, every broadcast that can be recovered goes through the namespace's channel, so every process gets it, whatever the rooms; events sent with the `Emitter` aren't recoverable.
 - `local` keeps any of the above in the current process: `$io->local->emit('reload')`, `$io->local->disconnectSockets()`.

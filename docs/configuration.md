@@ -52,7 +52,7 @@ On the client, `socket.recovered` tells the same. Things to know:
 - **Only drops are recovered:** a lost transport, a ping timeout, or the server shutting down. A client or a server that calls `disconnect()`, with `true` too, starts over.
 - **Every event the server keeps gets an offset as its last argument**, a string the client sends back when it reconnects. Listeners that take a fixed number of arguments don't notice it; ones that read all their arguments see it. Events with an acknowledgement and volatile ones are neither kept nor given an offset.
 - **Events and sessions stay in the process's memory** for `maxDisconnectionDuration`, then go. A client that comes back later, or that received no event before it dropped, starts over.
-- **One process only:** with `ChannelAdapter` or `RedisAdapter` nothing is recovered, as with the reference's pub/sub adapters, since the client may come back on another process. See [Several processes](multiple-processes.md#limits).
+- **Several processes need sticky sessions:** with `ChannelAdapter` or `RedisAdapter`, each process keeps the sessions of its own sockets and every event broadcast meanwhile, from any process, so a client that comes back to the same process recovers; one that lands on another starts over. A proxy with sticky sessions and one port per process keeps clients on their process; see [Behind a reverse proxy](reverse-proxy.md). The reference's pub/sub adapters recover nothing; its Redis Streams adapter recovers on any process, which isn't built here.
 
 ## Cookies across origins
 

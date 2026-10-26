@@ -66,6 +66,8 @@ jobs:
 
       - run: tests/Integration/run.sh multi-process
 
+      - run: tests/Integration/run.sh recovery-processes
+
   multi-process-redis:
     runs-on: ubuntu-latest
     steps:

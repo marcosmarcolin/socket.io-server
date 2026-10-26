@@ -3,6 +3,7 @@
 # php service, the client in Node.
 #   tests/Integration/run.sh                  one process: tests/Integration/server.php
 #   tests/Integration/run.sh recovery         connection state recovery: recovery-server.php
+#   tests/Integration/run.sh recovery-processes  the same across two processes, one per port
 #   tests/Integration/run.sh multi-process    two processes and a channel server: multi-process-server.php
 #   tests/Integration/run.sh multi-process-redis  the same two processes, joined by a Redis server over TLS
 #   tests/Integration/run.sh example <name>   the example in examples/<name>
@@ -22,6 +23,8 @@ tls=""
 case "${1:-single}" in
     single) server_script="tests/Integration/server.php"; test_file="integration.test.js" ;;
     recovery) server_script="tests/Integration/recovery-server.php"; test_file="recovery.test.js" ;;
+    recovery-processes)
+        server_script="tests/Integration/recovery-processes-server.php"; test_file="recovery-processes.test.js" ;;
     multi-process) server_script="tests/Integration/multi-process-server.php"; test_file="multi-process.test.js" ;;
     multi-process-redis)
         server_script="tests/Integration/multi-process-server.php"; test_file="multi-process.test.js"; redis=1; tls=1 ;;
@@ -29,7 +32,7 @@ case "${1:-single}" in
         [ -n "${2:-}" ] || { echo "usage: $0 example <name>" >&2; exit 2; }
         server_script="examples/$2/start.php"; test_file="examples/$2.test.js"
         case "$2" in redis|emitter) redis=1 ;; esac ;;
-    *) echo "usage: $0 [single|recovery|multi-process|multi-process-redis|example <name>|examples]" >&2; exit 2 ;;
+    *) echo "usage: $0 [single|recovery|recovery-processes|multi-process|multi-process-redis|example <name>|examples]" >&2; exit 2 ;;
 esac
 echo "integration: $server_script${redis:+ with Redis}"
 

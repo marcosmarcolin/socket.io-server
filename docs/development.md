@@ -13,6 +13,7 @@ tests/Integration/run.sh multi-process         # the same over two processes and
 tests/Integration/run.sh multi-process-redis   # the same two processes, joined by Redis over TLS
 tests/Integration/run.sh examples              # every example, each against its test
 tests/Integration/run.sh recovery              # connection state recovery, with the official client
+tests/Integration/run.sh recovery-processes    # the same over two processes, one port each
 tests/Load/run.sh                              # the load test; see docs/performance.md
 LOOP=swoole tests/Integration/run.sh           # any of the scripts above on another event loop
 ```

@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Connection state recovery across processes, with sticky sessions:** with `ChannelAdapter` or `RedisAdapter`, each process keeps the sessions of its sockets and every recoverable broadcast, from any process, so a client that comes back to the process it left recovers, as with one process. Recoverable broadcasts then go through the namespace's channel.
+
 ## [0.4.0] - 2026-10-26
 
 Connection state recovery, engine middlewares and the rest of the reference's server API; compression, a debug log, Redis over TLS and Swoole's event loop; less memory per connection, measured against the reference Node.js server.
