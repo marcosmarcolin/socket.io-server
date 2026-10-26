@@ -1,7 +1,5 @@
 # Development
 
-**English** · [Português (Brasil)](development.pt-BR.md)
-
 Everything runs in Docker; PHP and Composer are not needed on the host.
 
 ```sh

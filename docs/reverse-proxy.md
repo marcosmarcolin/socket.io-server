@@ -1,7 +1,5 @@
 # Behind a reverse proxy
 
-**English** · [Português (Brasil)](reverse-proxy.pt-BR.md)
-
 In production the server usually sits behind a reverse proxy, such as nginx or HAProxy, which ends TLS and forwards the connections. Socket.IO needs three things from it: the WebSocket upgrade headers, a read timeout longer than the heartbeat, and, with several processes and HTTP long-polling, sticky sessions.
 
 ## One process

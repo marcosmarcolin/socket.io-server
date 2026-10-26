@@ -1,7 +1,5 @@
 # Configuration
 
-**English** · [Português (Brasil)](configuration.pt-BR.md)
-
 ## Server options
 
 `new SocketIO($port, $options)` takes these options. Times are in milliseconds.

@@ -62,10 +62,9 @@ A change is done only when all of these hold:
 - Short comments, one line, only to explain why.
 - No `echo`/`print`. Errors become exceptions or `error` events, and the debug log goes to the `logger` option.
 - No production dependencies besides Workerman. `workerman/channel` is optional (in `suggest`).
-- Everything in English: code, comments, docs, commits, PRs. The exceptions are the Brazilian Portuguese translations of the user documentation: `README.pt-BR.md` and `docs/*.pt-BR.md`.
+- Everything in English: code, comments, docs, commits, PRs. The user docs have no translations.
 - **`CHANGELOG.md`** follows Keep a Changelog, in English only, like the commits it summarizes. A PR that changes behavior, the API or the requirements adds its line under `[Unreleased]`. A release renames that section to the version and date.
 - **The README stays short:** what the package is, features, requirements, installation, a quick start, the examples and links to `docs/`. Details go in the guides in `docs/`.
-- **User docs in two languages, always in sync.** `README.md` and `docs/*.md` (English) are the reference. Every change to one goes to its `.pt-BR.md` translation in the same PR, and neither has content the other lacks. Code blocks are identical in both, except the comments of shell commands.
 
 ## Verification
 
@@ -103,7 +102,7 @@ Examples show the API users will write, so they use Workerman directly where use
 
 ## Documentation
 
-User docs live in the README and in `docs/`, each in English (the reference) and Brazilian Portuguese (`.pt-BR.md`), updated together in the same PR as the change they describe:
+User docs live in the README and in `docs/`, in English only, updated in the same PR as the change they describe:
 
 | File | Covers | Update it when |
 |---|---|---|
