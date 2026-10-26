@@ -12,7 +12,7 @@ tests/Compliance/engine-io.sh                  # the official Engine.IO v4 test 
 tests/Compliance/socket-io.sh                  # the official Socket.IO v5 test suite
 tests/Integration/run.sh                       # the official socket.io-client against this server
 tests/Integration/run.sh multi-process         # the same over two processes and a channel server
-tests/Integration/run.sh multi-process-redis   # the same two processes, joined by Redis
+tests/Integration/run.sh multi-process-redis   # the same two processes, joined by Redis over TLS
 tests/Integration/run.sh examples              # every example, each against its test
 tests/Load/run.sh                              # the load test; see docs/performance.md
 LOOP=swoole tests/Integration/run.sh           # any of the scripts above on another event loop

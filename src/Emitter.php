@@ -58,16 +58,18 @@ final class Emitter
     /**
      * An emitter that publishes to the Redis server of RedisAdapter, with blocking I/O: no event loop needed.
      *
-     * @param string $url redis://[[user]:password@]host[:port], the one the servers use
+     * @param string $url redis://[[user]:password@]host[:port], or rediss:// for TLS, the one the servers use
      * @param float $timeout seconds to connect, and to wait for each reply
-     * @throws InvalidArgumentException for an invalid URL
+     * @param array<string, mixed> $tls PHP's ssl context options for rediss://, such as cafile or local_cert
+     * @throws InvalidArgumentException for an invalid URL, or TLS options without rediss://
      */
     public static function redis(
         string $url = RedisUrl::DEFAULT,
         string $key = 'socket.io',
         float $timeout = 5.0,
+        array $tls = [],
     ): self {
-        return new self(new BlockingRedisPublisher(RedisUrl::parse($url), $timeout), $key);
+        return new self(new BlockingRedisPublisher(RedisUrl::parse($url)->withTlsOptions($tls), $timeout), $key);
     }
 
     public function __get(string $name): self

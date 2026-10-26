@@ -94,13 +94,23 @@ Todos os argumentos são opcionais:
 
 ```php
 RedisAdapter::factory(
-    url: 'redis://127.0.0.1:6379',   // redis://[[user]:password@]host[:port]
+    url: 'redis://127.0.0.1:6379',   // redis://[[user]:password@]host[:port], or rediss:// for TLS
     key: 'socket.io',                // the first part of every channel name
     onError: null,                   // fn (Throwable $error): connection failures and Redis errors
+    tls: [],                         // PHP's ssl context options for rediss://
 );
 ```
 
-- A URL padrão é `redis://127.0.0.1:6379`. Caracteres reservados no usuário ou na senha vão com percent-encoding; um número de banco é aceito e ignorado, porque os canais de publish e subscribe são compartilhados por todos os bancos. TLS (`rediss://`) ainda não é suportado.
+- A URL padrão é `redis://127.0.0.1:6379`. Caracteres reservados no usuário ou na senha vão com percent-encoding; um número de banco é aceito e ignorado, porque os canais de publish e subscribe são compartilhados por todos os bancos.
+- **TLS:** uma URL `rediss://` conecta por TLS e confere o certificado do servidor com as autoridades do sistema, usando o host da URL como nome, como os serviços gerenciados de Redis (Amazon ElastiCache, Azure Cache, Upstash) exigem. O `tls` recebe as [opções de contexto ssl do PHP](https://www.php.net/manual/pt_BR/context.ssl.php) para o resto: uma autoridade privada, um certificado de cliente ou outro nome a conferir. No [event loop do Swoole](performance.pt-BR.md#no-event-loop-do-swoole), as conexões TLS de cliente do Workerman travam no handshake, então o adapter recusa `rediss://` ali; o `Emitter`, que não roda no loop, não é afetado.
+
+```php
+RedisAdapter::factory('rediss://:password@redis.internal:6380', tls: [
+    'cafile' => '/etc/ssl/redis-ca.pem',     // a private authority
+    'local_cert' => '/etc/ssl/app.pem',      // a client certificate, when Redis asks for one
+]);
+```
+
 - Servidores de apps diferentes no mesmo Redis precisam de `key`s diferentes, senão recebem os broadcasts uns dos outros.
 - Quando o Redis está inacessível, o adapter tenta de novo a cada segundo e informa a falha uma vez ao `onError` (`Worker::log` por padrão). Até 1.000 publicações esperam a conexão; mensagens publicadas enquanto um processo estava desconectado se perdem, como sempre no pub/sub do Redis.
 
@@ -120,7 +130,7 @@ $emitter->in('user:42')->disconnectSockets();                     // log a user 
 $emitter->serverSideEmit('cache-clear', 'users');                 // the servers' on('cache-clear')
 ```
 
-- Usa I/O bloqueante, então não precisa de event loop. Conecta no primeiro envio e mantém a conexão; `Emitter::redis($url, $key, $timeout)` recebe a URL e a `key` dos servidores, e quanto esperar pelo Redis, 5 segundos por padrão. Falhas lançam `RuntimeException`.
+- Usa I/O bloqueante, então não precisa de event loop. Conecta no primeiro envio e mantém a conexão; `Emitter::redis($url, $key, $timeout, $tls)` recebe a URL e a `key` dos servidores, quanto esperar pelo Redis, 5 segundos por padrão, e as mesmas opções `tls` do adapter. Falhas lançam `RuntimeException`.
 - `of()`, `to()`, `in()`, `except()` e `volatile` devolvem um emitter novo, então um pode ser guardado e reaproveitado.
 - Ele só envia: sem acknowledgements e sem `fetchSockets()`, como os pacotes de emitter da referência. Os dados seguem as regras do `emit()`, incluindo `Binary`.
 - Os servidores não contam um emitter como servidor, então ele nunca os faz esperar por respostas.

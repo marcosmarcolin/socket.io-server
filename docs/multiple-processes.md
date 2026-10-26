@@ -94,13 +94,23 @@ Every argument is optional:
 
 ```php
 RedisAdapter::factory(
-    url: 'redis://127.0.0.1:6379',   // redis://[[user]:password@]host[:port]
+    url: 'redis://127.0.0.1:6379',   // redis://[[user]:password@]host[:port], or rediss:// for TLS
     key: 'socket.io',                // the first part of every channel name
     onError: null,                   // fn (Throwable $error): connection failures and Redis errors
+    tls: [],                         // PHP's ssl context options for rediss://
 );
 ```
 
-- The URL defaults to `redis://127.0.0.1:6379`. Reserved characters in the user or password are percent-encoded; a database number is accepted and ignored, as publish and subscribe channels are shared by every database. TLS (`rediss://`) is not supported yet.
+- The URL defaults to `redis://127.0.0.1:6379`. Reserved characters in the user or password are percent-encoded; a database number is accepted and ignored, as publish and subscribe channels are shared by every database.
+- **TLS:** a `rediss://` URL connects over TLS and checks the server's certificate against the system's authorities, with the URL's host as its name, as managed Redis services (Amazon ElastiCache, Azure Cache, Upstash) need. `tls` takes [PHP's ssl context options](https://www.php.net/manual/en/context.ssl.php) for anything else: a private authority, a client certificate, or another name to check. On [Swoole's event loop](performance.md#on-swooles-event-loop), Workerman's TLS client connections hang in the handshake, so the adapter refuses `rediss://` there; the `Emitter`, which doesn't run in the loop, isn't affected.
+
+```php
+RedisAdapter::factory('rediss://:password@redis.internal:6380', tls: [
+    'cafile' => '/etc/ssl/redis-ca.pem',     // a private authority
+    'local_cert' => '/etc/ssl/app.pem',      // a client certificate, when Redis asks for one
+]);
+```
+
 - Servers of different apps sharing one Redis need different `key`s, or they get each other's broadcasts.
 - When Redis is unreachable, the adapter retries every second and reports the failure once to `onError` (`Worker::log` by default). Up to 1,000 publishes wait for the connection; messages published while a process was disconnected are lost, as always with Redis pub/sub.
 
@@ -120,7 +130,7 @@ $emitter->in('user:42')->disconnectSockets();                     // log a user 
 $emitter->serverSideEmit('cache-clear', 'users');                 // the servers' on('cache-clear')
 ```
 
-- It uses blocking I/O, so it needs no event loop. It connects on the first send and keeps the connection; `Emitter::redis($url, $key, $timeout)` takes the servers' URL and `key`, and how long to wait for Redis, 5 seconds by default. Failures throw a `RuntimeException`.
+- It uses blocking I/O, so it needs no event loop. It connects on the first send and keeps the connection; `Emitter::redis($url, $key, $timeout, $tls)` takes the servers' URL and `key`, how long to wait for Redis, 5 seconds by default, and the same `tls` options as the adapter. Failures throw a `RuntimeException`.
 - `of()`, `to()`, `in()`, `except()` and `volatile` return a new emitter, so one can be kept and reused.
 - It only sends: no acknowledgements and no `fetchSockets()`, as in the reference's emitter packages. Data follows the rules of `emit()`, `Binary` included.
 - Servers don't count an emitter as a server, so it never makes them wait for answers.

@@ -178,6 +178,13 @@ final class EmitterTest extends TestCase
         self::assertSame(3, $refused);
     }
 
+    public function testTheRedisEmitterRefusesTlsOptionsWithoutRediss(): void
+    {
+        $this->expectExceptionObject(new InvalidArgumentException('TLS options need a rediss:// URL'));
+
+        Emitter::redis('redis://127.0.0.1:6379', tls: ['cafile' => '/certs/ca.pem']);
+    }
+
     public function testANamespaceStartsWithASlash(): void
     {
         $this->expectException(InvalidArgumentException::class);

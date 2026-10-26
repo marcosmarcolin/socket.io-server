@@ -13,4 +13,7 @@ use Marcolin\SocketIO\Emitter;
 require __DIR__ . '/../../vendor/autoload.php';
 
 [, $room, $message] = $argv + [null, '', ''];
-Emitter::redis((string) getenv('REDIS_URL'))->to((string) $room)->emit('from-emitter', (string) $message, getmypid());
+$tls = (string) getenv('REDIS_TLS_CA') === '' ? [] : ['cafile' => (string) getenv('REDIS_TLS_CA')];
+Emitter::redis((string) getenv('REDIS_URL'), tls: $tls)
+    ->to((string) $room)
+    ->emit('from-emitter', (string) $message, getmypid());
