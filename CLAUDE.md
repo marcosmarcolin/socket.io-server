@@ -312,6 +312,12 @@ src/
     - each server's `broadcastWithAck()` reports how many sockets it reached, and each answer counts once, with its first argument; `AckCollector` waits for `serverCount()` reports;
     - the callback gets `null` and the answers in arrival order once every server reported and all answered (at once with `[]` when none was reached), or a `TimeoutException` and the answers so far, after which every socket of the namespace forgets the id;
     - a `volatile` packet dropped for a busy transport still counts, so the wait ends with the timeout.
+- **Socket middlewares** (`$socket->use()`), as the reference's `socket.use()`:
+  - they run in order for each received event of a connected socket, after the `onAny` listeners and before the event's own, getting `[name, ...args]` with the ack `Closure` last when asked;
+  - `$next()` lets the event through; `$next($error)` stops it and dispatches `error` with `$error`, and the socket stays connected; only the first call counts, and it may come later;
+  - an exception thrown before `$next` stops the event the same way; one thrown after it (from a listener) propagates, as with namespace middlewares;
+  - the list is copied when the event arrives, so a middleware added meanwhile applies from the next event; an event let through after the socket left is dropped;
+  - a middleware taking `array &$event` by reference changes what the next ones and the listeners get (JavaScript middlewares mutate the array the same way).
 - **Catch-all listeners**, as in the reference:
   - `onAny`/`prependAny`/`offAny`/`listenersAny` get each received event of a connected socket as `(string $event, ...$args)`, with the ack `Closure` last, before the event's own listeners; those are skipped if an `onAny` listener disconnected the socket. Numeric event names arrive as strings, as with `on()`.
   - `onAnyOutgoing` and its family get each event sent to the socket, without the ack callback, before it is written: from `emit()`/`send()`, and from the adapter for every socket a broadcast reaches (with or without ack).
@@ -366,7 +372,7 @@ Worker::runAll();
 
   Sockets still in their middlewares never connect. It is not called on `workerStop`: the reference has no such hook, and Workerman closes the connections itself.
 - `Nsp`: `on('connection')` and the `serverSideEmit()` events, `use()`, `to/in/except`, `timeout`, `emit`, `serverSideEmit()`, `fetchSockets(?Closure)`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
-- `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `onAny`, `prependAny`, `offAny`, `listenersAny`, `onAnyOutgoing`, `prependAnyOutgoing`, `offAnyOutgoing`, `listenersAnyOutgoing`, `join`, `leave`, `to/in/except`, `broadcast`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
+- `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `onAny`, `prependAny`, `offAny`, `listenersAny`, `onAnyOutgoing`, `prependAnyOutgoing`, `offAnyOutgoing`, `listenersAnyOutgoing`, `use`, `join`, `leave`, `to/in/except`, `broadcast`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
 - Broadcasts, `socketsJoin`, `socketsLeave`, `disconnectSockets` and `fetchSockets` with a callback go through the adapter, so they reach every process with `ChannelAdapter` or `RedisAdapter`; `allSockets` and `fetchSockets` without a callback read the local process.
 - `RemoteSocket`: `id`, `handshake`, `rooms`, `data`, `emit`, `join`, `leave`, `disconnect`.
 - **Broadcast** (`InMemoryAdapter`), as in the reference:

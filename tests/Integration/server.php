@@ -42,9 +42,20 @@ $io->use(static function (Socket $socket, Closure $next): void {
 });
 
 $io->on('connection', static function (Socket $socket) use ($io, &$lastConnectionError): void {
+    // A socket middleware stops the events named "forbidden", and the error listener tells the client.
+    $socket->use(static function (array $event, Closure $next): void {
+        $next($event[0] === 'forbidden' ? new RuntimeException('forbidden event') : null);
+    });
+    $socket->on('error', static function (Throwable $error) use ($socket): void {
+        $socket->emit('refused', $error->getMessage());
+    });
+    $socket->on('forbidden', static function () use ($socket): void {
+        $socket->emit('let-through');
+    });
     $socket->on('last-connection-error', static function (Closure $ack) use (&$lastConnectionError): void {
         $ack($lastConnectionError);
     });
+
     // Answers with the arguments it got, through the acknowledgement or as an event.
     $socket->on('echo', static function (mixed ...$args) use ($socket): void {
         $ack = array_pop($args);
