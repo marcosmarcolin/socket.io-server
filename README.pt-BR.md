@@ -87,6 +87,7 @@ Cada um roda com `php examples/<nome>/start.php start`; depois abra http://local
 | [acks](examples/acks) | acknowledgements nos dois sentidos, e o `timeout()` do servidor |
 | [namespaces](examples/namespaces) | `/public` e `/admin`, um middleware com token, `ConnectionError` |
 | [binary](examples/binary) | upload e download de arquivo com `Binary` |
+| [dashboard](examples/dashboard) | dashboards ao vivo: um timer no servidor manda números novos a cada poucos segundos para quem vê cada um |
 | [multi-process](examples/multi-process) | quatro processos e `ChannelAdapter` |
 | [redis](examples/redis) | quatro processos e `RedisAdapter`; precisa de um servidor Redis |
 

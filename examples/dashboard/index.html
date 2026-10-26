@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live dashboards</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    nav { display: flex; gap: .5rem; margin: 1rem 0; }
+    nav button { padding: .5rem 1rem; font: inherit; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; }
+    nav button[aria-pressed="true"] { background: #222; color: #fff; border-color: #222; }
+    #cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .75rem; }
+    .card { border: 1px solid #ddd; border-radius: 6px; padding: .75rem; }
+    .card .label { color: #666; font-size: 13px; }
+    .card .value { font-size: 26px; font-variant-numeric: tabular-nums; margin-top: .25rem; }
+    figure { margin: 1rem 0 0; border: 1px solid #ddd; border-radius: 6px; padding: .75rem; }
+    figcaption { color: #666; font-size: 13px; margin-bottom: .5rem; }
+    svg { width: 100%; height: 120px; display: block; }
+    polyline { fill: none; stroke: #2563eb; stroke-width: 2; vector-effect: non-scaling-stroke; }
+    .muted { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Live dashboards</h1>
+  <p class="muted">The server pushes new numbers every few seconds to everyone watching the same dashboard.</p>
+  <nav id="dashboards"></nav>
+  <div id="cards"></div>
+  <figure>
+    <figcaption id="caption"></figcaption>
+    <svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline id="line" points=""></polyline></svg>
+  </figure>
+  <p class="muted" id="status">Connecting…</p>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const url = `http://${location.hostname}:3000`;
+    const socket = io(url);
+    let current = null;
+
+    // "ordersPerMinute" becomes "Orders per minute".
+    const label = (name) => name.replace(/([A-Z])/g, " $1").toLowerCase().replace(/^./, (c) => c.toUpperCase());
+
+    function render({ dashboard, time, metrics, chart }) {
+      if (dashboard !== current) {
+        return;
+      }
+      const cards = document.getElementById("cards");
+      cards.replaceChildren(...Object.entries(metrics).map(([name, value]) => {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = '<div class="label"></div><div class="value"></div>';
+        card.querySelector(".label").textContent = label(name);
+        card.querySelector(".value").textContent = value.toLocaleString();
+        return card;
+      }));
+
+      const points = chart.points;
+      const min = Math.min(...points);
+      const max = Math.max(...points);
+      const step = points.length > 1 ? 100 / (points.length - 1) : 0;
+      const y = (value) => (max === min ? 50 : 95 - ((value - min) / (max - min)) * 90);
+      document.getElementById("line").setAttribute("points", points.map((v, i) => `${i * step},${y(v)}`).join(" "));
+      document.getElementById("caption").textContent = `${label(chart.metric)}, last ${points.length} updates`;
+      document.getElementById("status").textContent = `Updated at ${new Date(time).toLocaleTimeString()}`;
+    }
+
+    async function watch(name) {
+      current = name;
+      for (const button of document.querySelectorAll("#dashboards button")) {
+        button.setAttribute("aria-pressed", String(button.dataset.name === name));
+      }
+      // The answer brings the numbers right away; the timer's updates follow.
+      render(await socket.emitWithAck("watch", name));
+    }
+
+    socket.on("dashboards", (names) => {
+      const nav = document.getElementById("dashboards");
+      nav.replaceChildren(...names.map((name) => {
+        const button = document.createElement("button");
+        button.dataset.name = name;
+        button.textContent = label(name);
+        button.addEventListener("click", () => watch(name));
+        return button;
+      }));
+      watch(current ?? names[0]);
+    });
+    socket.on("update", render);
+    socket.on("disconnect", () => (document.getElementById("status").textContent = "Disconnected, reconnecting…"));
+  </script>
+</body>
+</html>

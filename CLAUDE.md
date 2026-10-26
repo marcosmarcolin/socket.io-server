@@ -89,6 +89,8 @@ Both scripts share `tests/Compliance/suite.sh`, which downloads the suite at a p
 
 `examples/<name>/` holds a `start.php` (Socket.IO on port 3000, its page on port 3001 through a plain Workerman HTTP worker) and an `index.html` that loads `socket.io-client` 4.8.4 from `cdn.socket.io` with its SRI hash. Examples are code: phpcs and PHPStan check them, they follow the code rules, and `tests/Integration/client/examples/<name>.test.js` checks each one. Run one with `tests/Integration/run.sh example <name>`.
 
+Examples show the API users will write, so they use Workerman directly where users would, such as `Workerman\Timer::add()` in `workerStart` for periodic work (the `dashboard` example). The `Scheduler` rule applies to `src/`, whose timing tests replace.
+
 ## Documentation
 
 User docs live in the README and in `docs/`, each in English (the reference) and Brazilian Portuguese (`.pt-BR.md`), updated together in the same PR as the change they describe:
