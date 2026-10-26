@@ -151,6 +151,39 @@ final class EmitterTest extends TestCase
         self::assertSame(1, $calls);
     }
 
+    public function testInterleavedEventsKeepTheirOwnOrder(): void
+    {
+        $emitter = new TestEmitter();
+        $calls = [];
+        foreach (['a1' => 'a', 'b1' => 'b', 'a2' => 'a', 'b2' => 'b'] as $name => $event) {
+            $emitter->on($event, static function () use (&$calls, $name): void {
+                $calls[] = $name;
+            });
+        }
+
+        $emitter->fire('a');
+        $emitter->fire('b');
+
+        self::assertSame(['a1', 'a2', 'b1', 'b2'], $calls);
+        self::assertSame(['a', 'b'], $emitter->eventNames());
+    }
+
+    public function testRemovingOneEventLeavesTheOthers(): void
+    {
+        $emitter = new TestEmitter();
+        $listener = static function (): void {
+        };
+        $emitter->on('a', $listener);
+        $emitter->once('b', $listener);
+        $emitter->on('c', $listener);
+
+        $emitter->off('b');
+
+        self::assertSame(['a', 'c'], $emitter->eventNames());
+        self::assertFalse($emitter->fire('b'));
+        self::assertSame([$listener], $emitter->listeners('c'));
+    }
+
     public function testExceptionsFromListenersPropagate(): void
     {
         $emitter = $this->emitter();

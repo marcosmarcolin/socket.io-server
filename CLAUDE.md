@@ -89,7 +89,7 @@ The integration client (`tests/Integration/client/`) pins `socket.io-client` in 
 
 Both scripts share `tests/Compliance/suite.sh`, which downloads the suite at a pinned commit of `socketio/socket.io` into `.cache/`, checks each file against a SHA-256 checksum, and runs it with a pinned Node image that shares the server container's network. To move to a newer suite, update the commit and the checksums together, after reading what changed.
 
-The load test (`tests/Load/`) runs `server.php` in PHP and `load.mjs` with the integration client's pinned `socket.io-client` in Node. It measures the PHP heap and RSS per connection (from the server's `stats` event), the time to connect, acknowledgement round trips and broadcast deliveries per second. `LOOP=event` builds `tests/Load/Dockerfile`, the PHP image plus the `event` extension (loaded after `sockets`, by its `zz-event.ini`). `SERVER=node` runs the reference server instead (`tests/Load/node/server.mjs`, the same handlers on `socket.io` pinned with a committed lockfile, `npm ci` from a read-only mount), for the comparison table; regenerate its lockfile as the integration client's. Workerman without `event` uses `select()`, limited to 1,024 descriptors per process. CI runs a small load test so the script keeps working; the numbers in `docs/performance.md` come from local runs.
+The load test (`tests/Load/`) runs `server.php` in PHP and `load.mjs` with the integration client's pinned `socket.io-client` in Node. It measures the PHP heap and RSS per connection (from the server's `stats` event), the time to connect, acknowledgement round trips and broadcast deliveries per second. `LOOP=event` builds `tests/Load/Dockerfile`, the PHP image plus the `event` extension (loaded after `sockets`, by its `zz-event.ini`). `SERVER=node` runs the reference server instead (`tests/Load/node/server.mjs`, the same handlers on `socket.io` pinned with a committed lockfile, `npm ci` from a read-only mount), for the comparison table; regenerate its lockfile as the integration client's. Workerman without `event` uses `select()`, limited to 1,024 descriptors per process. CI runs a small load test so the script keeps working; the numbers in `docs/performance.md` come from local runs. When they are measured again, update the test environment table in the guide too, and run both servers in the same session.
 
 ## Examples
 
@@ -133,7 +133,8 @@ Two independent layers, as in the Node reference implementation. The Engine laye
 ```
 src/
   Binary.php                    binary value (attachments and binary frames)
-  Event/Emitter.php             on/once/off/listeners plus a protected dispatch
+  Event/Emitter.php             on/once/off/listeners plus a protected dispatch; listeners in flat arrays, since every
+                                connection holds several emitters (an array per listener cost ~1.2 KB)
   Event/AnyListeners.php        the catch-all listeners of onAny() and onAnyOutgoing()
   Engine/                       Engine.IO v4
     Server.php                  validates requests, handshake, sessions, routing; no Workerman code
