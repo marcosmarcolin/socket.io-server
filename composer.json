@@ -3,7 +3,7 @@
   "description": "Socket.IO v4 server for PHP, built on Workerman",
   "type": "library",
   "license": "MIT",
-  "keywords": ["socket.io", "websocket", "realtime", "workerman", "engine.io"],
+  "keywords": ["socket.io", "websocket", "realtime", "workerman", "engine.io", "redis"],
   "homepage": "https://github.com/marcosmarcolin/socket.io-server",
   "authors": [
     {

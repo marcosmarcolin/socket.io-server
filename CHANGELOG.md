@@ -4,6 +4,15 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **`RedisAdapter`**: broadcasts across processes and machines through Redis publish and subscribe, set with `$io->adapter(RedisAdapter::factory('redis://127.0.0.1:6379'))` in `workerStart`. The URL (with an optional user and password), the channel key and the error handler are configurable, and every argument has a default. It has its own Redis client on Workerman, so it needs no extra package, and it reconnects and subscribes again by itself.
+- **The `redis` example**: four processes joined by Redis.
+
+### Changed
+
+- The cross-process logic of `ChannelAdapter` moved to the abstract `PubSubAdapter`, which `ChannelAdapter` and `RedisAdapter` extend. Adapters for other brokers can extend it with their own `PubSub`. `ChannelAdapter::factory()` and `new ChannelAdapter($nsp, $pubSub)` work as before.
+
 ## [0.2.0] - 2026-10-25
 
 ### Added

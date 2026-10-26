@@ -3,6 +3,7 @@
 # php service, the client in Node.
 #   tests/Integration/run.sh                  one process: tests/Integration/server.php
 #   tests/Integration/run.sh multi-process    two processes and a channel server: multi-process-server.php
+#   tests/Integration/run.sh multi-process-redis  the same two processes, joined by a Redis server
 #   tests/Integration/run.sh example <name>   the example in examples/<name>
 #   tests/Integration/run.sh examples         every example, one after the other
 set -eu
@@ -14,23 +15,37 @@ if [ "${1:-}" = "examples" ]; then
     exit 0
 fi
 
+redis=""
 case "${1:-single}" in
     single) server_script="tests/Integration/server.php"; test_file="integration.test.js" ;;
     multi-process) server_script="tests/Integration/multi-process-server.php"; test_file="multi-process.test.js" ;;
+    multi-process-redis)
+        server_script="tests/Integration/multi-process-server.php"; test_file="multi-process.test.js"; redis=1 ;;
     example)
         [ -n "${2:-}" ] || { echo "usage: $0 example <name>" >&2; exit 2; }
-        server_script="examples/$2/start.php"; test_file="examples/$2.test.js" ;;
-    *) echo "usage: $0 [single|multi-process|example <name>|examples]" >&2; exit 2 ;;
+        server_script="examples/$2/start.php"; test_file="examples/$2.test.js"
+        [ "$2" != "redis" ] || redis=1 ;;
+    *) echo "usage: $0 [single|multi-process|multi-process-redis|example <name>|examples]" >&2; exit 2 ;;
 esac
-echo "integration: $server_script"
+echo "integration: $server_script${redis:+ with Redis}"
 
 # Keep in sync with tests/Compliance/suite.sh.
 NODE_IMAGE="node:24.21.0-alpine"
+REDIS_IMAGE="redis:7.4.2-alpine"
+# A password, so the tests cover the login too.
+REDIS_PASSWORD="integration"
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
-server=$(docker compose run -d --rm php php "$server_script" start)
-trap 'docker stop -t 2 "$server" >/dev/null 2>&1 || true' EXIT
+server=$(docker compose run -d --rm -e ADAPTER="${redis:+redis}" \
+    -e REDIS_URL="redis://:$REDIS_PASSWORD@127.0.0.1:6379" php php "$server_script" start)
+redis_server=""
+trap 'docker stop -t 2 "$server" $redis_server >/dev/null 2>&1 || true' EXIT
+if [ -n "$redis" ]; then
+    # Shares the server's network, as the client does; the adapter reconnects until Redis is up.
+    redis_server=$(docker run -d --rm --network "container:$server" "$REDIS_IMAGE" \
+        redis-server --requirepass "$REDIS_PASSWORD" --save "" --appendonly no)
+fi
 
 # The client is mounted read-only and installed in a copy, so node_modules never lands in the repository.
 docker run --rm --network "container:$server" -v "$root/tests/Integration/client:/client:ro" \
