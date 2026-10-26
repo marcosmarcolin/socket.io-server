@@ -45,12 +45,32 @@
 | `emit(string $event, ...$args)`, `send(...$args)` | Sends an event; a `Closure` as the last argument asks the client to acknowledge it. |
 | `onAny(Closure $listener)`, `prependAny()`, `offAny(?Closure $listener = null)`, `listenersAny()` | Every event from the client, before its own listeners. The listener gets the event name, then the arguments, with the acknowledgement `Closure` last when the client asked for one. `offAny()` without a listener removes them all. |
 | `onAnyOutgoing(Closure $listener)`, `prependAnyOutgoing()`, `offAnyOutgoing()`, `listenersAnyOutgoing()` | Every event sent to this client, by `emit()` or a broadcast (from other processes too), before it is written: the event name, then the arguments, without the acknowledgement callback. |
+| `use(fn (array $event, Closure $next))` | A middleware for the events from the client, after the `onAny()` listeners and before the event's own; see [Socket middlewares](#socket-middlewares). |
 | `timeout(int $ms)`, `volatile`, `compress(bool)` | Emit modifiers, which return a new object. See [Acknowledgements](#acknowledgements). |
 | `join(string\|array $rooms)`, `leave(string $room)` | Rooms. |
 | `to()`, `in()`, `except()`, `broadcast` | Broadcasting to other sockets; the socket itself is left out. |
 | `disconnect(bool $close = false)` | Leaves the namespace; with `true`, closes the whole connection. |
 
-Events: `disconnecting` and `disconnect` get `(string $reason, ?Throwable $description)`; `disconnecting` still sees the rooms. The reasons are `transport close`, `transport error`, `ping timeout`, `parse error`, `forced close`, `server namespace disconnect`, `client namespace disconnect`, `forced server close` and `server shutting down`. `error` gets a `Throwable` when the client sent a packet that breaks the protocol, just before the connection closes.
+Events: `disconnecting` and `disconnect` get `(string $reason, ?Throwable $description)`; `disconnecting` still sees the rooms. The reasons are `transport close`, `transport error`, `ping timeout`, `parse error`, `forced close`, `server namespace disconnect`, `client namespace disconnect`, `forced server close` and `server shutting down`. `error` gets a `Throwable` when the client sent a packet that breaks the protocol, just before the connection closes, or when a `use()` middleware stopped an event.
+
+### Socket middlewares
+
+`use()` middlewares run, in order, for each event the socket receives. Each gets the event as `[name, ...args]`, with the acknowledgement `Closure` last when the client asked for one, and lets it through with `$next()` or stops it with `$next($error)`:
+
+```php
+$socket->use(function (array $event, Closure $next) use ($socket): void {
+    [$name] = $event;   // then the arguments, and the acknowledgement Closure last when asked
+    $next(isAllowed($socket, $name) ? null : new RuntimeException('unauthorized event'));
+});
+
+$socket->on('error', function (Throwable $error) use ($socket): void {
+    $socket->emit('refused', $error->getMessage());
+});
+```
+
+- A stopped event reaches no listener, and the socket emits `error` with the error; the socket stays connected, so the app decides what to do.
+- `$next` may be called later, from an asynchronous callback; only its first call counts. An exception thrown before `$next` stops the event the same way.
+- Taking the event by reference, `array &$event`, lets a middleware change the arguments the next middlewares and the listeners get.
 
 The names `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` and `removeListener` are reserved: emitting them throws.
 
