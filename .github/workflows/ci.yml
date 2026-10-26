@@ -89,6 +89,9 @@ jobs:
       # A small run, so the load test keeps working; the numbers come from local runs.
       - run: CLIENTS=200 ROUNDS=5 tests/Load/run.sh
 
+      # A short soak, so the script keeps working: clients come and go, and no message may be lost.
+      - run: DURATION=60 CLIENTS=300 tests/Soak/run.sh
+
   swoole:
     runs-on: ubuntu-latest
     env:

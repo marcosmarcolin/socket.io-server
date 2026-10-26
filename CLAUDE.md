@@ -87,6 +87,7 @@ tests/Load/run.sh                              # the load test: 500 WebSocket cl
 LOOP=event CLIENTS=10000 tests/Load/run.sh     # the same with the event extension, past select()'s 1,024
 SERVER=node CLIENTS=10000 tests/Load/run.sh    # the reference Node.js server, for the comparison in docs/performance.md
 LOOP=swoole tests/Integration/run.sh           # any compliance, integration or load script on another event loop
+DURATION=1200 CLIENTS=2000 tests/Soak/run.sh   # the soak test: clients come and go; memory must plateau
 ```
 
 `tests/php-server.sh` starts the PHP server of every script: in the php service, or, with `LOOP=select|event|swoole`, in the image of `tests/Load/Dockerfile` (PHP 8.1 with `event`) or, for Swoole, `tests/Load/swoole.Dockerfile` (the Swoole project's prebuilt `phpswoole/swoole:6.1.10-php8.1`, 6.1 being the last line for PHP 8.1, plus `pcntl`; compiling Swoole took minutes per CI run), where `tests/event-loop.php`, loaded with `auto_prepend_file`, sets `Worker::$eventLoopClass`, so the servers run unchanged. A failed image build prints its log. CI's `swoole` job runs both suites and the integration tests on Swoole.
@@ -224,7 +225,7 @@ src/
   - `onWebSocketConnect` runs `Server::verifyWebSocket()` before the 101 and answers an invalid request with a plain HTTP 400 and the error message, as the reference does;
   - `onWebSocketConnected` (Workerman 5.2) runs after the 101, sets `maxPackageSize` to `maxPayload` plus the frame header, and calls `Server::handleWebSocket()`, so the `open` packet goes out at once;
   - `onClose` reports the close to the WebSocket, or aborts an unanswered HTTP request.
-- **Per-connection state** lives in `WeakMap`s keyed by `TcpConnection`. A `WorkermanHttpExchange` copies its request up front, because Workerman recycles `Request` objects and a poll is answered later.
+- **Per-connection state** lives in `WeakMap`s keyed by `TcpConnection`. A `WeakMap` entry whose value holds its own key is never freed (the value keeps the key alive), so such entries are removed on close: `ServerBinding` unsets its maps in `onClose`, and `SocketIO` unsets `$clients[$session]` on the session's `close` (a `Client` holds its session; before, every closed connection leaked its client, session and sockets). `tests/Unit/MemoryTest.php` checks with `WeakReference`s that a closed connection is collected; the soak test checks that memory plateaus. A `WorkermanHttpExchange` copies its request up front, because Workerman recycles `Request` objects and a poll is answered later.
 - **Exceptions never leave a callback.** `ServerBinding` closes the connection (after a 500 if the request had no answer yet) and passes the exception to its error handler, which defaults to `Worker::log`.
 - **Closing a WebSocket** writes what is grouped, then sends a close frame with code 1000, then closes the TCP connection.
 - **Grouped WebSocket writes** (`WorkermanWebSocketConnection`, `WriteGroup`): the write system call costs far more than our code or Workerman's `send()` (about 1.5 µs against 0.6 and 0.25 per delivery), so:

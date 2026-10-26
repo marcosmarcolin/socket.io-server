@@ -16,6 +16,7 @@ tests/Integration/run.sh admin                 # the Admin UI's protocol, with t
 tests/Integration/run.sh recovery              # connection state recovery, with the official client
 tests/Integration/run.sh recovery-processes    # the same over two processes, one port each
 tests/Load/run.sh                              # the load test; see docs/performance.md
+DURATION=1200 tests/Soak/run.sh                # the soak test: clients come and go for 20 minutes
 LOOP=swoole tests/Integration/run.sh           # any of the scripts above on another event loop
 ```
 

@@ -106,6 +106,10 @@ final class SocketIO extends Emitter
 
         $this->engine->on('connection', function (EngineSocket $connection): void {
             $this->clients[$connection] = new Client($this, $connection);
+            // The client holds its session, so the weak map alone would keep both forever.
+            $connection->once('close', function () use ($connection): void {
+                unset($this->clients[$connection]);
+            });
         });
         if ($this->logger->enabled()) {
             $this->logEngine();

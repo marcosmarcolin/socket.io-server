@@ -4,6 +4,14 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Memory is freed when a connection closes.** Every closed connection kept its client, its Engine.IO session and its sockets, about 7 KB each, because the map from sessions to clients was never cleared; a server with clients coming and going grew until it ran out of memory, and slowed down on the way. Found by the new soak test.
+
+### Added
+
+- **A soak test** (`tests/Soak/run.sh`): thousands of clients connect, leave, drop and recover, join rooms and acknowledge for as long as asked, while each checks a numbered broadcast for lost, repeated or reordered messages, and the server reports what it holds every 30 seconds.
+
 ## [0.5.1] - 2026-10-26
 
 Broadcasts about twice as fast, and a multiplayer Pong example.
