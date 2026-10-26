@@ -9,7 +9,9 @@ use InvalidArgumentException;
 use LogicException;
 use Marcolin\SocketIO\Adapter\Adapter;
 use Marcolin\SocketIO\Adapter\InMemoryAdapter;
+use Marcolin\SocketIO\Engine\CloseReason;
 use Marcolin\SocketIO\Engine\RandomSessionIdGenerator;
+use Marcolin\SocketIO\Engine\Request as EngineRequest;
 use Marcolin\SocketIO\Engine\Scheduler;
 use Marcolin\SocketIO\Engine\Server;
 use Marcolin\SocketIO\Engine\ServerOptions;
@@ -44,6 +46,8 @@ final class SocketIO extends Emitter
     /** Milliseconds a connection may wait before connecting to a namespace. */
     public readonly int $connectTimeout;
 
+    private readonly Logger $logger;
+
     private readonly Encoder $encoder;
 
     /** @var array<string, Nsp> */
@@ -59,7 +63,8 @@ final class SocketIO extends Emitter
 
     /**
      * @param int|null $port listens on this port, on all IPv4 interfaces; without it, call attach() with a worker
-     * @param array<string, mixed> $options connectTimeout, plus the Engine.IO options of ServerOptions::fromArray()
+     * @param array<string, mixed> $options connectTimeout, logger (a Closure(string $scope, string $message)), plus
+     *        the Engine.IO options of ServerOptions::fromArray()
      */
     public function __construct(
         ?int $port = null,
@@ -74,6 +79,12 @@ final class SocketIO extends Emitter
         }
         unset($options['connectTimeout']);
         $this->connectTimeout = $connectTimeout;
+        $logger = $options['logger'] ?? null;
+        if ($logger !== null && ! $logger instanceof Closure) {
+            throw new InvalidArgumentException('The "logger" option must be a Closure(string $scope, string $message)');
+        }
+        unset($options['logger']);
+        $this->logger = new Logger($logger);
 
         $this->engine = new Server(
             ServerOptions::fromArray($options),
@@ -88,6 +99,9 @@ final class SocketIO extends Emitter
         $this->engine->on('connection', function (EngineSocket $connection): void {
             $this->clients[$connection] = new Client($this, $connection);
         });
+        if ($this->logger->enabled()) {
+            $this->logEngine();
+        }
 
         if ($port !== null) {
             $this->attach(new Worker('tcp://0.0.0.0:' . $port));
@@ -168,6 +182,14 @@ final class SocketIO extends Emitter
         $this->sockets->on($event, $listener);
 
         return $this;
+    }
+
+    /**
+     * @internal
+     */
+    public function logger(): Logger
+    {
+        return $this->logger;
     }
 
     /**
@@ -349,5 +371,38 @@ final class SocketIO extends Emitter
     public function newSocketId(): string
     {
         return $this->socketIds->generate();
+    }
+
+    /**
+     * Logs the Engine.IO sessions from their events: opened, refused, upgraded and closed.
+     */
+    private function logEngine(): void
+    {
+        $this->engine->on('connection_error', function (EngineRequest $request, int $code, string $message): void {
+            $this->logger->debug('engine', sprintf('refused %s: code %d, %s', $request->uri, $code, $message));
+        });
+        $this->engine->on('connection', function (EngineSocket $connection): void {
+            $this->logger->debug('engine', sprintf(
+                'session %s opened over %s from %s',
+                $connection->id,
+                $connection->transport()->name(),
+                $connection->request->remoteAddress,
+            ));
+            $connection->on('upgrade', function () use ($connection): void {
+                $this->logger->debug('engine:socket', sprintf(
+                    'session %s upgraded to %s',
+                    $connection->id,
+                    $connection->transport()->name(),
+                ));
+            });
+            $connection->on('close', function (CloseReason $reason, ?\Throwable $error) use ($connection): void {
+                $this->logger->debug('engine:socket', sprintf(
+                    'session %s closed: %s%s',
+                    $connection->id,
+                    $reason->value,
+                    $error === null ? '' : ' (' . $error->getMessage() . ')',
+                ));
+            });
+        });
     }
 }

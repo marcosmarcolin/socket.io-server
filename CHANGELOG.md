@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- **The `logger` option**: a `Closure(string $scope, string $message)` that gets a debug log of each connection's life, in the reference's `debug` scopes (`engine`, `engine:socket`, `socket.io:client`, `socket.io:socket`, `socket.io:adapter`).
 - **The `packetCreate` session event**: `$socket->conn->on('packetCreate', fn (Packet $packet) => ...)` sees each message and ping the server writes, before it is buffered, as in the reference.
 - **Adapter room events**, as the reference's adapter: `$nsp->adapter()->on('create-room' | 'delete-room' | 'join-room' | 'leave-room', ...)` reports when the rooms of the current process change, with any adapter.
 

@@ -13,6 +13,7 @@
 | `maxPayload` | `1000000` | Maior mensagem, em bytes; corpos HTTP maiores recebem 413. |
 | `upgradeTimeout` | `10000` | Quanto tempo um upgrade de polling para WebSocket pode levar. |
 | `connectTimeout` | `45000` | Quanto tempo um cliente pode ficar sem entrar em um namespace. |
+| `logger` | `null` | Um `Closure(string $scope, string $message)` que recebe o log de depuração; veja [Log de depuração](#log-de-depuração). |
 | `path` | `'/socket.io/'` | O caminho da URL; a opção `path` do cliente precisa ser igual. |
 | `transports` | `['polling', 'websocket']` | Os transportes que os clientes podem usar. Com `['websocket']`, requests de polling são recusados, então os clientes também precisam de `transports: ['websocket']` (senão recebem `xhr poll error`). Com `['polling']`, nenhum upgrade é oferecido. |
 | `cors` | `['origin' => '*']` | `origin` é `'*'`, uma lista de origens permitidas, um `Closure` que decide a cada request, ou `null` para não enviar cabeçalhos CORS. `credentials` (`false` por padrão) deixa o navegador enviar cookies. |
@@ -107,6 +108,38 @@ $io->engine->on('connection_error', function (Request $request, int $code, strin
 - `ResponseHeaders` tem `set()`, `append()` (uma linha por valor, como vários `Set-Cookie` precisam), `get()`, `remove()` e `all()`; os nomes não diferenciam maiúsculas, e um nome que não é um token de header ou um valor com quebra de linha lança exceção.
 - As respostas de erro e o preflight de CORS saem sem o evento `headers`.
 - O `code` do `connection_error` é o código de erro do Engine.IO (0 a 5) da resposta, e `message` a sua mensagem: a que o `allowRequest` devolveu, quando ele recusou.
+
+## Log de depuração
+
+A opção `logger` recebe o que a referência registra com `DEBUG=socket.io:*`: um escopo e uma mensagem para cada passo da vida de uma conexão. Sem ela, nada é registrado.
+
+```php
+use Workerman\Worker;
+
+$io = new SocketIO(3000, [
+    'logger' => function (string $scope, string $message): void {
+        Worker::log("[$scope] $message");
+    },
+]);
+```
+
+```text
+[engine] session iZ8v0K2tq_3LFkpbAAAB opened over polling from 203.0.113.7
+[socket.io:socket] socket 6f1c0a2b9d3e4f5a6b7c8d9e joined / over session iZ8v0K2tq_3LFkpbAAAB
+[engine:socket] session iZ8v0K2tq_3LFkpbAAAB upgraded to websocket
+[socket.io:socket] socket 6f1c0a2b9d3e4f5a6b7c8d9e left /: transport close
+[engine:socket] session iZ8v0K2tq_3LFkpbAAAB closed: transport close
+```
+
+| Escopo | O quê |
+|---|---|
+| `engine` | uma sessão aberta (transporte, endereço do cliente) ou um request recusado (código, mensagem) |
+| `engine:socket` | uma sessão que subiu para WebSocket, ou fechou (motivo) |
+| `socket.io:client` | um namespace desconhecido pedido, nenhum namespace a tempo, um pacote inválido ou fora de ordem |
+| `socket.io:socket` | um socket entrou ou saiu de um namespace, um middleware o recusou, um middleware `use()` barrou um evento |
+| `socket.io:adapter` | com `ChannelAdapter` ou `RedisAdapter`, um servidor entrou ou saiu do cluster |
+
+Filtre pelo escopo no `Closure` para manter só o que precisa. As mensagens trazem ids e endereços, nunca os dados dos eventos.
 
 ## TLS
 
