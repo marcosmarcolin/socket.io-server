@@ -10,11 +10,20 @@ use Closure;
  * Event listeners for the classes that extend it.
  *
  * Dispatching is protected: only the emitter itself decides when its events fire.
+ *
+ * Every connection holds several emitters, so registrations live in flat arrays keyed by registration id, in
+ * registration order: an array per event, or per registration, costs hundreds of bytes each in PHP.
  */
 abstract class Emitter
 {
-    /** @var array<string, array<int, array{listener: Closure, once: bool}>> */
+    /** @var array<int, string> the event of each registration */
+    private array $events = [];
+
+    /** @var array<int, Closure> the listener of each registration */
     private array $listeners = [];
+
+    /** @var array<int, true> the registrations made with once() */
+    private array $once = [];
 
     private int $nextId = 0;
 
@@ -36,14 +45,9 @@ abstract class Emitter
      */
     public function off(string $event, ?Closure $listener = null): static
     {
-        if ($listener === null) {
-            unset($this->listeners[$event]);
-
-            return $this;
-        }
-        foreach ($this->listeners[$event] ?? [] as $id => $entry) {
-            if ($entry['listener'] === $listener) {
-                $this->remove($event, $id);
+        foreach ($this->events as $id => $registered) {
+            if ($registered === $event && ($listener === null || $this->listeners[$id] === $listener)) {
+                $this->remove($id);
             }
         }
 
@@ -55,10 +59,14 @@ abstract class Emitter
      */
     public function listeners(string $event): array
     {
-        return array_values(array_map(
-            static fn (array $entry): Closure => $entry['listener'],
-            $this->listeners[$event] ?? [],
-        ));
+        $listeners = [];
+        foreach ($this->events as $id => $registered) {
+            if ($registered === $event) {
+                $listeners[] = $this->listeners[$id];
+            }
+        }
+
+        return $listeners;
     }
 
     /**
@@ -68,7 +76,7 @@ abstract class Emitter
      */
     public function eventNames(): array
     {
-        return array_map('strval', array_keys($this->listeners));
+        return array_values(array_unique($this->events));
     }
 
     /**
@@ -85,7 +93,9 @@ abstract class Emitter
     public function removeAllListeners(?string $event = null): static
     {
         if ($event === null) {
+            $this->events = [];
             $this->listeners = [];
+            $this->once = [];
 
             return $this;
         }
@@ -100,33 +110,47 @@ abstract class Emitter
      */
     protected function dispatch(string $event, mixed ...$args): bool
     {
-        $entries = $this->listeners[$event] ?? [];
-        foreach ($entries as $id => $entry) {
-            if ($entry['once']) {
-                // A once listener may already be gone if a nested dispatch fired it.
-                if (! isset($this->listeners[$event][$id])) {
+        // Most dispatches on the hot path (packetCreate, drain) have no listener: leave before copying anything.
+        if (! in_array($event, $this->events, true)) {
+            return false;
+        }
+        // As registered when the dispatch began, as Node's EventEmitter: listeners added meanwhile wait for the
+        // next one, and ones removed meanwhile still run, except a once() listener a nested dispatch already ran.
+        $events = $this->events;
+        $listeners = $this->listeners;
+        $once = $this->once;
+        $dispatched = false;
+        foreach ($events as $id => $registered) {
+            if ($registered !== $event) {
+                continue;
+            }
+            $dispatched = true;
+            if (isset($once[$id])) {
+                if (! isset($this->listeners[$id])) {
                     continue;
                 }
-                $this->remove($event, $id);
+                $this->remove($id);
             }
-            ($entry['listener'])(...$args);
+            $listeners[$id](...$args);
         }
 
-        return $entries !== [];
+        return $dispatched;
     }
 
     private function add(string $event, Closure $listener, bool $once): static
     {
-        $this->listeners[$event][$this->nextId++] = ['listener' => $listener, 'once' => $once];
+        $id = $this->nextId++;
+        $this->events[$id] = $event;
+        $this->listeners[$id] = $listener;
+        if ($once) {
+            $this->once[$id] = true;
+        }
 
         return $this;
     }
 
-    private function remove(string $event, int $id): void
+    private function remove(int $id): void
     {
-        unset($this->listeners[$event][$id]);
-        if (($this->listeners[$event] ?? null) === []) {
-            unset($this->listeners[$event]);
-        }
+        unset($this->events[$id], $this->listeners[$id], $this->once[$id]);
     }
 }

@@ -6,7 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
-- **A load test and the guide "Performance and limits"** (`docs/performance.md`): about 30 KB per WebSocket connection, 10,000 clients in one process, and what it takes past 1,000 connections (the `event` extension, `memory_limit`, `ulimit`). `tests/Load/run.sh` measures it on any machine.
+- **A load test and the guide "Performance and limits"** (`docs/performance.md`): about 24 KB per WebSocket connection, 10,000 clients in one process, and what it takes past 1,000 connections (the `event` extension, `memory_limit`, `ulimit`). `tests/Load/run.sh` measures it on any machine.
+- **A comparison with the reference Node.js server** in `docs/performance.md`: the same load test against `socket.io` 4.8.4 (`SERVER=node tests/Load/run.sh`). This server uses less memory and answers acknowledgements on par up to 1,000 clients; Node delivers broadcasts 1.5 to 2.5 times as fast. The guide also lists the machine and versions measured.
 - **A compatibility section in the README**: the protocols, the clients tested, and the official compliance suites.
 - **The `new_namespace` event**: `$io->on('new_namespace', fn (Nsp $nsp) => ...)` runs when a namespace other than `/` is created, as in the reference, such as to give every namespace a middleware.
 - **The reference's listener methods**: `eventNames()`, `removeListener()` and `removeAllListeners()` on every emitter, and `once()`, `off()` and `listeners()` on `SocketIO` reach the main namespace, as `on()` does.
@@ -19,6 +20,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
+- **Less memory per connection**: event listeners are stored in flat arrays per emitter, instead of an array per listener, which takes a WebSocket connection from about 30 KB to 24 KB and raises acknowledgements per second by about 10%.
 - **Polling answers of 1 KB or more are compressed by default**, as in the reference, when the client sends `Accept-Encoding`. `'httpCompression' => false` keeps them plain.
 - **For custom schedulers:** the `Scheduler` interface has `now()`, a monotonic clock in milliseconds.
 - **For custom adapters:** the `Adapter` interface has `on()` and `off()`, for the room events. `InMemoryAdapter` now extends the package's event emitter, so adapters that extend it get them; ones that implement the interface directly must add them.

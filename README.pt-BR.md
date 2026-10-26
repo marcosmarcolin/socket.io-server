@@ -21,7 +21,7 @@ Ele fala os protocolos atuais, Engine.IO v4 e Socket.IO v5, então navegadores e
 - Um `Emitter` que envia para os clientes a partir de qualquer código PHP, como um request do PHP-FPM.
 - CORS com cookies, um gancho para recusar conexões antes do handshake, e TLS.
 - Compressão das respostas de polling e das mensagens WebSocket, e um log de depuração.
-- Cerca de 30 KB por conexão: 10.000 clientes WebSocket num processo ocupam 300 MB (veja [Desempenho e limites](docs/performance.pt-BR.md)).
+- Cerca de 24 KB por conexão: 10.000 clientes WebSocket num processo ocupam 250 MB, menos que os 290 MB do servidor oficial do Node.js (veja [Desempenho e limites](docs/performance.pt-BR.md)).
 - Uma API no formato da do [phpsocket.io](https://github.com/walkor/phpsocket.io), para facilitar a migração.
 
 ## Compatibilidade
