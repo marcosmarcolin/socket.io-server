@@ -132,32 +132,33 @@ abstract class PubSubAdapter extends InMemoryAdapter
 
     final public function broadcast(Packet $packet, BroadcastOptions $options): void
     {
+        $offset = $this->recoverable($packet, $options) ? $this->offset() : null;
+        if ($offset !== null) {
+            $packet = self::withOffset($packet, $offset);
+        }
         $parts = $this->encode($packet);
-        $this->deliver(
-            $parts,
-            $options,
-            static fn (): array => is_array($packet->data) ? array_values($packet->data) : [],
-        );
+        if ($offset !== null) {
+            $this->keep($offset, $parts, $options);
+        }
+        $this->deliver($parts, $options, self::eventData($packet));
         if ($options->local) {
             return;
         }
-        $this->publish($this->channels->forRooms($options->rooms), MessageType::Broadcast, [
+        if ($offset === null) {
+            $this->publish($this->channels->forRooms($options->rooms), MessageType::Broadcast, [
+                'opts' => Wire::options($options),
+                'parts' => Wire::parts($parts),
+            ]);
+
+            return;
+        }
+        // Every process keeps it, through the namespace channel: one whose last member of these rooms dropped
+        // has left their channels, but keeps that member's session.
+        $this->publish($this->channels->namespace, MessageType::Broadcast, [
             'opts' => Wire::options($options),
             'parts' => Wire::parts($parts),
+            'offset' => $offset,
         ]);
-    }
-
-    /**
-     * Keeps nothing: as the reference's pub/sub adapters, this one can't recover sessions, whose socket may come
-     * back on another process.
-     */
-    final public function persistSession(Session $session): void
-    {
-    }
-
-    final public function restoreSession(string $pid, string $offset): ?RestoredSession
-    {
-        return null;
     }
 
     final public function addSockets(BroadcastOptions $options, array $rooms): void
@@ -379,6 +380,11 @@ abstract class PubSubAdapter extends InMemoryAdapter
             }
 
             return;
+        }
+        // Kept under the sender's offset, so a client of this process that comes back here recovers it.
+        $offset = $message['offset'] ?? null;
+        if (is_string($offset) && $this->nsp->server->connectionStateRecovery !== null && ! $options->volatile) {
+            $this->keep($offset, $parts, $options);
         }
         $this->deliver($parts, $options, static function () use ($parts): array {
             $packet = self::decode($parts);

@@ -20,7 +20,15 @@ function next(emitter, event) {
 }
 
 async function connected(mode, options = {}) {
-  const socket = io(URL, { forceNew: true, reconnectionDelay: 100, reconnectionDelayMax: 100, ...MODES[mode], ...options });
+  // A fixed reconnection delay, long enough to send while the client is away.
+  const socket = io(URL, {
+    forceNew: true,
+    reconnectionDelay: 500,
+    reconnectionDelayMax: 500,
+    randomizationFactor: 0,
+    ...MODES[mode],
+    ...options,
+  });
   open.add(socket);
   await next(socket, "connect");
   return socket;
@@ -62,11 +70,13 @@ for (const mode of Object.keys(MODES)) {
       await b.emitWithAck("to-room", "room", "before");
       await until(() => received.length === 1);
 
+      // Listened to first: the client may reconnect before the messages below are acknowledged.
+      const reconnected = next(a, "connect");
       a.io.engine.close();
       await until(async () => !(await b.emitWithAck("is-connected", id)));
       await b.emitWithAck("to-room", "room", "missed 1");
       await b.emitWithAck("to-room", "room", "missed 2");
-      await next(a, "connect");
+      await reconnected;
 
       assert.equal(a.recovered, true);
       assert.equal(a.id, id);

@@ -97,23 +97,15 @@ class InMemoryAdapter extends Emitter implements Adapter
 
     public function broadcast(Packet $packet, BroadcastOptions $options): void
     {
-        // As the reference: an acknowledgement can't be restored, and a volatile event may be lost anyway.
-        if (
-            $this->nsp->server->connectionStateRecovery !== null
-            && $packet->type === PacketType::Event
-            && $packet->id === null
-            && ! $options->volatile
-            && is_array($packet->data)
-        ) {
-            $offset = $this->offset();
-            $packet = new Packet($packet->type, $packet->nsp, [...array_values($packet->data), $offset]);
-            $parts = $this->encode($packet);
-            $this->keep($offset, $parts, $options);
-            $this->deliver($parts, $options, self::eventData($packet));
-
-            return;
+        $offset = $this->recoverable($packet, $options) ? $this->offset() : null;
+        if ($offset !== null) {
+            $packet = self::withOffset($packet, $offset);
         }
-        $this->deliver($this->encode($packet), $options, self::eventData($packet));
+        $parts = $this->encode($packet);
+        if ($offset !== null) {
+            $this->keep($offset, $parts, $options);
+        }
+        $this->deliver($parts, $options, self::eventData($packet));
     }
 
     public function broadcastWithAck(
@@ -293,11 +285,35 @@ class InMemoryAdapter extends Emitter implements Adapter
     }
 
     /**
-     * A new offset, unique in this adapter: a random prefix, so a client from before a restart matches nothing.
+     * Whether connection state recovery keeps this broadcast: as the reference, an event without an
+     * acknowledgement, which can't be restored, that isn't volatile, which may be lost anyway.
      */
-    private function offset(): string
+    protected function recoverable(Packet $packet, BroadcastOptions $options): bool
     {
-        $this->offsetPrefix ??= bin2hex(random_bytes(4));
+        return $this->nsp->server->connectionStateRecovery !== null
+            && $packet->type === PacketType::Event
+            && $packet->id === null
+            && ! $options->volatile
+            && is_array($packet->data);
+    }
+
+    /**
+     * The packet with the offset as its last argument, which the client sends back to recover.
+     */
+    protected static function withOffset(Packet $packet, string $offset): Packet
+    {
+        $data = is_array($packet->data) ? array_values($packet->data) : [];
+
+        return new Packet($packet->type, $packet->nsp, [...$data, $offset], $packet->id);
+    }
+
+    /**
+     * A new offset, unique across adapters: a random prefix, so neither another process's nor a client's from
+     * before a restart matches.
+     */
+    protected function offset(): string
+    {
+        $this->offsetPrefix ??= bin2hex(random_bytes(6));
 
         return $this->offsetPrefix . '.' . base_convert((string) $this->nextOffset++, 10, 36);
     }
@@ -307,7 +323,7 @@ class InMemoryAdapter extends Emitter implements Adapter
      *
      * @param list<string|Binary> $parts
      */
-    private function keep(string $offset, array $parts, BroadcastOptions $options): void
+    protected function keep(string $offset, array $parts, BroadcastOptions $options): void
     {
         $recovery = $this->nsp->server->connectionStateRecovery;
         if ($recovery === null) {
@@ -349,7 +365,7 @@ class InMemoryAdapter extends Emitter implements Adapter
     /**
      * @return Closure(): list<mixed>
      */
-    private static function eventData(Packet $packet): Closure
+    protected static function eventData(Packet $packet): Closure
     {
         return static fn (): array => is_array($packet->data) ? array_values($packet->data) : [];
     }

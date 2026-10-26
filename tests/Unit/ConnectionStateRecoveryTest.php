@@ -278,24 +278,65 @@ final class ConnectionStateRecoveryTest extends TestCase
         self::assertCount(1, $back->received());
     }
 
-    public function testAPubSubAdapterRecoversNothing(): void
+    public function testAClientBackOnTheSameProcessGetsWhatAnotherProcessBroadcast(): void
     {
-        // As the reference's pub/sub adapters: the client may come back on another process.
-        $pubSub = (new FakeChannelBroker())->connect('A');
-        $this->io->adapter(static fn (Nsp $nsp): Adapter => new ChannelAdapter($nsp, $pubSub));
-        $client = new SocketIOClient($this->io);
-        $client->send('0');
-        $connect = self::connectData($client->received()[0]);
-
-        $this->io->emit('news', 1);
-        $this->socket(0)->emit('direct', 2);
-        self::assertSame(['2["news",1]', '2["direct",2]'], $client->received());
+        $broker = new FakeChannelBroker();
+        $a = $this->process($broker, 'A');
+        $b = $this->process($broker, 'B');
+        [$client, $connect, $offset] = $this->connectTo($a);
+        $a->sockets->sockets()[$connect['sid']]->join('room');
         $client->connection->close();
 
-        $back = new SocketIOClient($this->io);
-        $back->send('0' . json_encode(['pid' => $connect['pid'], 'offset' => 'any']));
+        // A has no member of "room" left, so it left the room's channel; the broadcast must reach it anyway.
+        $b->to('room')->emit('from-b', 1);
+        $b->to('other')->emit('not-for-it', 2);
+        $back = new SocketIOClient($a);
+        $back->send('0' . json_encode(['pid' => $connect['pid'], 'offset' => $offset]));
+        $received = $back->received();
 
-        self::assertFalse($this->socket(1)->recovered);
+        self::assertSame(['from-b', 1], array_slice(self::eventArgs($received[0]), 0, 2));
+        self::assertSame($connect, self::connectData($received[1]));
+        $socket = $a->sockets->sockets()[$connect['sid']] ?? self::fail('Not recovered');
+        self::assertTrue($socket->recovered);
+        self::assertEqualsCanonicalizing([$connect['sid'], 'room'], $socket->rooms);
+    }
+
+    public function testEveryProcessGetsTheSameOffset(): void
+    {
+        $broker = new FakeChannelBroker();
+        $a = $this->process($broker, 'A');
+        $b = $this->process($broker, 'B');
+        [$onA] = $this->connectTo($a);
+        [$onB] = $this->connectTo($b);
+
+        $a->emit('news', 1);
+
+        self::assertSame(self::eventArgs($onA->received()[0]), self::eventArgs($onB->received()[0]));
+    }
+
+    public function testAClientBackOnAnotherProcessStartsOver(): void
+    {
+        $broker = new FakeChannelBroker();
+        $a = $this->process($broker, 'A');
+        $b = $this->process($broker, 'B');
+        [$client, $connect, $offset] = $this->connectTo($a);
+        $client->connection->close();
+
+        $back = new SocketIOClient($b);
+        $back->send('0' . json_encode(['pid' => $connect['pid'], 'offset' => $offset]));
+
+        self::assertNotSame($connect['sid'], self::connectData($back->received()[0])['sid']);
+    }
+
+    public function testWithoutTheOptionABroadcastToOneRoomStaysOnItsChannel(): void
+    {
+        $broker = new FakeChannelBroker();
+        $a = $this->process($broker, 'A', false);
+        $broker->published = [];
+
+        $a->to('room')->emit('news', 1);
+
+        self::assertSame(['socket.io#/#room#'], array_column($broker->published, 0));
     }
 
     /**
@@ -337,6 +378,35 @@ final class ConnectionStateRecoveryTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
 
         new SocketIO(options: ['connectionStateRecovery' => $value], scheduler: new FakeScheduler());
+    }
+
+    private function process(FakeChannelBroker $broker, string $name, mixed $recovery = true): SocketIO
+    {
+        $io = new SocketIO(
+            options: ['connectionStateRecovery' => $recovery, 'pingInterval' => 100_000, 'pingTimeout' => 100_000],
+            scheduler: $this->scheduler,
+            sessionIds: new SequentialSessionIdGenerator(),
+            socketIds: new SequentialSocketIdGenerator($name === 'A' ? 0x100 : 0x200),
+        );
+        $pubSub = $broker->connect($name);
+        $io->adapter(static fn (Nsp $nsp): Adapter => new ChannelAdapter($nsp, $pubSub));
+
+        return $io;
+    }
+
+    /**
+     * @return array{SocketIOClient, array{sid: string, pid: string}, string}
+     */
+    private function connectTo(SocketIO $io): array
+    {
+        $client = new SocketIOClient($io);
+        $client->send('0');
+        $connect = self::connectData($client->received()[0]);
+        ($io->sockets->sockets()[$connect['sid']] ?? self::fail('Not connected'))->emit('hello');
+        $offset = self::eventArgs($client->received()[0])[1];
+        self::assertIsString($offset);
+
+        return [$client, $connect, $offset];
     }
 
     private function start(mixed $recovery): void
