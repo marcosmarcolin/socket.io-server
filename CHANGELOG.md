@@ -4,33 +4,48 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
+Broadcasts, the socket helpers, `serverSideEmit()` and acknowledgements now work across processes and machines, on workerman/channel or on Redis, and an `Emitter` sends from any PHP code.
+
 ### Added
 
+#### Several processes
+
 - **`RedisAdapter`**: broadcasts across processes and machines through Redis publish and subscribe, set with `$io->adapter(RedisAdapter::factory('redis://127.0.0.1:6379'))` in `workerStart`. The URL (with an optional user and password), the channel key and the error handler are configurable, and every argument has a default. It has its own Redis client on Workerman, so it needs no extra package, and it reconnects and subscribes again by itself.
-- **The `redis` example**: four processes joined by Redis.
+- **`Emitter`**: sends to the clients from any PHP code that isn't a server, such as a PHP-FPM request, as the reference's emitter packages: `Emitter::redis($url)->to('user:42')->emit('event', $data)`, with `of()`, `except()`, `volatile`, the socket helpers and `serverSideEmit()`. It uses blocking I/O, so it needs no event loop.
 - **The cluster protocol** in `ChannelAdapter` and `RedisAdapter`, as the reference's `ClusterAdapterWithHeartbeat`: servers count each other with heartbeats, and `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` now apply on every server.
 - **`serverSideEmit()`** on `SocketIO` and `Nsp`: events between servers, received with `on()`, with an optional callback that gets one response per other server or a `TimeoutException` after 5 seconds.
+- **`fetchSockets()` with a callback** reaches every server: `$io->in('room')->fetchSockets(fn (?Throwable $error, array $sockets) => ...)` gets this process's `Socket` objects and a `RemoteSocket` (`id`, `handshake`, `rooms`, `data`, `emit()`, `join()`, `leave()`, `disconnect()`) for each socket elsewhere, or a `TimeoutException` with the sockets so far. Without a callback, `fetchSockets()` still returns this process's sockets at once.
 - **Broadcasts with an acknowledgement cross processes** in `ChannelAdapter` and `RedisAdapter`: the callback of `$io->timeout(5000)->emit('ask', $callback)` gets the answers of the sockets of every server. They used to throw.
 - **`RemoteSocket::timeout()`**: `$remote->timeout(5000)->emit('ask', fn (?Throwable $error, mixed $answer) => ...)` gets the socket's answer, as `Socket::timeout()` does.
-- **`fetchSockets()` with a callback** reaches every server: `$io->in('room')->fetchSockets(fn (?Throwable $error, array $sockets) => ...)` gets this process's `Socket` objects and a `RemoteSocket` (`id`, `handshake`, `rooms`, `data`, `emit()`, `join()`, `leave()`, `disconnect()`) for each socket elsewhere, or a `TimeoutException` with the sockets so far. Without a callback, `fetchSockets()` still returns this process's sockets at once.
+- **The `local` flag**: `$io->local`, `$nsp->local`, `$socket->local` and `->local` on a broadcast keep a broadcast, the socket helpers or `fetchSockets()` in the current process, whatever the adapter, as in the reference.
 - **`BroadcastOptions::$timeout`**, `Adapter::fetchClusterSockets()`, `Adapter::serverCount()` and `Adapter::serverSideEmit()`; `InMemoryAdapter` counts one server, answers `fetchClusterSockets()` at once with its own sockets, and throws on `serverSideEmit()`.
+
+#### Server
+
 - **`Socket::use()`**: middlewares for the events a socket receives, as the reference's `socket.use()`. `$next($error)` stops the event and emits `error` on the socket.
 - **Engine events** on `$io->engine`, as the reference's: `initial_headers` and `headers` let listeners change a session's response headers through `ResponseHeaders`, such as to set a cookie, over polling and in the WebSocket 101; `connection_error` reports each refused request with its code and message.
-- **The `local` flag**: `$io->local`, `$nsp->local`, `$socket->local` and `->local` on a broadcast keep a broadcast, the socket helpers or `fetchSockets()` in the current process, whatever the adapter, as in the reference.
-- **`fetchSockets()`, `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` on `SocketIO`**, acting on the main namespace, as the reference's `io` has them.
 - **The `cookie` option**: `'cookie' => true` makes the polling handshake set `io=<session id>`, as the reference does, for load balancers with sticky sessions; an array changes its attributes.
+- **`fetchSockets()`, `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` on `SocketIO`**, acting on the main namespace, as the reference's `io` has them.
+
+#### Documentation and examples
+
 - **The guide "Behind a reverse proxy"** (`docs/reverse-proxy.md`): nginx and HAProxy configurations, with TLS and sticky sessions for polling over several processes, one port each.
-- **`Emitter`**: sends to the clients from any PHP code that isn't a server, such as a PHP-FPM request, as the reference's emitter packages: `Emitter::redis($url)->to('user:42')->emit('event', $data)`, with `of()`, `except()`, `volatile`, the socket helpers and `serverSideEmit()`. It uses blocking I/O, so it needs no event loop.
+- **The `dashboard` example**: live dashboards, where a timer started in `workerStart` pushes new numbers every few seconds to the viewers of each dashboard, as a room.
 - **The `emitter` example**: a plain PHP endpoint sending notifications to the open tabs through the `Emitter`.
 - **The `session-auth` example**: a page logs in with a PHP session, and a middleware lets in only the sockets whose cookie belongs to a logged-in session, across origins with `withCredentials`.
 - **The `private-messaging` example**: a room per user carries private messages to every tab of the recipient and of the sender, a session id in `auth` keeps the user across reconnections, and "user connected"/"user disconnected" follow each user's first and last tab.
-- **The `dashboard` example**: live dashboards, where a timer started in `workerStart` pushes new numbers every few seconds to the viewers of each dashboard, as a room.
+- **The `redis` example**: four processes joined by Redis.
 
 ### Changed
 
 - `$io->on()` registers any event but `workerStart` and `workerStop` on the main namespace, as the reference does, so `$io->on('event')` receives `serverSideEmit()`.
 - The messages `ChannelAdapter` publishes have a new shape, with a `uid` and a `type`: during an upgrade, processes on the old and new versions don't hear each other's broadcasts.
 - The cross-process logic of `ChannelAdapter` moved to the abstract `PubSubAdapter`, which `ChannelAdapter` and `RedisAdapter` extend. Adapters for other brokers can extend it with their own `PubSub`. `ChannelAdapter::factory()` and `new ChannelAdapter($nsp, $pubSub)` work as before.
+- **For custom adapters:** the `Adapter` interface has three new methods, `serverCount()`, `serverSideEmit()` and `fetchClusterSockets()`. Adapters that extend `InMemoryAdapter` get them; ones that implement the interface directly must add them.
+- **For custom HTTP exchanges:** `HttpExchange::respond()` takes `string|list<string>` header values, one line per value, so several `Set-Cookie` headers fit.
+- **Documentation:** the README keeps the essentials, and the details moved to guides in `docs/`: configuration, API reference, several processes, reverse proxy and development, in English and Brazilian Portuguese. Links to sections of the old README need to point to those guides.
 
 ## [0.2.0] - 2026-10-25
 
@@ -79,6 +94,7 @@ The first release.
 - Across processes, only broadcasts travel; the socket helpers (`fetchSockets`, `socketsJoin`...) act on the current process.
 - With several processes on one port, clients must use `transports: ['websocket']`.
 
-[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/marcosmarcolin/socket.io-server/releases/tag/v0.1.0
