@@ -103,9 +103,18 @@ final class ServerBinding
     public function onWebSocketConnect(TcpConnection $connection, Request $request): void
     {
         $this->guard($connection, function () use ($connection, $request): void {
-            $rejection = $this->server->verifyWebSocket(RequestValues::request($connection, $request));
+            $engineRequest = RequestValues::request($connection, $request);
+            $rejection = $this->server->verifyWebSocket($engineRequest);
             if ($rejection !== null) {
                 self::reject($connection, $rejection);
+
+                return;
+            }
+            // Workerman writes these lines into the 101.
+            foreach ($this->server->webSocketHeaders($engineRequest) as $name => $values) {
+                foreach (is_string($values) ? [$values] : $values as $value) {
+                    $connection->headers[] = $name . ': ' . $value;
+                }
             }
         });
     }

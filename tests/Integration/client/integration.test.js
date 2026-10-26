@@ -1,6 +1,8 @@
 // Integration tests with the official socket.io-client, against tests/Integration/server.php.
 import { after, describe, test } from "node:test";
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import { request } from "node:http";
 import { io, Manager } from "socket.io-client";
 
 const URL = "http://localhost:3000";
@@ -49,6 +51,58 @@ after(() => {
   for (const socket of open) {
     socket.disconnect();
   }
+});
+
+describe("engine events", () => {
+  test("initial_headers and headers change the polling answers", TIMEOUT, async () => {
+    const handshake = await fetch(`${URL}/socket.io/?EIO=4&transport=polling`);
+    const [, sid] = /"sid":"([^"]+)"/.exec(await handshake.text());
+
+    assert.deepEqual(handshake.headers.getSetCookie(), ["io-test=1; Path=/"]);
+    assert.equal(handshake.headers.get("x-engine"), "php");
+
+    const post = await fetch(`${URL}/socket.io/?EIO=4&transport=polling&sid=${sid}`, { method: "POST", body: "1" });
+    assert.equal(await post.text(), "ok");
+    assert.deepEqual(post.headers.getSetCookie(), []);
+    assert.equal(post.headers.get("x-engine"), "php");
+  });
+
+  test("initial_headers and headers change the WebSocket 101", TIMEOUT, async () => {
+    const response = await new Promise((resolve, reject) => {
+      const upgrade = request(`${URL}/socket.io/?EIO=4&transport=websocket`, {
+        headers: {
+          Connection: "Upgrade",
+          Upgrade: "websocket",
+          "Sec-WebSocket-Version": "13",
+          // A fresh nonce, as RFC 6455 asks.
+          "Sec-WebSocket-Key": randomBytes(16).toString("base64"),
+        },
+      });
+      upgrade.on("upgrade", (res, socket) => {
+        socket.destroy();
+        resolve(res);
+      });
+      upgrade.on("response", (res) => reject(new Error(`got ${res.statusCode} instead of 101`)));
+      upgrade.on("error", reject);
+      upgrade.end();
+    });
+
+    assert.equal(response.statusCode, 101);
+    assert.deepEqual(response.headers["set-cookie"], ["io-test=1; Path=/"]);
+    assert.equal(response.headers["x-engine"], "php");
+  });
+
+  test("connection_error reports a refused request", TIMEOUT, async () => {
+    const refused = await fetch(`${URL}/socket.io/?EIO=4&transport=carrier-pigeon`);
+    assert.equal(refused.status, 400);
+
+    const socket = await connected("websocket");
+    assert.deepEqual(await socket.emitWithAck("last-connection-error"), {
+      code: 0,
+      message: "Transport unknown",
+      transport: "carrier-pigeon",
+    });
+  });
 });
 
 for (const mode of Object.keys(MODES)) {
@@ -161,6 +215,18 @@ for (const mode of Object.keys(MODES)) {
       const [error] = await next(socket, "connect_error");
 
       assert.equal(error.message, "Invalid namespace");
+    });
+
+    test("a socket middleware stops an event and the server reports it", TIMEOUT, async () => {
+      const socket = await connected(mode);
+      const letThrough = record(socket, "let-through");
+
+      const refused = next(socket, "refused");
+      socket.emit("forbidden");
+
+      assert.deepEqual(await refused, ["forbidden event"]);
+      assert.deepEqual(await socket.emitWithAck("echo", "still fine"), "still fine");
+      assert.deepEqual(letThrough, []);
     });
 
     test("lets the server see every event both ways with onAny and onAnyOutgoing", TIMEOUT, async () => {

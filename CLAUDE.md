@@ -132,6 +132,7 @@ src/
     ServerError.php             HTTP error codes and messages
     Rejection.php               a refused request: its ServerError and the message sent, which allowRequest may set
     Cors.php, CorsHttpExchange.php  CORS headers, added to every polling answer
+    ResponseHeaders.php, HeadersHttpExchange.php  the `initial_headers`/`headers` events on a session's answers
     Request.php                 an HTTP request: the session's handshake, or the one opening a WebSocket
     SessionIdGenerator.php, RandomSessionIdGenerator.php  20-character base64url session ids
     Socket.php                  session: state, heartbeat, upgrade, write buffer
@@ -201,6 +202,7 @@ src/
 - **Closing a WebSocket** sends a close frame with code 1000, then closes the TCP connection.
 - **Workerman 5 pitfalls:**
   - An exception inside `onWebSocketConnect` or `onWebSocketConnected` calls `Worker::stopAll(250)` and **kills the worker**. Never throw there: reject by closing the connection.
+  - The extra headers of a 101 go in `$connection->headers` inside `onWebSocketConnect`, as `"Name: value"` lines: `Websocket::dealHandshake()` writes them right after the callback. Workerman marks the property internal for HTTP, where `Http` consumes and clears it on each answer; on a connection that just upgraded, nothing reads it again.
   - Workerman calls `onWebSocketConnected` even when `onWebSocketConnect` already closed the connection, if the refusal is still in the send buffer (status `CLOSING`). `ServerBinding` skips a connection that is no longer established.
   - Workerman caches decoded packages by their raw bytes and may deliver a cached object without decoding again. Never keep state that depends on `decode()` running for every package, except the opcode, which is part of those bytes.
   - Workerman's files use `strict_types`, so `input()` must return an `int`.
@@ -263,6 +265,10 @@ src/
   - `'*'` with `credentials` throws: browsers reject that pair, and the `cors` package would send it anyway.
   - The preflight answers 204 with `GET, POST, OPTIONS` and echoes `Access-Control-Request-Headers`. With CORS disabled, `OPTIONS` is an ordinary request and gets code 2.
   - CORS doesn't cover WebSocket, in browsers or in the reference. `docs/configuration.md` shows the middleware that checks `Origin` on every transport.
+- **Engine events** on `Engine\Server` (`$io->engine`), as the reference's:
+  - `initial_headers` and `headers` get a mutable `ResponseHeaders` and the `Request`. `initial_headers` runs for a request without `sid` (the polling handshake, or a WebSocket that opens a session), then `headers` runs for it too. Over polling, `HeadersHttpExchange` runs them for each `200` answer of a session (the data and `ok` answers), not for errors or the CORS preflight. Over WebSocket, `ServerBinding` asks `Server::webSocketHeaders()` once `verifyWebSocket()` accepted, and writes the result into the 101.
+  - `ResponseHeaders` validates names (header tokens) and values (no CR, LF or NUL); `append()` keeps one line per value, for several `Set-Cookie`. `HttpExchange::respond()` takes `string|list<string>` values.
+  - `connection_error` gets `(Request, int $code, string $message)` for every request `verify()` refuses, over HTTP (`reject()`) or before a 101 (`verifyWebSocket()`), with the message `allowRequest` returned. The reference passes one object with a `context` we don't build.
 
 ### Socket.IO
 
@@ -306,6 +312,12 @@ src/
     - each server's `broadcastWithAck()` reports how many sockets it reached, and each answer counts once, with its first argument; `AckCollector` waits for `serverCount()` reports;
     - the callback gets `null` and the answers in arrival order once every server reported and all answered (at once with `[]` when none was reached), or a `TimeoutException` and the answers so far, after which every socket of the namespace forgets the id;
     - a `volatile` packet dropped for a busy transport still counts, so the wait ends with the timeout.
+- **Socket middlewares** (`$socket->use()`), as the reference's `socket.use()`:
+  - they run in order for each received event of a connected socket, after the `onAny` listeners and before the event's own, getting `[name, ...args]` with the ack `Closure` last when asked;
+  - `$next()` lets the event through; `$next($error)` stops it and dispatches `error` with `$error`, and the socket stays connected; only the first call counts, and it may come later;
+  - an exception thrown before `$next` stops the event the same way; one thrown after it (from a listener) propagates, as with namespace middlewares;
+  - the list is copied when the event arrives, so a middleware added meanwhile applies from the next event; an event let through after the socket left is dropped;
+  - a middleware taking `array &$event` by reference changes what the next ones and the listeners get (JavaScript middlewares mutate the array the same way).
 - **Catch-all listeners**, as in the reference:
   - `onAny`/`prependAny`/`offAny`/`listenersAny` get each received event of a connected socket as `(string $event, ...$args)`, with the ack `Closure` last, before the event's own listeners; those are skipped if an `onAny` listener disconnected the socket. Numeric event names arrive as strings, as with `on()`.
   - `onAnyOutgoing` and its family get each event sent to the socket, without the ack callback, before it is written: from `emit()`/`send()`, and from the adapter for every socket a broadcast reaches (with or without ack).
@@ -351,7 +363,7 @@ $io->on('connection', function (Socket $socket) use ($io): void {
 Worker::runAll();
 ```
 
-- `SocketIO`: `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- `SocketIO`: `$io->engine` (its `initial_headers`, `headers` and `connection_error` events), `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
 - **`close()`**, as the reference's:
   1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
   2. each adapter's `close()` runs (`PubSubAdapter` unsubscribes from its channels);
@@ -360,7 +372,7 @@ Worker::runAll();
 
   Sockets still in their middlewares never connect. It is not called on `workerStop`: the reference has no such hook, and Workerman closes the connections itself.
 - `Nsp`: `on('connection')` and the `serverSideEmit()` events, `use()`, `to/in/except`, `volatile`, `local`, `timeout`, `emit`, `serverSideEmit()`, `fetchSockets(?Closure)`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
-- `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `onAny`, `prependAny`, `offAny`, `listenersAny`, `onAnyOutgoing`, `prependAnyOutgoing`, `offAnyOutgoing`, `listenersAnyOutgoing`, `join`, `leave`, `to/in/except`, `broadcast`, `local`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
+- `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `onAny`, `prependAny`, `offAny`, `listenersAny`, `onAnyOutgoing`, `prependAnyOutgoing`, `offAnyOutgoing`, `listenersAnyOutgoing`, `use`, `join`, `leave`, `to/in/except`, `broadcast`, `local`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
 - Broadcasts, `socketsJoin`, `socketsLeave`, `disconnectSockets` and `fetchSockets` with a callback go through the adapter, so they reach every process with `ChannelAdapter` or `RedisAdapter`; `allSockets` and `fetchSockets` without a callback read the local process.
 - `RemoteSocket`: `id`, `handshake`, `rooms`, `data`, `emit`, `join`, `leave`, `disconnect`.
 - **Broadcast** (`InMemoryAdapter`), as in the reference:

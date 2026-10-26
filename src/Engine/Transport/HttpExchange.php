@@ -42,7 +42,7 @@ interface HttpExchange
     /**
      * Answers the request. Only the first call has an effect.
      *
-     * @param array<string, string> $headers
+     * @param array<string, string|list<string>> $headers a list sends one line per value
      */
     public function respond(int $status, string $body, array $headers = []): void;
 

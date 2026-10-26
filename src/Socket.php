@@ -23,7 +23,8 @@ use Throwable;
  * when the client asked for one. onAny() gets every event, with its name first; onAnyOutgoing() gets every event
  * sent to the client, by emit() or a broadcast. Reserved events:
  * - `disconnecting` and `disconnect` (string $reason, ?Throwable $description);
- * - `error` (Throwable), for a packet that broke the protocol, just before the connection closes.
+ * - `error` (Throwable), for a packet that broke the protocol, just before the connection closes, or for an event a
+ *   use() middleware stopped.
  *
  * @property-read SocketEmitter $volatile emits that are dropped when the transport can't take them right now
  * @property-read BroadcastOperator $broadcast every other socket of the namespace
@@ -67,6 +68,9 @@ final class Socket extends Emitter
     private readonly AnyListeners $anyListeners;
 
     private readonly AnyListeners $anyOutgoingListeners;
+
+    /** @var list<Closure> the use() middlewares, which get each received event */
+    private array $middlewares = [];
 
     /**
      * @internal created by Nsp
@@ -249,6 +253,25 @@ final class Socket extends Emitter
     public function except(string|array $rooms): BroadcastOperator
     {
         return $this->broadcastOperator()->except($rooms);
+    }
+
+    /**
+     * Adds a middleware for the events this socket receives, run in order after the onAny() listeners and before
+     * the event's own listeners, as in the reference.
+     *
+     * It gets the event as [name, ...args], with the acknowledgement Closure last when the client asked for one,
+     * and a $next Closure: $next() lets the event through, $next($error) stops it and emits `error` with $error.
+     * It may call $next later; only the first call counts. An exception it throws before $next stops the event the
+     * same way. Taking the event by reference (array &$event) lets it change what the next middlewares and the
+     * listeners get.
+     *
+     * @param Closure(array<int, mixed>, Closure(?Throwable=): void): void $middleware
+     */
+    public function use(Closure $middleware): static
+    {
+        $this->middlewares[] = $middleware;
+
+        return $this;
     }
 
     /**
@@ -474,8 +497,52 @@ final class Socket extends Emitter
             $this->anyListeners->notify((string) $event, ...$args);
             // An onAny() listener may have disconnected the socket; the reference checks again too.
             if ($this->stillConnected()) {
-                $this->dispatch((string) $event, ...$args);
+                $this->runMiddlewares($this->middlewares, 0, [(string) $event, ...$args]);
             }
+        }
+    }
+
+    /**
+     * Runs the use() middlewares from $index on, then the event's listeners, unless one stopped it.
+     *
+     * @param list<Closure> $middlewares the middlewares when the event arrived
+     * @param array<int, mixed> $event
+     */
+    private function runMiddlewares(array $middlewares, int $index, array $event): void
+    {
+        $middleware = $middlewares[$index] ?? null;
+        if ($middleware === null) {
+            $name = array_shift($event);
+            // A middleware may have disconnected the socket, or renamed the event to something unusable.
+            if ($this->stillConnected() && (is_string($name) || is_int($name))) {
+                $this->dispatch((string) $name, ...array_values($event));
+            }
+
+            return;
+        }
+
+        $called = false;
+        $next = function (?Throwable $error = null) use (&$called, &$event, $middlewares, $index): void {
+            if ($called) {
+                return;
+            }
+            $called = true;
+            if ($error !== null) {
+                $this->dispatch('error', $error);
+
+                return;
+            }
+            $this->runMiddlewares($middlewares, $index + 1, $event);
+        };
+
+        try {
+            $middleware($event, $next);
+        } catch (Throwable $e) {
+            // After next(), the exception comes from later code, such as an event listener.
+            if ($called) {
+                throw $e;
+            }
+            $next($e);
         }
     }
 
