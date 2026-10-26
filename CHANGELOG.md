@@ -22,6 +22,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - **The guide "Behind a reverse proxy"** (`docs/reverse-proxy.md`): nginx and HAProxy configurations, with TLS and sticky sessions for polling over several processes, one port each.
 - **`Emitter`**: sends to the clients from any PHP code that isn't a server, such as a PHP-FPM request, as the reference's emitter packages: `Emitter::redis($url)->to('user:42')->emit('event', $data)`, with `of()`, `except()`, `volatile`, the socket helpers and `serverSideEmit()`. It uses blocking I/O, so it needs no event loop.
 - **The `emitter` example**: a plain PHP endpoint sending notifications to the open tabs through the `Emitter`.
+- **The `session-auth` example**: a page logs in with a PHP session, and a middleware lets in only the sockets whose cookie belongs to a logged-in session, across origins with `withCredentials`.
 - **The `dashboard` example**: live dashboards, where a timer started in `workerStart` pushes new numbers every few seconds to the viewers of each dashboard, as a room.
 
 ### Changed
