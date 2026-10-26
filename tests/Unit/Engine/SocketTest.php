@@ -7,6 +7,8 @@ namespace Marcolin\SocketIO\Tests\Unit\Engine;
 use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\Engine\CloseReason;
 use Marcolin\SocketIO\Engine\InvalidPacketException;
+use Marcolin\SocketIO\Engine\Packet;
+use Marcolin\SocketIO\Engine\PacketType;
 use Marcolin\SocketIO\Engine\ServerOptions;
 use Marcolin\SocketIO\Engine\Socket;
 use Marcolin\SocketIO\Engine\SocketState;
@@ -561,6 +563,57 @@ final class SocketTest extends TestCase
     }
 
     // Helpers
+
+    // packetCreate
+
+    public function testPacketCreateReportsMessagesAndPingsBeforeTheyAreBuffered(): void
+    {
+        [$socket, $connection] = $this->webSocketSocket();
+        $created = [];
+        $socket->on('packetCreate', static function (Packet $packet) use (&$created, $connection): void {
+            // Not written yet when the listener runs.
+            $created[] = [$packet->type, $packet->data, $packet->binary, count($connection->sent)];
+        });
+
+        $socket->send('hello');
+        $socket->send(new Binary("\x01"));
+        $this->scheduler->advance(self::PING_INTERVAL);
+
+        self::assertSame([
+            [PacketType::Message, 'hello', false, 0],
+            [PacketType::Message, "\x01", true, 1],
+            [PacketType::Ping, '', false, 2],
+        ], $created);
+    }
+
+    public function testPacketCreateIsSilentOnceTheSessionCloses(): void
+    {
+        [$socket] = $this->webSocketSocket();
+        $created = 0;
+        $socket->on('packetCreate', static function () use (&$created): void {
+            ++$created;
+        });
+
+        $socket->close();
+        $socket->send('too late');
+
+        self::assertSame(0, $created);
+    }
+
+    public function testThePacketsOfTheUpgradeAreNotCreatedPackets(): void
+    {
+        [$socket, $polling] = $this->pollingSocket();
+        $created = [];
+        $socket->on('packetCreate', static function (Packet $packet) use (&$created): void {
+            $created[] = $packet->type;
+        });
+        $this->get($polling);
+
+        // The probe's pong and the poll's noop go straight to the transports, as in the reference.
+        $this->upgrade($socket);
+
+        self::assertSame([], $created);
+    }
 
     /**
      * @return array{Socket, Polling}

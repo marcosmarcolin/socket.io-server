@@ -55,6 +55,23 @@
 
 Events: `disconnecting` and `disconnect` get `(string $reason, ?Throwable $description)`; `disconnecting` still sees the rooms. The reasons are `transport close`, `transport error`, `ping timeout`, `parse error`, `forced close`, `server namespace disconnect`, `client namespace disconnect`, `forced server close` and `server shutting down`. `error` gets a `Throwable` when the client sent a packet that breaks the protocol, just before the connection closes, or when a `use()` middleware stopped an event.
 
+### Session events
+
+`$socket->conn` is the Engine.IO session under the socket, shared by its namespaces. Its events, as the reference's:
+
+```php
+use Marcolin\SocketIO\Engine\Packet;
+
+$socket->conn->on('upgrade', function (): void {
+    // The connection moved from HTTP long-polling to WebSocket.
+});
+$socket->conn->on('packet', function (Packet $packet): void {});        // each packet from the client
+$socket->conn->on('packetCreate', function (Packet $packet): void {});  // each packet to the client
+```
+
+- `packet` and `packetCreate` get an `Engine\Packet`, with its `type`, `data` and `binary`. `packetCreate` covers the messages and pings the server writes, before they are buffered; the handshake's `open` goes out before any listener can be added.
+- `heartbeat` fires when the client answers a ping, `drain` when the write buffer was handed to the transport, `upgrading` and `upgrade` around the move to WebSocket, and `close` with the `CloseReason`.
+
 ### Socket middlewares
 
 `use()` middlewares run, in order, for each event the socket receives. Each gets the event as `[name, ...args]`, with the acknowledgement `Closure` last when the client asked for one, and lets it through with `$next()` or stops it with `$next($error)`:

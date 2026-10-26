@@ -18,6 +18,7 @@ use Throwable;
  * Events:
  * - `message` (string|Binary): a message from the client;
  * - `packet` (Packet): any packet from the client;
+ * - `packetCreate` (Packet): a packet about to be buffered for the client: messages and pings, as in the reference;
  * - `heartbeat`: the client answered a ping;
  * - `drain`: the write buffer was handed to the transport;
  * - `upgrading` (Transport): the client probed the new transport;
@@ -332,7 +333,9 @@ final class Socket extends Emitter
         if ($this->state !== SocketState::Open) {
             return;
         }
-        $this->writeBuffer[] = new Packet($type, $data, $binary);
+        $packet = new Packet($type, $data, $binary);
+        $this->dispatch('packetCreate', $packet);
+        $this->writeBuffer[] = $packet;
         $this->flush();
     }
 

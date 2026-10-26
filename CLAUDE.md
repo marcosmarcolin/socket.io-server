@@ -244,6 +244,7 @@ src/
   - the next `ping` is scheduled `pingInterval` after the `pong`;
   - any other packet received while waiting for the `pong` restarts the `pingTimeout` once per ping, as the reference does;
   - a `ping` from the client closes the session with `transport error` (v4 heartbeats go from server to client only).
+- **Session events** (`Engine\Socket`, `$socket->conn`): `message`, `packet` (each received packet), `packetCreate` (each packet `sendPacket()` buffers: the `open`, messages and pings, as the reference's `sendPacket`; the probe's `pong` and the upgrade's `noop` go straight to the transports and don't fire it), `heartbeat`, `drain`, `upgrading`, `upgrade`, `close`. `packetCreate` fires before the packet is buffered, and not once the session is closing.
 - **Close reasons** (`CloseReason`): `ping timeout`, `transport close`, `transport error`, `parse error` (malformed packet) and `forced close` (closed by the server). A `close` packet over WebSocket closes the session with `transport close`.
 - **Polling:**
   - a `GET` waits until there are packets to send; a `POST` answers `ok`;
