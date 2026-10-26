@@ -168,7 +168,7 @@ src/
   Adapter/
     Adapter.php                 the extension point for other processes
     BroadcastOptions.php        rooms, except and volatile of a broadcast
-    InMemoryAdapter.php         local rooms and broadcast; not final, the base of other adapters
+    InMemoryAdapter.php         local rooms and broadcast, and the room events; not final, the base of other adapters
     PubSubAdapter.php           the cluster protocol through a PubSub; abstract, the base of the two below
     Cluster/                    MessageType (the reference's numbers), Nodes (server count), Request (waiting for responses),
                                 Channels and Wire (channel names and message shapes, shared with the Emitter)
@@ -325,6 +325,7 @@ src/
   - an exception thrown before `$next` stops the event the same way; one thrown after it (from a listener) propagates, as with namespace middlewares;
   - the list is copied when the event arrives, so a middleware added meanwhile applies from the next event; an event let through after the socket left is dropped;
   - a middleware taking `array &$event` by reference changes what the next ones and the listeners get (JavaScript middlewares mutate the array the same way).
+- **Adapter room events**, as the reference's adapter (since socket.io 3.1), always on: `InMemoryAdapter` extends `Event\Emitter` and dispatches `create-room` (room), then `join-room` (room, socket id) in `addAll()`, and `leave-room` (room, socket id), then `delete-room` (room) in `del()`, only when membership really changes. A socket's own room counts. The events are local: each process reports its own sockets, whatever the adapter; joins and leaves that arrive from other servers fire them where the socket lives. The `Adapter` interface has `on()`/`off()`.
 - **Catch-all listeners**, as in the reference:
   - `onAny`/`prependAny`/`offAny`/`listenersAny` get each received event of a connected socket as `(string $event, ...$args)`, with the ack `Closure` last, before the event's own listeners; those are skipped if an `onAny` listener disconnected the socket. Numeric event names arrive as strings, as with `on()`.
   - `onAnyOutgoing` and its family get each event sent to the socket, without the ack callback, before it is written: from `emit()`/`send()`, and from the adapter for every socket a broadcast reaches (with or without ack).

@@ -42,6 +42,13 @@ $io->engine->on(
     },
 );
 
+// The adapter's room events: a room whose name starts with "watched:" is announced when it's created.
+$io->sockets->adapter()->on('create-room', static function (string $room) use ($io): void {
+    if (str_starts_with($room, 'watched:')) {
+        $io->emit('room-created', $room);
+    }
+});
+
 $io->use(static function (Socket $socket, Closure $next): void {
     $refused = ($socket->handshake['auth']['token'] ?? null) === 'refuse';
     $next($refused ? new ConnectionError('refused', ['reason' => 'bad token']) : null);

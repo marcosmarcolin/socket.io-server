@@ -15,7 +15,7 @@
 | `on('connection', fn (Socket $socket))` | The main namespace's `connection` event; any other event but `workerStart` and `workerStop` is the main namespace's too, as with `serverSideEmit()`. |
 | `on('workerStart' \| 'workerStop', fn (Worker $worker))` | Each process starting or stopping. |
 | `use(fn (Socket $socket, Closure $next))` | A middleware on `/`. |
-| `adapter(fn (Nsp $nsp): Adapter)` | How namespaces keep rooms and broadcast, such as `ChannelAdapter::factory()` or `RedisAdapter::factory()`. |
+| `adapter(fn (Nsp $nsp): Adapter)` | How namespaces keep rooms and broadcast, such as `ChannelAdapter::factory()` or `RedisAdapter::factory()`. `$nsp->adapter()` returns a namespace's adapter, with its [events](#adapter-events). |
 | `close()` | Shuts the server down: every socket leaves with `server shutting down`, the connections close, and the worker stops accepting new ones in this process. |
 | `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `local`, `compress()`, `timeout()` | Broadcasting on `/`, as on a namespace. |
 | `serverSideEmit(string $event, ...$args)` | An event to `/` on the other servers; see `Nsp`. |
@@ -141,6 +141,23 @@ $io->local->emit('reload');                       // this process only, whatever
 ```
 
 `compress()` exists for compatibility and has no effect: the server doesn't compress.
+
+## Adapter events
+
+Each namespace's adapter tells when its rooms change, as the reference's adapter does, with no option to turn on:
+
+```php
+$adapter = $io->of('/')->adapter();
+
+$adapter->on('create-room', function (string $room): void {});
+$adapter->on('delete-room', function (string $room): void {});
+$adapter->on('join-room', function (string $room, string $socketId): void {});
+$adapter->on('leave-room', function (string $room, string $socketId): void {});
+```
+
+- `create-room` comes before the first `join-room` of a room, and `delete-room` after its last `leave-room`.
+- A socket's own room, its id, counts too: connecting creates and joins it, and disconnecting leaves and deletes it.
+- They report the sockets of the current process, with every adapter: with several processes, each one sees its own sockets' rooms.
 
 ## Errors
 

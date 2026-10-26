@@ -232,6 +232,16 @@ for (const mode of Object.keys(MODES)) {
       assert.deepEqual(letThrough, []);
     });
 
+    test("the adapter's create-room event fires when a room gets its first member", TIMEOUT, async () => {
+      const socket = await connected(mode);
+      const room = `watched:${mode}-${Date.now()}`;
+
+      const created = next(socket, "room-created");
+      await socket.emitWithAck("join", room);
+
+      assert.deepEqual(await created, [room]);
+    });
+
     test("lets the server see every event both ways with onAny and onAnyOutgoing", TIMEOUT, async () => {
       const socket = await connected(mode);
       socket.emit("first", 1, { a: true });

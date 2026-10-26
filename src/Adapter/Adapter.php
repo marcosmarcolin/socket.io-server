@@ -13,9 +13,18 @@ use Marcolin\SocketIO\TimeoutException;
 /**
  * Keeps the rooms of one namespace and reaches its sockets. Adapters are the extension point for running on
  * several processes; the methods mirror the reference's adapter.
+ *
+ * Its events are `create-room`, `delete-room`, `join-room` and `leave-room`; see InMemoryAdapter.
  */
 interface Adapter
 {
+    /**
+     * Listens to the adapter's room events.
+     */
+    public function on(string $event, Closure $listener): static;
+
+    public function off(string $event, ?Closure $listener = null): static;
+
     /**
      * @param list<string> $rooms
      */
