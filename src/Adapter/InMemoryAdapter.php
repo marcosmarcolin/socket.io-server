@@ -104,6 +104,11 @@ class InMemoryAdapter implements Adapter
         return $this->select($options);
     }
 
+    public function fetchClusterSockets(BroadcastOptions $options, Closure $callback): void
+    {
+        $callback(null, $this->fetchSockets($options));
+    }
+
     public function addSockets(BroadcastOptions $options, array $rooms): void
     {
         foreach ($this->select($options) as $socket) {

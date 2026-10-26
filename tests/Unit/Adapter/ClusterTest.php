@@ -12,6 +12,7 @@ use Marcolin\SocketIO\Adapter\ChannelAdapter;
 use Marcolin\SocketIO\Adapter\PubSubAdapter;
 use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\Nsp;
+use Marcolin\SocketIO\RemoteSocket;
 use Marcolin\SocketIO\Socket;
 use Marcolin\SocketIO\SocketIO;
 use Marcolin\SocketIO\Tests\Fake\FakeChannelBroker;
@@ -324,6 +325,204 @@ final class ClusterTest extends TestCase
         self::assertSame(1, $calls);
     }
 
+    public function testFetchSocketsWithoutACallbackReadsThisProcess(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [, $a] = $this->connect('A');
+        $this->connect('B');
+
+        self::assertSame([$a], $this->servers['A']->sockets->fetchSockets());
+    }
+
+    public function testFetchSocketsWithACallbackGetsEveryServersSockets(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->server('C');
+        [, $a] = $this->connect('A');
+        [, $b] = $this->connect('B', ['token' => 'secret']);
+        $b->join('lobby');
+        $b->data = ['user' => 'ana', 'since' => new \DateTimeImmutable('2026-01-02T03:04:05+00:00')];
+        $fetched = null;
+
+        $this->servers['A']->sockets->fetchSockets(
+            static function (?Throwable $error, array $sockets) use (&$fetched): void {
+                $fetched = [$error, $sockets];
+            },
+        );
+
+        self::assertNotNull($fetched);
+        [$error, $sockets] = $fetched;
+        self::assertNull($error);
+        self::assertCount(2, $sockets);
+        self::assertSame($a, $sockets[0]);
+        $remote = $sockets[1];
+        self::assertInstanceOf(RemoteSocket::class, $remote);
+        self::assertSame($b->id, $remote->id);
+        self::assertSame([$b->id, 'lobby'], $remote->rooms);
+        self::assertSame(['token' => 'secret'], $remote->handshake['auth'] ?? null);
+        self::assertSame($b->handshake['issued'], $remote->handshake['issued'] ?? null);
+        // Objects cross as JSON.
+        self::assertSame(['user' => 'ana', 'since' => [
+            'date' => '2026-01-02 03:04:05.000000',
+            'timezone_type' => 1,
+            'timezone' => '+00:00',
+        ]], $remote->data);
+    }
+
+    public function testFetchSocketsAppliesRoomsAndExceptOnEveryServer(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [, $a] = $this->connect('A');
+        [, $b1] = $this->connect('B');
+        [, $b2] = $this->connect('B');
+        [, $b3] = $this->connect('B');
+        $a->join('lobby');
+        $b1->join('lobby');
+        $b2->join(['lobby', 'muted']);
+        $this->broker->published = [];
+        $ids = null;
+
+        $this->servers['A']->to('lobby')->except('muted')->fetchSockets(
+            static function (?Throwable $error, array $sockets) use (&$ids): void {
+                $ids = array_map(static fn (Socket|RemoteSocket $socket): string => $socket->id, $sockets);
+            },
+        );
+
+        // $b3 is in neither room.
+        self::assertSame([$a->id, $b1->id], $ids);
+        // The request goes to the namespace channel, which every server hears, not the room's.
+        self::assertSame('socket.io#/#', $this->published()[0][0]);
+    }
+
+    public function testFetchSocketsAloneAnswersAtOnce(): void
+    {
+        $this->server('A');
+        [, $a] = $this->connect('A');
+        $fetched = null;
+
+        $this->servers['A']->sockets->fetchSockets(
+            static function (?Throwable $error, array $sockets) use (&$fetched): void {
+                $fetched = [$error, $sockets];
+            },
+        );
+
+        self::assertSame([null, [$a]], $fetched);
+    }
+
+    public function testFetchSocketsTimesOutWithTheSocketsSoFar(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [, $a] = $this->connect('A');
+        [, $b] = $this->connect('B');
+        // A server that heartbeats but never answers.
+        $this->broker->publish('socket.io#/#', ['uid' => 'mute', 'type' => 2]);
+
+        $this->servers['A']->sockets->fetchSockets($this->recorder());
+        self::assertNull($this->result);
+        $this->clocks['A']->advance(PubSubAdapter::REQUEST_TIMEOUT);
+
+        [$error, $sockets] = $this->callbackResult();
+        self::assertInstanceOf(TimeoutException::class, $error);
+        self::assertSame('timeout reached: missing 1 responses', $error->getMessage());
+        self::assertSame([$a->id, $b->id], array_map(
+            static fn (mixed $socket): ?string => $socket instanceof Socket || $socket instanceof RemoteSocket
+                ? $socket->id
+                : null,
+            $sockets,
+        ));
+    }
+
+    public function testARemoteSocketActsOnTheSocketOnItsServer(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [$bClient, $b] = $this->connect('B');
+        $remote = null;
+        $this->servers['A']->sockets->fetchSockets(
+            static function (?Throwable $error, array $sockets) use (&$remote): void {
+                $remote = $sockets[0] ?? null;
+            },
+        );
+        self::assertInstanceOf(RemoteSocket::class, $remote);
+
+        $remote->emit('hello', 'from A');
+        $remote->join(['x', 'y']);
+        $remote->leave('x');
+        self::assertSame(['2["hello","from A"]'], $bClient->received());
+        self::assertSame([$b->id, 'y'], $b->rooms);
+
+        $remote->disconnect();
+        self::assertFalse($b->connected);
+        self::assertSame(['1'], $bClient->received());
+    }
+
+    /**
+     * @return iterable<string, array{mixed}>
+     */
+    public static function malformedSocketLists(): iterable
+    {
+        $valid = ['id' => 'x', 'handshake' => '{}', 'rooms' => ['x'], 'data' => 'null'];
+
+        yield 'not a list' => [['a' => $valid]];
+        yield 'an entry that is not an array' => [['x']];
+        yield 'no id' => [[['id' => null] + $valid]];
+        yield 'rooms not strings' => [[['rooms' => [1]] + $valid]];
+        yield 'handshake not JSON' => [[['handshake' => '{'] + $valid]];
+        yield 'handshake not an object' => [[['handshake' => '1'] + $valid]];
+        yield 'data not a string' => [[['data' => []] + $valid]];
+    }
+
+    #[DataProvider('malformedSocketLists')]
+    public function testIgnoresMalformedSocketLists(mixed $sockets): void
+    {
+        self::assertNull($this->fetchAnswered($sockets));
+    }
+
+    public function testTheValidFormOfTheMalformedSocketListsCompletes(): void
+    {
+        $fetched = $this->fetchAnswered([['id' => 'x', 'handshake' => '{}', 'rooms' => ['x'], 'data' => 'null']]);
+
+        self::assertNotNull($fetched);
+        self::assertNull($fetched[0]);
+        self::assertSame(['x'], array_map(static fn (Socket|RemoteSocket $s): string => $s->id, $fetched[1]));
+    }
+
+    /**
+     * Fetches from A while only a mute server is known, which then answers with these sockets.
+     *
+     * @return array{?Throwable, list<Socket|RemoteSocket>}|null what the callback got, if it ran
+     */
+    private function fetchAnswered(mixed $sockets): ?array
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->servers['B']->close();
+        // A server that never answers by itself.
+        $this->broker->publish('socket.io#/#', ['uid' => 'mute', 'type' => 2]);
+        $fetched = null;
+        $this->servers['A']->sockets->fetchSockets(
+            static function (?Throwable $error, array $sockets) use (&$fetched): void {
+                $fetched = [$error, $sockets];
+            },
+        );
+        $published = $this->published();
+        $request = end($published)[1] ?? [];
+        $channel = $this->broker->channelsOf('A')[1];
+
+        $this->broker->publish($channel, [
+            'uid' => 'mute',
+            'type' => 8,
+            'requestId' => $request['requestId'] ?? '',
+            'sockets' => $sockets,
+        ]);
+
+        return $fetched;
+    }
+
     public function testServerSideEmitRefusesTheNamespacesOwnEvents(): void
     {
         $this->server('A');
@@ -458,13 +657,14 @@ final class ClusterTest extends TestCase
     }
 
     /**
+     * @param array<string, mixed>|null $auth
      * @return array{SocketIOClient, Socket}
      */
-    private function connect(string $name): array
+    private function connect(string $name, ?array $auth = null): array
     {
         $io = $this->servers[$name];
         $client = new SocketIOClient($io);
-        $client->send('0');
+        $client->send($auth === null ? '0' : '0' . json_encode($auth));
         $client->received();
         $sockets = $io->sockets->sockets();
 

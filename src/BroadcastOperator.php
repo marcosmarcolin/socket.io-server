@@ -10,11 +10,12 @@ use LogicException;
 use Marcolin\SocketIO\Adapter\BroadcastOptions;
 use Marcolin\SocketIO\Parser\Packet;
 use Marcolin\SocketIO\Parser\PacketType;
+use Throwable;
 
 /**
  * Selects sockets of a namespace by room and acts on them. Immutable: each modifier returns a new operator.
  *
- * It acts on this process only; reaching other processes is the adapter's job.
+ * Broadcasts and the socket helpers go through the namespace's adapter, which may reach other processes.
  *
  * @property-read BroadcastOperator $volatile the same selection, skipping sockets whose transport is busy
  */
@@ -162,11 +163,21 @@ final class BroadcastOperator
     }
 
     /**
-     * @return list<Socket>
+     * The selected sockets. Without a callback, those of this process, at once. With one, those of every server
+     * too: the callback gets this process's Socket objects and a RemoteSocket for each socket elsewhere, or a
+     * TimeoutException with the sockets so far when some server didn't answer within 5 seconds.
+     *
+     * @param (Closure(?Throwable, list<Socket|RemoteSocket>): void)|null $callback
+     * @return ($callback is null ? list<Socket> : null)
      */
-    public function fetchSockets(): array
+    public function fetchSockets(?Closure $callback = null): ?array
     {
-        return $this->nsp->adapter()->fetchSockets($this->options());
+        if ($callback === null) {
+            return $this->nsp->adapter()->fetchSockets($this->options());
+        }
+        $this->nsp->adapter()->fetchClusterSockets($this->options(), $callback);
+
+        return null;
     }
 
     /**

@@ -181,6 +181,26 @@ describe("multiple processes", () => {
     assert.deepEqual(await b1.emitWithAck("servers"), { error: null, pids: [a1.pid] });
   });
 
+  test("fetchSockets with a callback finds the sockets of every process", TIMEOUT, async () => {
+    const [[a1], [b1]] = [...byProcess.values()];
+    await a1.emitWithAck("set-name", "ana");
+    await b1.emitWithAck("set-name", "bia");
+    await a1.emitWithAck("join", "fetchable");
+    await b1.emitWithAck("join", "fetchable");
+
+    const { error, sockets } = await a1.emitWithAck("fetch", "fetchable");
+
+    assert.equal(error, null);
+    assert.deepEqual(sockets, [
+      { id: a1.id, name: "ana", remote: false },
+      { id: b1.id, name: "bia", remote: true },
+    ]);
+
+    const poked = [next(a1, "poked"), next(b1, "poked")];
+    b1.emit("poke", "fetchable");
+    assert.deepEqual(await Promise.all(poked), [[b1.pid], [b1.pid]]);
+  });
+
   test("scale: 200 clients get 20 broadcasts each, once and in order", { timeout: 60_000 }, async () => {
     const CLIENTS = 200;
     const MESSAGES = 20;

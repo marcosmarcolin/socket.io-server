@@ -29,6 +29,7 @@
 | `sockets(): array<string, Socket>` | The connected sockets, by id. |
 | `allSockets(): list<string>` | Their ids. |
 | `fetchSockets(): list<Socket>`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets(bool $close = false)` | Act on the selected sockets; use `to()` and `except()` first to select. With `ChannelAdapter` or `RedisAdapter`, `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` reach every process; `fetchSockets()` reads this one. |
+| `fetchSockets(fn (?Throwable $error, array $sockets))` | The selected sockets of every server: `Socket` objects from this process, a [`RemoteSocket`](#remotesocket) for each one elsewhere. The error is a `TimeoutException`, with the sockets so far, when some server didn't answer within 5 seconds. |
 | `serverSideEmit(string $event, ...$args)` | Sends an event to this namespace on the other servers, whose `on($event)` listeners get it. A `Closure` last gets `(?Throwable $error, array $responses)`, one response per other server; the error is a `TimeoutException` after 5 seconds. Needs `ChannelAdapter` or `RedisAdapter`; `connect`, `connection` and `new_namespace` are reserved. See [Several processes](multiple-processes.md#what-crosses-processes). |
 
 ## `Socket`
@@ -52,6 +53,25 @@
 Events: `disconnecting` and `disconnect` get `(string $reason, ?Throwable $description)`; `disconnecting` still sees the rooms. The reasons are `transport close`, `transport error`, `ping timeout`, `parse error`, `forced close`, `server namespace disconnect`, `client namespace disconnect`, `forced server close` and `server shutting down`. `error` gets a `Throwable` when the client sent a packet that breaks the protocol, just before the connection closes.
 
 The names `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` and `removeListener` are reserved: emitting them throws.
+
+## `RemoteSocket`
+
+A socket on another server, from `fetchSockets()` with a callback:
+
+```php
+$io->in('room1')->fetchSockets(function (?Throwable $error, array $sockets): void {
+    foreach ($sockets as $socket) {   // Socket here, RemoteSocket on another server
+        $socket->emit('hello', $socket->data['name'] ?? null);
+    }
+});
+```
+
+| | |
+|---|---|
+| `id`, `handshake`, `rooms`, `data` | Copies, as the socket's server had them. `handshake` and `data` cross as JSON, so objects arrive as arrays. |
+| `emit(string $event, ...$args)` | Sends it an event; acknowledgements aren't supported yet. |
+| `join(string\|array $rooms)`, `leave(string $room)` | Its rooms, on its server. |
+| `disconnect(bool $close = false)` | Disconnects it from the namespace; with `true`, closes its connection. |
 
 ## Acknowledgements
 
