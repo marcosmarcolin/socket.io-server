@@ -227,6 +227,12 @@ final class Nsp extends Emitter
                 return;
             }
             if ($error !== null) {
+                $this->server->logger()->debug('socket.io:socket', sprintf(
+                    '%s refused socket %s: %s',
+                    $this->name,
+                    $socket->id,
+                    $error->getMessage(),
+                ));
                 $socket->cleanup();
                 $socket->refuse($error);
 
@@ -235,6 +241,12 @@ final class Nsp extends Emitter
 
             unset($this->connecting[$socket->id]);
             $this->sockets[$socket->id] = $socket;
+            $this->server->logger()->debug('socket.io:socket', sprintf(
+                'socket %s joined %s over session %s',
+                $socket->id,
+                $this->name,
+                $client->conn->id,
+            ));
             $socket->onConnect();
             $onConnect($socket);
             $this->dispatch('connect', $socket);

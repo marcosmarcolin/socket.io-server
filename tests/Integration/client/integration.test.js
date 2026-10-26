@@ -262,6 +262,22 @@ for (const mode of Object.keys(MODES)) {
       assert.deepEqual(await socket.emitWithAck("created"), ['2["said","hello"]']);
     });
 
+    test("the logger option sees the session open, join and upgrade", TIMEOUT, async () => {
+      const socket = await connected(mode);
+      // The upgrade may already be done by now.
+      if (mode === "upgrade" && socket.io.engine.transport.name !== "websocket") {
+        await next(socket.io.engine, "upgrade");
+      }
+      const sid = socket.io.engine.id;
+
+      const lines = await socket.emitWithAck("debug-log");
+
+      const first = mode === "websocket" ? "websocket" : "polling";
+      assert.match(lines[0], new RegExp(`^engine: session ${sid} opened over ${first} from `));
+      assert.ok(lines.includes(`socket.io:socket: socket ${socket.id} joined / over session ${sid}`));
+      assert.equal(lines.includes(`engine:socket: session ${sid} upgraded to websocket`), mode === "upgrade");
+    });
+
     test("lets the server see every event both ways with onAny and onAnyOutgoing", TIMEOUT, async () => {
       const socket = await connected(mode);
       socket.emit("first", 1, { a: true });

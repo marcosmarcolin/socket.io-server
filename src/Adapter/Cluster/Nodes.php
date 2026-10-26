@@ -27,14 +27,20 @@ final class Nodes
     ) {
     }
 
-    public function seen(string $uid): void
+    /**
+     * @return bool whether the server is new
+     */
+    public function seen(string $uid): bool
     {
-        if (isset($this->timers[$uid])) {
+        $new = ! isset($this->timers[$uid]);
+        if (! $new) {
             $this->scheduler->cancel($this->timers[$uid]);
         }
         $this->timers[$uid] = $this->scheduler->after($this->timeout, function () use ($uid): void {
             $this->remove($uid);
         });
+
+        return $new;
     }
 
     public function remove(string $uid): void
