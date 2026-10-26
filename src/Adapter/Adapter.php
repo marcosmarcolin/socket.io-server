@@ -6,7 +6,9 @@ namespace Marcolin\SocketIO\Adapter;
 
 use Closure;
 use Marcolin\SocketIO\Parser\Packet;
+use Marcolin\SocketIO\RemoteSocket;
 use Marcolin\SocketIO\Socket;
+use Marcolin\SocketIO\TimeoutException;
 
 /**
  * Keeps the rooms of one namespace and reaches its sockets. Adapters are the extension point for running on
@@ -58,9 +60,19 @@ interface Adapter
     public function sockets(array $rooms): array;
 
     /**
+     * The selected sockets of this process.
+     *
      * @return list<Socket>
      */
     public function fetchSockets(BroadcastOptions $options): array;
+
+    /**
+     * The selected sockets of every server: this process's, then the others' as they answer.
+     *
+     * @param Closure(?TimeoutException, list<Socket|RemoteSocket>): void $callback gets a TimeoutException, with
+     *     the sockets so far, when some server didn't answer in time
+     */
+    public function fetchClusterSockets(BroadcastOptions $options, Closure $callback): void;
 
     /**
      * Makes the selected sockets join the rooms.

@@ -17,8 +17,8 @@ use Throwable;
  * Events: `connection` and `connect` (Socket), when a socket joined, after the middlewares let it in; and the events
  * other servers send with serverSideEmit().
  *
- * Broadcasts, socketsJoin, socketsLeave and disconnectSockets reach every server through the adapter;
- * fetchSockets and allSockets read this process.
+ * Broadcasts, socketsJoin, socketsLeave and disconnectSockets reach every server through the adapter, and so does
+ * fetchSockets with a callback; allSockets and fetchSockets without one read this process.
  *
  * @property-read BroadcastOperator $volatile broadcasts that skip sockets whose transport is busy
  */
@@ -129,11 +129,14 @@ final class Nsp extends Emitter
     }
 
     /**
-     * @return list<Socket>
+     * The namespace's sockets; see BroadcastOperator::fetchSockets() for the callback, which reaches every server.
+     *
+     * @param (Closure(?Throwable, list<Socket|RemoteSocket>): void)|null $callback
+     * @return ($callback is null ? list<Socket> : null)
      */
-    public function fetchSockets(): array
+    public function fetchSockets(?Closure $callback = null): ?array
     {
-        return $this->operator()->fetchSockets();
+        return $this->operator()->fetchSockets($callback);
     }
 
     /**

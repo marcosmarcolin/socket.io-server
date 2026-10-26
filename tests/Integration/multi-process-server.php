@@ -13,6 +13,7 @@ declare(strict_types=1);
 use Channel\Server as ChannelServer;
 use Marcolin\SocketIO\Adapter\ChannelAdapter;
 use Marcolin\SocketIO\Adapter\RedisAdapter;
+use Marcolin\SocketIO\RemoteSocket;
 use Marcolin\SocketIO\Socket;
 use Marcolin\SocketIO\SocketIO;
 use Workerman\Worker;
@@ -65,6 +66,31 @@ $io->on('connection', static function (Socket $socket) use ($io): void {
     });
     $socket->on('kick', static function (string $socketId) use ($io): void {
         $io->in($socketId)->disconnectSockets();
+    });
+    $socket->on('set-name', static function (string $name, Closure $ack) use ($socket): void {
+        $socket->data['name'] = $name;
+        $ack(true);
+    });
+    // The sockets in a room, on every process.
+    $socket->on('fetch', static function (string $room, Closure $ack) use ($io): void {
+        $io->in($room)->fetchSockets(static function (?Throwable $error, array $sockets) use ($ack): void {
+            $ack([
+                'error' => $error?->getMessage(),
+                'sockets' => array_map(static fn (Socket|RemoteSocket $socket): array => [
+                    'id' => $socket->id,
+                    'name' => is_array($socket->data) ? ($socket->data['name'] ?? null) : null,
+                    'remote' => $socket instanceof RemoteSocket,
+                ], $sockets),
+            ]);
+        });
+    });
+    // Emits to each socket of a room, found with fetchSockets().
+    $socket->on('poke', static function (string $room) use ($io): void {
+        $io->in($room)->fetchSockets(static function (?Throwable $error, array $sockets): void {
+            foreach ($sockets as $socket) {
+                $socket->emit('poked', getmypid());
+            }
+        });
     });
     // Asks the other processes for their pid.
     $socket->on('servers', static function (Closure $ack) use ($io): void {

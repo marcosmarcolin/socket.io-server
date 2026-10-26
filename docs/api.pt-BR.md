@@ -29,6 +29,7 @@
 | `sockets(): array<string, Socket>` | Os sockets conectados, por id. |
 | `allSockets(): list<string>` | Os ids deles. |
 | `fetchSockets(): list<Socket>`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets(bool $close = false)` | Agem nos sockets selecionados; use `to()` e `except()` antes para selecionar. Com `ChannelAdapter` ou `RedisAdapter`, `socketsJoin()`, `socketsLeave()` e `disconnectSockets()` chegam a todos os processos; `fetchSockets()` lê este. |
+| `fetchSockets(fn (?Throwable $error, array $sockets))` | Os sockets selecionados de todos os servidores: objetos `Socket` deste processo, um [`RemoteSocket`](#remotesocket) para cada um em outro lugar. O erro é um `TimeoutException`, com os sockets que já chegaram, quando algum servidor não respondeu em 5 segundos. |
 | `serverSideEmit(string $event, ...$args)` | Envia um evento para este namespace nos outros servidores, cujos listeners `on($event)` o recebem. Um `Closure` no fim recebe `(?Throwable $error, array $responses)`, uma resposta por servidor; o erro é um `TimeoutException` depois de 5 segundos. Precisa do `ChannelAdapter` ou do `RedisAdapter`; `connect`, `connection` e `new_namespace` são reservados. Veja [Vários processos](multiple-processes.pt-BR.md#o-que-atravessa-processos). |
 
 ## `Socket`
@@ -52,6 +53,25 @@
 Eventos: `disconnecting` e `disconnect` recebem `(string $reason, ?Throwable $description)`; `disconnecting` ainda vê as salas. Os motivos são `transport close`, `transport error`, `ping timeout`, `parse error`, `forced close`, `server namespace disconnect`, `client namespace disconnect`, `forced server close` e `server shutting down`. `error` recebe um `Throwable` quando o cliente enviou um pacote que quebra o protocolo, logo antes de a conexão fechar.
 
 Os nomes `connect`, `connect_error`, `disconnect`, `disconnecting`, `newListener` e `removeListener` são reservados: emiti-los lança exceção.
+
+## `RemoteSocket`
+
+Um socket em outro servidor, vindo do `fetchSockets()` com callback:
+
+```php
+$io->in('room1')->fetchSockets(function (?Throwable $error, array $sockets): void {
+    foreach ($sockets as $socket) {   // Socket here, RemoteSocket on another server
+        $socket->emit('hello', $socket->data['name'] ?? null);
+    }
+});
+```
+
+| | |
+|---|---|
+| `id`, `handshake`, `rooms`, `data` | Cópias, como o servidor do socket os tinha. `handshake` e `data` atravessam como JSON, então objetos chegam como arrays. |
+| `emit(string $event, ...$args)` | Envia um evento para ele; acknowledgements ainda não são suportados. |
+| `join(string\|array $rooms)`, `leave(string $room)` | As salas dele, no servidor dele. |
+| `disconnect(bool $close = false)` | Desconecta-o do namespace; com `true`, fecha a conexão dele. |
 
 ## Acknowledgements
 

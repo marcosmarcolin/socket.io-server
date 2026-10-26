@@ -13,6 +13,7 @@ Os dois funcionam do mesmo jeito: cada broadcast é codificado uma vez e publica
 
 - Broadcasts: `emit`, `to`, `except`, `broadcast`, `volatile`.
 - `socketsJoin()`, `socketsLeave()` e `disconnectSockets()`: `$io->in($userRoom)->disconnectSockets()` desconecta um usuário onde quer que estejam os sockets dele.
+- `fetchSockets()` com callback: os sockets de todos os servidores, como `RemoteSocket` quando estão em outro lugar (veja a [referência da API](api.pt-BR.md#remotesocket)).
 - `serverSideEmit()`: eventos de um servidor para os outros, que escutam com `on()` no mesmo namespace. Um `Closure` no fim recebe uma resposta por servidor:
 
 ```php
@@ -28,8 +29,6 @@ $io->serverSideEmit('ping', 'web-1', function (?Throwable $error, array $hosts):
 ```
 
 Cada servidor sabe quantos outros rodam o namespace pelos heartbeats deles, enviados depois de 5 segundos sem publicar nada; um servidor em silêncio por 10 segundos, ou que fechou, deixa de contar. Os dados do `serverSideEmit()` seguem as mesmas regras do `emit()`, incluindo `Binary`.
-
-`fetchSockets()` e `allSockets()` ainda leem o processo atual.
 
 ## workerman/channel
 
@@ -108,5 +107,5 @@ RedisAdapter::factory(
 ## Limites
 
 - Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem. Definir `'transports' => ['websocket']` também no servidor recusa o polling de vez. Entre máquinas, um load balancer com sticky sessions permite o polling.
-- `fetchSockets()` e `allSockets()` leem o processo atual.
+- `fetchSockets()` sem callback e `allSockets()` leem o processo atual.
 - Broadcasts com acknowledgement (`timeout()->emit(..., $callback)`) ainda não atravessam processos: os dois adapters lançam exceção.

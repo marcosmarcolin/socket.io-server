@@ -16,6 +16,9 @@ use Marcolin\SocketIO\Parser\Decoder;
 use Marcolin\SocketIO\Parser\InvalidPacketException;
 use Marcolin\SocketIO\Parser\Packet;
 use Marcolin\SocketIO\Parser\PacketType;
+use Marcolin\SocketIO\RemoteSocket;
+use Marcolin\SocketIO\Socket;
+use Marcolin\SocketIO\TimeoutException;
 use ReflectionClass;
 
 /**
@@ -25,6 +28,7 @@ use ReflectionClass;
  * - Broadcasts reach the sockets of this process at once, then are published already encoded, so every other
  *   process writes them to its own sockets without encoding them again.
  * - socketsJoin, socketsLeave and disconnectSockets apply on every server.
+ * - fetchClusterSockets asks every server for its selected sockets, and gets them as RemoteSocket.
  * - serverSideEmit reaches the namespace on the other servers, and may wait for one response from each.
  * - Each server publishes a heartbeat when it has published nothing for HEARTBEAT_INTERVAL, so the others know how
  *   many servers there are; one silent for HEARTBEAT_TIMEOUT, or that closed its adapter, is gone.
@@ -139,6 +143,27 @@ abstract class PubSubAdapter extends InMemoryAdapter
         parent::disconnectSockets($options, $close);
     }
 
+    final public function fetchClusterSockets(BroadcastOptions $options, Closure $callback): void
+    {
+        $local = $this->fetchSockets($options);
+        $uids = $this->nodes->uids();
+        if ($uids === []) {
+            $callback(null, $local);
+
+            return;
+        }
+        // Not a room channel: every server must get the request to answer it, members or not.
+        $this->request(
+            $uids,
+            MessageType::FetchSockets,
+            ['opts' => self::wireOptions($options)],
+            static function (?TimeoutException $error, array $responses) use ($local, $callback): void {
+                /** @var list<list<RemoteSocket>> $responses */
+                $callback($error, [...$local, ...array_merge(...$responses)]);
+            },
+        );
+    }
+
     final public function serverCount(): int
     {
         return 1 + $this->nodes->count();
@@ -164,17 +189,7 @@ abstract class PubSubAdapter extends InMemoryAdapter
 
             return;
         }
-        $requestId = bin2hex(random_bytes(8));
-        $this->requests[$requestId] = new Request(
-            $uids,
-            $this->scheduler,
-            self::REQUEST_TIMEOUT,
-            $ack,
-            function () use ($requestId): void {
-                unset($this->requests[$requestId]);
-            },
-        );
-        $this->publish($this->prefix, MessageType::ServerSideEmit, $fields + ['requestId' => $requestId]);
+        $this->request($uids, MessageType::ServerSideEmit, $fields, $ack);
     }
 
     /**
@@ -259,6 +274,28 @@ abstract class PubSubAdapter extends InMemoryAdapter
         });
     }
 
+    /**
+     * Publishes a request to the namespace channel, and waits for one response from each of these servers.
+     *
+     * @param list<string> $uids
+     * @param array<string, mixed> $fields
+     * @param Closure(?TimeoutException, list<mixed>): void $callback
+     */
+    private function request(array $uids, MessageType $type, array $fields, Closure $callback): void
+    {
+        $requestId = bin2hex(random_bytes(8));
+        $this->requests[$requestId] = new Request(
+            $uids,
+            $this->scheduler,
+            self::REQUEST_TIMEOUT,
+            $callback,
+            function () use ($requestId): void {
+                unset($this->requests[$requestId]);
+            },
+        );
+        $this->publish($this->prefix, $type, $fields + ['requestId' => $requestId]);
+    }
+
     private function onMessage(mixed $message): void
     {
         if (! is_array($message)) {
@@ -284,6 +321,8 @@ abstract class PubSubAdapter extends InMemoryAdapter
             MessageType::DisconnectSockets => $this->onDisconnectSockets($message),
             MessageType::ServerSideEmit => $this->onServerSideEmit($uid, $message),
             MessageType::ServerSideEmitResponse => $this->onServerSideEmitResponse($uid, $message),
+            MessageType::FetchSockets => $this->onFetchSockets($uid, $message),
+            MessageType::FetchSocketsResponse => $this->onFetchSocketsResponse($uid, $message),
             default => null,
         };
     }
@@ -382,6 +421,80 @@ abstract class PubSubAdapter extends InMemoryAdapter
         if ($request !== null && $packet?->type === PacketType::Ack && is_array($packet->data)) {
             $request->respond($uid, $packet->data[0] ?? null);
         }
+    }
+
+    /**
+     * Answers another server with this process's selected sockets. Their handshake and data cross as JSON, so the
+     * message holds only scalars.
+     *
+     * @param array<mixed> $message
+     */
+    private function onFetchSockets(string $uid, array $message): void
+    {
+        $options = self::options($message['opts'] ?? null);
+        $requestId = $message['requestId'] ?? null;
+        if ($options === null || ! is_string($requestId)) {
+            return;
+        }
+        $this->publish($this->responseChannel($uid), MessageType::FetchSocketsResponse, [
+            'requestId' => $requestId,
+            'sockets' => array_map(static fn (Socket $socket): array => [
+                'id' => $socket->id,
+                'handshake' => self::json($socket->handshake),
+                'rooms' => $socket->rooms,
+                'data' => self::json($socket->data),
+            ], parent::fetchSockets($options)),
+        ]);
+    }
+
+    /**
+     * @param array<mixed> $message
+     */
+    private function onFetchSocketsResponse(string $uid, array $message): void
+    {
+        $requestId = $message['requestId'] ?? null;
+        $request = is_string($requestId) ? ($this->requests[$requestId] ?? null) : null;
+        $entries = $message['sockets'] ?? null;
+        if ($request === null || ! is_array($entries) || ! array_is_list($entries)) {
+            return;
+        }
+        $sockets = [];
+        foreach ($entries as $entry) {
+            $socket = is_array($entry) ? $this->remoteSocket($entry) : null;
+            if ($socket === null) {
+                return;
+            }
+            $sockets[] = $socket;
+        }
+        $request->respond($uid, $sockets);
+    }
+
+    /**
+     * @param array<mixed> $entry
+     */
+    private function remoteSocket(array $entry): ?RemoteSocket
+    {
+        $id = $entry['id'] ?? null;
+        $rooms = self::strings($entry['rooms'] ?? null);
+        $handshake = $entry['handshake'] ?? null;
+        $data = $entry['data'] ?? null;
+        if (! is_string($id) || $rooms === null || ! is_string($handshake) || ! is_string($data)) {
+            return null;
+        }
+        $handshake = json_decode($handshake, true);
+        if (! is_array($handshake)) {
+            return null;
+        }
+
+        return new RemoteSocket($this->nsp, $id, $handshake, $rooms, json_decode($data, true));
+    }
+
+    /**
+     * JSON for any value: what can't be encoded becomes null, and invalid UTF-8 is replaced.
+     */
+    private static function json(mixed $value): string
+    {
+        return json_encode($value, JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE) ?: 'null';
     }
 
     private function nodeGone(string $uid): void
