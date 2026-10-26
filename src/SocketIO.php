@@ -47,6 +47,9 @@ final class SocketIO extends Emitter
     /** Milliseconds a connection may wait before connecting to a namespace. */
     public readonly int $connectTimeout;
 
+    /** The connectionStateRecovery option, or null when it's off. */
+    public readonly ?ConnectionStateRecovery $connectionStateRecovery;
+
     private readonly Logger $logger;
 
     private readonly Encoder $encoder;
@@ -64,7 +67,8 @@ final class SocketIO extends Emitter
 
     /**
      * @param int|null $port listens on this port, on all IPv4 interfaces; without it, call attach() with a worker
-     * @param array<string, mixed> $options connectTimeout, logger (a Closure(string $scope, string $message)), plus
+     * @param array<string, mixed> $options connectTimeout, connectionStateRecovery (true, or an array of
+     *        maxDisconnectionDuration and skipMiddlewares), logger (a Closure(string $scope, string $message)), plus
      *        the Engine.IO options of ServerOptions::fromArray()
      */
     public function __construct(
@@ -80,6 +84,9 @@ final class SocketIO extends Emitter
         }
         unset($options['connectTimeout']);
         $this->connectTimeout = $connectTimeout;
+        $recovery = $options['connectionStateRecovery'] ?? null;
+        $this->connectionStateRecovery = ConnectionStateRecovery::fromOption($recovery);
+        unset($options['connectionStateRecovery']);
         $logger = $options['logger'] ?? null;
         if ($logger !== null && ! $logger instanceof Closure) {
             throw new InvalidArgumentException('The "logger" option must be a Closure(string $scope, string $message)');
@@ -436,6 +443,17 @@ final class SocketIO extends Emitter
     public function newSocketId(): string
     {
         return $this->socketIds->generate();
+    }
+
+    /**
+     * A private session id for connection state recovery: secret, so 15 random bytes in base64url, as the
+     * reference's base64id.
+     *
+     * @internal
+     */
+    public function newPrivateSessionId(): string
+    {
+        return rtrim(strtr(base64_encode(random_bytes(15)), '+/', '-_'), '=');
     }
 
     /**

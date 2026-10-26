@@ -147,6 +147,19 @@ abstract class PubSubAdapter extends InMemoryAdapter
         ]);
     }
 
+    /**
+     * Keeps nothing: as the reference's pub/sub adapters, this one can't recover sessions, whose socket may come
+     * back on another process.
+     */
+    final public function persistSession(Session $session): void
+    {
+    }
+
+    final public function restoreSession(string $pid, string $offset): ?RestoredSession
+    {
+        return null;
+    }
+
     final public function addSockets(BroadcastOptions $options, array $rooms): void
     {
         if (! $options->local) {

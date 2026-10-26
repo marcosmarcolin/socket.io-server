@@ -20,4 +20,20 @@ enum DisconnectReason: string
     case ClientNamespaceDisconnect = 'client namespace disconnect';
     case ForcedServerClose = 'forced server close';
     case ServerShuttingDown = 'server shutting down';
+
+    /**
+     * Whether connection state recovery keeps the session: the reasons the client didn't choose, as the reference's.
+     */
+    public function isRecoverable(): bool
+    {
+        return match ($this) {
+            self::TransportError,
+            self::TransportClose,
+            self::ForcedClose,
+            self::PingTimeout,
+            self::ServerShuttingDown,
+            self::ForcedServerClose => true,
+            default => false,
+        };
+    }
 }

@@ -15,6 +15,7 @@ It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and 
 
 - HTTP long-polling and WebSocket on one port, with the upgrade from polling to WebSocket.
 - Namespaces, middlewares, rooms, acknowledgements (broadcasts with a timeout too), binary data and catch-all listeners.
+- Connection state recovery: a client that lost its connection gets its socket, rooms and missed events back.
 - Several processes and machines, through [workerman/channel](https://github.com/walkor/channel) or Redis.
 - An `Emitter` that sends to the clients from any PHP code, such as a PHP-FPM request.
 - CORS with cookies, a hook to refuse connections before the handshake, and TLS.

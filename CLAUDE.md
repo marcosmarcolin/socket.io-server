@@ -14,7 +14,7 @@ This file is the specification of how the package works. Behavior changes start 
 
 **It is not** (out of scope; don't implement without an explicit decision):
 - A server for `socket.io-client` 1.x/2.x (Engine.IO v3). Those clients have [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io).
-- WebTransport, JSONP, custom parsers (msgpack), dynamic namespaces (regex or callback), connection state recovery.
+- WebTransport, JSONP, custom parsers (msgpack), dynamic namespaces (regex or callback).
 - Compatibility with the Node adapters (`@socket.io/redis-adapter`, `@socket.io/redis-emitter`): `RedisAdapter` speaks only to other servers of this package.
 
 ## Sources of truth
@@ -39,7 +39,7 @@ A change is done only when all of these hold:
 3. **The protocol suites pass in CI**, once they exist:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers (`tests/Compliance/socket-io-server.php`, run by `tests/Compliance/socket-io.sh`).
-4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh`, `tests/Integration/run.sh multi-process` and `tests/Integration/run.sh multi-process-redis`).
+4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary, connection state recovery and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh`, `tests/Integration/run.sh recovery`, `tests/Integration/run.sh multi-process` and `tests/Integration/run.sh multi-process-redis`).
 5. **The docs are current:** both READMEs, the user guides in `docs/` (configuration, API reference, several processes, migration, development), CLAUDE.md and examples match the behavior, and `CHANGELOG.md` lists every user-visible change under `[Unreleased]`. Each example has a test with the official client (`tests/Integration/client/examples/`) that CI runs, so an example that stops working fails the build.
 
 ## Code rules
@@ -80,6 +80,7 @@ tests/Integration/run.sh                       # the official socket.io-client a
 tests/Integration/run.sh multi-process         # the same over two processes and a channel server
 tests/Integration/run.sh multi-process-redis   # the same two processes, joined by a Redis server over TLS
 tests/Integration/run.sh examples              # every example in examples/, each against its test
+tests/Integration/run.sh recovery              # connection state recovery with the official client: recovery-server.php
 tests/Load/run.sh                              # the load test: 500 WebSocket clients on select()
 LOOP=event CLIENTS=10000 tests/Load/run.sh     # the same with the event extension, past select()'s 1,024
 SERVER=node CLIENTS=10000 tests/Load/run.sh    # the reference Node.js server, for the comparison in docs/performance.md
@@ -167,6 +168,7 @@ src/
   SocketEmitter.php             timeout()/volatile/compress() on a socket: immutable, emits only
   Client.php                    one Engine.IO connection and its per-namespace sockets
   DisconnectReason.php, ConnectionError.php, TimeoutException.php
+  ConnectionStateRecovery.php   the connectionStateRecovery option: maxDisconnectionDuration, skipMiddlewares
   SocketIdGenerator.php, RandomSocketIdGenerator.php
   BroadcastOperator.php         to/in/except/compress/volatile/timeout/emit and the socket helpers, immutable
   RemoteSocket.php              a socket on another server, from fetchSockets() with a callback
@@ -179,6 +181,7 @@ src/
     Packet.php, PacketType.php, InvalidPacketException.php
   Adapter/
     Adapter.php                 the extension point for other processes
+    Session.php, RestoredSession.php  what a socket that dropped leaves for its recovery, and what it gets back
     BroadcastOptions.php        rooms, except and volatile of a broadcast
     InMemoryAdapter.php         local rooms and broadcast, and the room events; not final, the base of other adapters
     PubSubAdapter.php           the cluster protocol through a PubSub; abstract, the base of the two below
@@ -345,6 +348,13 @@ src/
   - the list is copied when the event arrives, so a middleware added meanwhile applies from the next event; an event let through after the socket left is dropped;
   - a middleware taking `array &$event` by reference changes what the next ones and the listeners get (JavaScript middlewares mutate the array the same way).
 - **Adapter room events**, as the reference's adapter (since socket.io 3.1), always on: `InMemoryAdapter` extends `Event\Emitter` and dispatches `create-room` (room), then `join-room` (room, socket id) in `addAll()`, and `leave-room` (room, socket id), then `delete-room` (room) in `del()`, only when membership really changes. A socket's own room counts. The events are local: each process reports its own sockets, whatever the adapter; joins and leaves that arrive from other servers fire them where the socket lives. The `Adapter` interface has `on()`/`off()`.
+- **Connection state recovery** (`connectionStateRecovery` option, off by default; `true` or `['maxDisconnectionDuration' => 120000, 'skipMiddlewares' => true]`, the reference's defaults), as the reference's `SessionAwareAdapter` and `Namespace._createSocket()`:
+  - With the option, every socket gets a private id (`pid`, 15 random bytes in base64url) sent in the CONNECT answer as `{"sid","pid"}`.
+  - `InMemoryAdapter::broadcast()` gives every `EVENT` without an ack id that isn't volatile an offset as its last argument (a random per-adapter prefix and a counter), and keeps its encoded parts with the rooms and `except`, for `maxDisconnectionDuration`. A socket's own `emit()` goes through `adapter()->broadcast()` to its id room with `local` (the reference doesn't set `local`, so a pub/sub adapter would publish it), so it gets an offset and is kept too; `onAnyOutgoing` listeners see the offset, as in the reference.
+  - A socket leaving with a recoverable reason (`transport error`, `transport close`, `forced close`, `ping timeout`, `server shutting down`, `forced server close`; `DisconnectReason::isRecoverable()`) is persisted after `disconnecting` and before it leaves its rooms: id, pid, rooms, data.
+  - A CONNECT whose payload has string `pid` and `offset` asks `restoreSession()`: an unknown or expired pid, or an offset no longer kept, gets a new socket. Otherwise the socket takes the old id and pid, joins its rooms, gets its data, and the missed events (the kept ones after the offset that its rooms reach and its `except` doesn't) are written before the CONNECT answer, so the client handles them before its `connect` event; `$socket->recovered` is true. With `skipMiddlewares`, it connects without running them.
+  - Unlike the reference, a session is recovered once (`restoreSession()` drops it), so two clients can't take the same socket id. Expiry is lazy, on the scheduler's clock: expired sessions go when another is persisted or this one asked for, expired events when another is kept; no timers.
+  - `PubSubAdapter` keeps nothing (`persistSession()` does nothing, `restoreSession()` returns null) and adds no offsets, as the reference's pub/sub adapters: the client may come back on another process.
 - **Catch-all listeners**, as in the reference:
   - `onAny`/`prependAny`/`offAny`/`listenersAny` get each received event of a connected socket as `(string $event, ...$args)`, with the ack `Closure` last, before the event's own listeners; those are skipped if an `onAny` listener disconnected the socket. Numeric event names arrive as strings, as with `on()`.
   - `onAnyOutgoing` and its family get each event sent to the socket, without the ack callback, before it is written: from `emit()`/`send()`, and from the adapter for every socket a broadcast reaches (with or without ack).
@@ -433,7 +443,7 @@ Worker::runAll();
   - **`RemoteSocket`**: `id`, `handshake`, `rooms`, `data`, and `emit()`, `join()`, `leave()`, `disconnect()`, each through `$nsp->to($id)`/`in($id)`, so through the adapter. `timeout()` returns a copy whose `emit()` takes a callback getting `(?Throwable, mixed $answer)`, one answer instead of a list, as the reference's `expectSingleResponse`; a callback without `timeout()` throws.
   - **Broadcast acks:** `BroadcastOptions` carries the `timeout`. `PubSubAdapter::broadcastWithAck()` publishes the packet with a `requestId` to the namespace channel (never a room's: every counted server must report), then delivers locally. Each other server decodes it, sends it under an ack id of its own namespace, and answers on the requester's response channel with `BroadcastClientCount`, then one `BroadcastAck` per answer (its first argument, as an `ACK` packet). Both sides drop the request after the timeout: the requester forgets the `requestId`, the others make their sockets forget the ack id. A server that never reports (gone without `AdapterClose`) makes the wait end with the timeout.
   - **The `local` flag** (`$io->local`, `$nsp->local`, `$socket->local`, and `->local` on an operator), as the reference's: `BroadcastOptions::$local` makes `PubSubAdapter` publish nothing, so broadcasts, the socket helpers and `fetchSockets(Closure)` act on this process only. A local broadcast with an ack waits for this server's count only (the reference still waits for `serverCount()` reports and times out). `$socket->local` leaves the socket out, as `broadcast` does.
-  - **Not yet:** `allSockets` reads the local process (it is deprecated in the reference).
+  - **Not yet:** `allSockets` reads the local process (it is deprecated in the reference). Connection state recovery needs the default adapter.
 - **`Emitter`**, as the reference's `@socket.io/redis-emitter` and `@socket.io/postgres-emitter`: sends from code that isn't a server.
   - It publishes through a `Publisher` exactly what `PubSubAdapter` would, with the uid `emitter` (`Emitter::UID`), using `Cluster\Channels` and `Cluster\Wire`, so the two can't drift. Servers never count that uid as a node, as `ClusterAdapterWithHeartbeat` skips `EMITTER_UID`.
   - API: `of()`, `to()`/`in()`, `except()`, `volatile` (each returns a copy), `emit()`, `send()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`, `serverSideEmit()`. A `Closure` argument throws (no acks, no `fetchSockets`), and so do reserved names.
