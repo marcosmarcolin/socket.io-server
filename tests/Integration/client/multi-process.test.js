@@ -142,6 +142,45 @@ describe("multiple processes", () => {
     assert.deepEqual(got.map((messages) => messages.length), [0, 1, 1, 1]);
   });
 
+  test("socketsJoin and socketsLeave apply on every process", TIMEOUT, async () => {
+    const clients = [...byProcess.values()].flat();
+    const got = clients.map((socket) => record(socket, "room-message"));
+
+    await clients[0].emitWithAck("join-all", "joined-by-server");
+    await sleep(300);
+    clients[3].emit("to-rooms", ["joined-by-server"], "after join");
+    await sleep(300);
+    await clients[3].emitWithAck("leave-all", "joined-by-server");
+    await sleep(300);
+    clients[0].emit("to-rooms", ["joined-by-server"], "after leave");
+    await sleep(300);
+
+    for (const messages of got) {
+      assert.deepEqual(messages.filter(([m]) => m.startsWith("after ")), [["after join"]]);
+    }
+  });
+
+  test("disconnectSockets reaches a socket on another process", TIMEOUT, async () => {
+    const [[a1]] = [...byProcess.values()];
+    let victim = await connect();
+    for (let attempt = 0; victim.pid === a1.pid; attempt++) {
+      assert.ok(attempt < 50, "no client landed on the other process");
+      victim = await connect();
+    }
+    const disconnected = next(victim, "disconnect");
+
+    a1.emit("kick", victim.id);
+
+    assert.deepEqual(await disconnected, ["io server disconnect", undefined]);
+  });
+
+  test("serverSideEmit gets an answer from the other process", TIMEOUT, async () => {
+    const [[a1], [b1]] = [...byProcess.values()];
+
+    assert.deepEqual(await a1.emitWithAck("servers"), { error: null, pids: [b1.pid] });
+    assert.deepEqual(await b1.emitWithAck("servers"), { error: null, pids: [a1.pid] });
+  });
+
   test("scale: 200 clients get 20 broadcasts each, once and in order", { timeout: 60_000 }, async () => {
     const CLIENTS = 200;
     const MESSAGES = 20;

@@ -25,8 +25,8 @@ use Workerman\Worker;
 /**
  * The Socket.IO server.
  *
- * `connection` and `connect` listeners belong to the main namespace, as $io->sockets->on() would, and so do
- * the broadcast methods. The server's own events are `workerStart` and `workerStop` (Worker), once attached.
+ * Listeners belong to the main namespace, as $io->sockets->on() would, and so do the broadcast methods and
+ * serverSideEmit(); only the server's own events, `workerStart` and `workerStop` (Worker), stay here.
  *
  * @property-read BroadcastOperator $volatile broadcasts that skip sockets whose transport is busy
  * @property-read Worker|null $worker the Workerman worker serving it, once attached
@@ -161,13 +161,12 @@ final class SocketIO extends Emitter
 
     public function on(string $event, Closure $listener): static
     {
-        if ($event === 'connection' || $event === 'connect') {
-            $this->sockets->on($event, $listener);
-
-            return $this;
+        if ($event === 'workerStart' || $event === 'workerStop') {
+            return parent::on($event, $listener);
         }
+        $this->sockets->on($event, $listener);
 
-        return parent::on($event, $listener);
+        return $this;
     }
 
     /**
@@ -211,13 +210,21 @@ final class SocketIO extends Emitter
     }
 
     /**
-     * Sends an event to every socket of the main namespace, in this process.
+     * Sends an event to every socket of the main namespace, on every server the adapter reaches.
      */
     public function emit(string $event, mixed ...$args): static
     {
         $this->sockets->emit($event, ...$args);
 
         return $this;
+    }
+
+    /**
+     * Sends an event to the main namespace on the other servers; see Nsp::serverSideEmit().
+     */
+    public function serverSideEmit(string $event, mixed ...$args): void
+    {
+        $this->sockets->serverSideEmit($event, ...$args);
     }
 
     /**

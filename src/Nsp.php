@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Marcolin\SocketIO;
 
 use Closure;
+use InvalidArgumentException;
 use LogicException;
 use Marcolin\SocketIO\Adapter\Adapter;
 use Marcolin\SocketIO\Event\Emitter;
@@ -13,9 +14,11 @@ use Throwable;
 /**
  * A namespace.
  *
- * Events: `connection` and `connect` (Socket), when a socket joined, after the middlewares let it in.
+ * Events: `connection` and `connect` (Socket), when a socket joined, after the middlewares let it in; and the events
+ * other servers send with serverSideEmit().
  *
- * The broadcast methods act on the sockets of this process.
+ * Broadcasts, socketsJoin, socketsLeave and disconnectSockets reach every server through the adapter;
+ * fetchSockets and allSockets read this process.
  *
  * @property-read BroadcastOperator $volatile broadcasts that skip sockets whose transport is busy
  */
@@ -98,7 +101,7 @@ final class Nsp extends Emitter
     }
 
     /**
-     * Sends an event to every socket of the namespace, in this process.
+     * Sends an event to every socket of the namespace, on every server the adapter reaches.
      */
     public function emit(string $event, mixed ...$args): static
     {
@@ -154,6 +157,22 @@ final class Nsp extends Emitter
     public function disconnectSockets(bool $close = false): void
     {
         $this->operator()->disconnectSockets($close);
+    }
+
+    /**
+     * Sends an event to this namespace on the other servers, whose listeners get it with on($event). A Closure as
+     * the last argument gets one response per other server, as (?Throwable $error, array $responses): the error is
+     * a TimeoutException when some didn't answer within 5 seconds. The data follows emit()'s rules.
+     *
+     * @throws InvalidArgumentException for a name the namespace keeps for itself, or data that can't be sent
+     * @throws LogicException with an adapter that reaches no other server
+     */
+    public function serverSideEmit(string $event, mixed ...$args): void
+    {
+        if (in_array($event, ['connect', 'connection', 'new_namespace'], true)) {
+            throw new InvalidArgumentException(sprintf('"%s" is a reserved event name', $event));
+        }
+        $this->adapter->serverSideEmit([$event, ...array_values($args)]);
     }
 
     public function __get(string $name): BroadcastOperator
@@ -225,6 +244,20 @@ final class Nsp extends Emitter
     public function remove(Socket $socket): void
     {
         unset($this->sockets[$socket->id], $this->connecting[$socket->id]);
+    }
+
+    /**
+     * An event another server sent with serverSideEmit(), as its name and arguments.
+     *
+     * @internal
+     * @param list<mixed> $args
+     */
+    public function receiveServerSideEmit(array $args): void
+    {
+        $event = array_shift($args);
+        if (is_string($event)) {
+            $this->dispatch($event, ...$args);
+        }
     }
 
     /**

@@ -79,6 +79,19 @@ interface Adapter
     public function disconnectSockets(BroadcastOptions $options, bool $close): void;
 
     /**
+     * How many servers run this namespace, this one included.
+     */
+    public function serverCount(): int;
+
+    /**
+     * Sends an event to the namespace on the other servers, which receive it with $nsp->on($event).
+     *
+     * @param list<mixed> $packet the event name and arguments; a Closure last gets one response per other server,
+     *     as (?TimeoutException $error, list<mixed> $responses)
+     */
+    public function serverSideEmit(array $packet): void;
+
+    /**
      * Releases what the adapter holds outside this process, when the server shuts down.
      */
     public function close(): void;

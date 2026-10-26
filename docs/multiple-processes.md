@@ -2,12 +2,34 @@
 
 **English** · [Português (Brasil)](multiple-processes.pt-BR.md)
 
-Broadcasts reach the other processes through an adapter, set in `workerStart` on every process:
+Broadcasts and the socket helpers reach the other processes through an adapter, set in `workerStart` on every process:
 
 - `ChannelAdapter`, on a [workerman/channel](https://github.com/walkor/channel) server: nothing else to run, good for one machine.
 - `RedisAdapter`, on a Redis server: for several machines, or when you already run Redis. It needs no extra package.
 
 Both work the same way: each broadcast is encoded once and published once, and every process delivers it to its own sockets.
+
+## What crosses processes
+
+- Broadcasts: `emit`, `to`, `except`, `broadcast`, `volatile`.
+- `socketsJoin()`, `socketsLeave()` and `disconnectSockets()`: `$io->in($userRoom)->disconnectSockets()` disconnects a user wherever their sockets are.
+- `serverSideEmit()`: events from one server to the others, which listen with `on()` on the same namespace. A `Closure` last gets one answer per other server:
+
+```php
+// On every server: answers the others.
+$io->on('ping', function (string $from, Closure $ack): void {
+    $ack(gethostname());
+});
+
+// On one server: asks the others, and gets one answer per server.
+$io->serverSideEmit('ping', 'web-1', function (?Throwable $error, array $hosts): void {
+    // $error is a TimeoutException when some server didn't answer within 5 seconds.
+});
+```
+
+Each server knows how many others run the namespace from their heartbeats, sent after 5 seconds without publishing anything; a server silent for 10 seconds, or that closed, stops counting. The data of `serverSideEmit()` follows the same rules as `emit()`, `Binary` included.
+
+`fetchSockets()` and `allSockets()` still read the current process.
 
 ## workerman/channel
 
@@ -86,5 +108,5 @@ RedisAdapter::factory(
 ## Limits
 
 - Clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee. Setting `'transports' => ['websocket']` on the server too refuses polling outright. Across machines, a load balancer with sticky sessions lets polling work.
-- Only broadcasts cross processes (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the current process.
+- `fetchSockets()` and `allSockets()` read the current process.
 - Broadcasts with an acknowledgement (`timeout()->emit(..., $callback)`) don't cross processes yet: both adapters throw.

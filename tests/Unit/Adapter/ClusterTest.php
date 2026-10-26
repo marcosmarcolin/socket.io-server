@@ -1,0 +1,497 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Marcolin\SocketIO\Tests\Unit\Adapter;
+
+use Closure;
+use InvalidArgumentException;
+use LogicException;
+use Marcolin\SocketIO\Adapter\Adapter;
+use Marcolin\SocketIO\Adapter\ChannelAdapter;
+use Marcolin\SocketIO\Adapter\PubSubAdapter;
+use Marcolin\SocketIO\Binary;
+use Marcolin\SocketIO\Nsp;
+use Marcolin\SocketIO\Socket;
+use Marcolin\SocketIO\SocketIO;
+use Marcolin\SocketIO\Tests\Fake\FakeChannelBroker;
+use Marcolin\SocketIO\Tests\Fake\FakeScheduler;
+use Marcolin\SocketIO\Tests\Fake\SequentialSessionIdGenerator;
+use Marcolin\SocketIO\Tests\Fake\SequentialSocketIdGenerator;
+use Marcolin\SocketIO\Tests\Fake\SocketIOClient;
+use Marcolin\SocketIO\TimeoutException;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\TestCase;
+use Throwable;
+
+/**
+ * The cluster protocol of PubSubAdapter: servers sharing a fake broker, each with its own clock.
+ */
+final class ClusterTest extends TestCase
+{
+    private FakeChannelBroker $broker;
+
+    /** @var array<string, SocketIO> */
+    private array $servers = [];
+
+    /** @var array<string, FakeScheduler> */
+    private array $clocks = [];
+
+    /** @var array{?Throwable, array<mixed>}|null what the last serverSideEmit() callback got */
+    private ?array $result = null;
+
+    protected function setUp(): void
+    {
+        $this->broker = new FakeChannelBroker();
+    }
+
+    public function testServersCountEachOtherAsTheyStart(): void
+    {
+        $this->server('A');
+        self::assertSame(1, $this->servers('A'));
+
+        $this->server('B');
+        self::assertSame([2, 2], [$this->servers('A'), $this->servers('B')]);
+
+        $this->server('C');
+        self::assertSame([3, 3, 3], [$this->servers('A'), $this->servers('B'), $this->servers('C')]);
+    }
+
+    public function testEachNamespaceCountsItsOwnServers(): void
+    {
+        $this->server('A')->of('/admin');
+        $this->server('B');
+
+        self::assertSame([2, 1], [$this->servers('A'), $this->servers('A', '/admin')]);
+    }
+
+    public function testAHeartbeatGoesOutAfterAnIntervalWithoutPublishing(): void
+    {
+        $this->server('A');
+        $this->broker->published = [];
+
+        $this->clocks['A']->advance(PubSubAdapter::HEARTBEAT_INTERVAL - 1);
+        self::assertSame([], $this->types());
+        $this->clocks['A']->advance(1);
+        self::assertSame([2], $this->types());
+    }
+
+    public function testAnyPublishPutsTheHeartbeatOff(): void
+    {
+        $this->server('A');
+        $this->clocks['A']->advance(4000);
+        $this->servers['A']->emit('news');
+        $this->broker->published = [];
+
+        $this->clocks['A']->advance(PubSubAdapter::HEARTBEAT_INTERVAL - 1);
+        self::assertSame([], $this->types());
+        $this->clocks['A']->advance(1);
+        self::assertSame([2], $this->types());
+    }
+
+    public function testAServerSilentForTheTimeoutIsGone(): void
+    {
+        $this->server('A');
+        $this->server('B');
+
+        // B's clock stands still, so it sends no heartbeat.
+        $this->clocks['A']->advance(PubSubAdapter::HEARTBEAT_TIMEOUT - 1);
+        self::assertSame(2, $this->servers('A'));
+        $this->clocks['A']->advance(1);
+        self::assertSame(1, $this->servers('A'));
+    }
+
+    public function testHeartbeatsKeepServersCounted(): void
+    {
+        $this->server('A');
+        $this->server('B');
+
+        for ($i = 0; $i < 6; $i++) {
+            $this->clocks['A']->advance(PubSubAdapter::HEARTBEAT_INTERVAL);
+            $this->clocks['B']->advance(PubSubAdapter::HEARTBEAT_INTERVAL);
+        }
+
+        self::assertSame([2, 2], [$this->servers('A'), $this->servers('B')]);
+    }
+
+    public function testAClosedServerLeavesTheCountAtOnce(): void
+    {
+        $this->server('A');
+        $this->server('B');
+
+        $this->servers['B']->close();
+
+        self::assertSame(1, $this->servers('A'));
+        self::assertSame([], $this->broker->channelsOf('B'));
+        // No heartbeat after closing.
+        $this->broker->published = [];
+        $this->clocks['B']->advance(PubSubAdapter::HEARTBEAT_INTERVAL * 3);
+        self::assertSame([], $this->types());
+    }
+
+    public function testSocketsJoinAppliesOnEveryServer(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [, $a] = $this->connect('A');
+        [, $b] = $this->connect('B');
+
+        $this->servers['A']->sockets->socketsJoin('everyone');
+        $this->servers['A']->in($b->id)->socketsJoin(['vip', 'beta']);
+
+        self::assertSame([$a->id, 'everyone'], $a->rooms);
+        self::assertSame([$b->id, 'everyone', 'vip', 'beta'], $b->rooms);
+    }
+
+    public function testSocketsJoinOfOneRoomReachesTheServersWithItsMembers(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [, $b1] = $this->connect('B');
+        [, $b2] = $this->connect('B');
+        $b1->join('lobby');
+        $this->broker->published = [];
+
+        $this->servers['A']->in('lobby')->socketsJoin('game');
+
+        self::assertSame([$b1->id, 'lobby', 'game'], $b1->rooms);
+        self::assertSame([$b2->id], $b2->rooms);
+        self::assertSame('socket.io#/#lobby#', $this->published()[0][0]);
+    }
+
+    public function testSocketsLeaveAppliesOnEveryServer(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [, $a] = $this->connect('A');
+        [, $b] = $this->connect('B');
+        $a->join(['x', 'y']);
+        $b->join(['x', 'y']);
+
+        $this->servers['B']->except('y')->socketsLeave('x');
+        $this->servers['B']->sockets->socketsLeave('x');
+
+        self::assertSame([$a->id, 'y'], $a->rooms);
+        self::assertSame([$b->id, 'y'], $b->rooms);
+    }
+
+    public function testDisconnectSocketsAppliesOnEveryServer(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [$aClient, $a] = $this->connect('A');
+        [$bClient, $b] = $this->connect('B');
+        $reasons = [];
+        $b->on('disconnect', static function (string $reason) use (&$reasons): void {
+            $reasons[] = $reason;
+        });
+
+        $this->servers['A']->in($b->id)->disconnectSockets();
+
+        self::assertTrue($a->connected);
+        self::assertFalse($b->connected);
+        self::assertSame(['server namespace disconnect'], $reasons);
+        self::assertSame(['1'], $bClient->received());
+        self::assertSame([], $aClient->received());
+    }
+
+    public function testDisconnectSocketsCanCloseTheConnections(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [$bClient] = $this->connect('B');
+
+        $this->servers['A']->sockets->disconnectSockets(true);
+
+        self::assertTrue($bClient->isClosed());
+    }
+
+    public function testServerSideEmitReachesTheOtherServersOnly(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->server('C');
+        $received = [];
+        foreach (['A', 'B', 'C'] as $name) {
+            $this->servers[$name]->on('hello', static function (mixed ...$args) use (&$received, $name): void {
+                $received[] = [$name, ...$args];
+            });
+        }
+
+        $this->servers['A']->serverSideEmit('hello', 'world', ['n' => 1], new Binary("\x00\xff"));
+
+        self::assertEquals([
+            ['B', 'world', ['n' => 1], new Binary("\x00\xff")],
+            ['C', 'world', ['n' => 1], new Binary("\x00\xff")],
+        ], $received);
+    }
+
+    public function testServerSideEmitStaysInItsNamespace(): void
+    {
+        $this->server('A')->of('/admin');
+        $this->server('B')->of('/admin');
+        $received = [];
+        $this->servers['B']->on('ping', static function () use (&$received): void {
+            $received[] = '/';
+        });
+        $this->servers['B']->of('/admin')->on('ping', static function () use (&$received): void {
+            $received[] = '/admin';
+        });
+
+        $this->servers['A']->of('/admin')->serverSideEmit('ping');
+
+        self::assertSame(['/admin'], $received);
+    }
+
+    public function testServerSideEmitGetsOneResponsePerServer(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->server('C');
+        foreach (['B', 'C'] as $name) {
+            $this->servers[$name]->on('ping', static function (int $n, Closure $ack) use ($name): void {
+                $ack($name . ':' . $n, 'ignored');
+                $ack('twice');
+            });
+        }
+
+        $this->servers['A']->serverSideEmit('ping', 7, $this->recorder());
+
+        self::assertSame([null, ['B:7', 'C:7']], $this->result);
+    }
+
+    public function testServerSideEmitWithoutOtherServersAnswersAtOnce(): void
+    {
+        $this->server('A');
+
+        $this->servers['A']->serverSideEmit('ping', $this->recorder());
+
+        self::assertSame([null, []], $this->result);
+    }
+
+    public function testServerSideEmitTimesOutWithTheResponsesSoFar(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->server('C');
+        $this->servers['B']->on('ping', static function (Closure $ack): void {
+            $ack('pong');
+        });
+        $this->servers['C']->on('ping', static function (): void {
+        });
+
+        $this->servers['A']->serverSideEmit('ping', $this->recorder());
+        self::assertNull($this->result);
+        $this->clocks['A']->advance(PubSubAdapter::REQUEST_TIMEOUT);
+
+        [$error, $responses] = $this->callbackResult();
+        self::assertInstanceOf(TimeoutException::class, $error);
+        self::assertSame('timeout reached: missing 1 responses', $error->getMessage());
+        self::assertSame(['pong'], $responses);
+    }
+
+    public function testAServerLeavingCompletesTheRequest(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->server('C');
+        $this->servers['B']->on('ping', static function (Closure $ack): void {
+            $ack('pong');
+        });
+        $this->servers['A']->serverSideEmit('ping', $this->recorder());
+
+        $this->servers['C']->close();
+
+        self::assertSame([null, ['pong']], $this->result);
+    }
+
+    public function testALateResponseIsIgnored(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $acks = [];
+        $this->servers['B']->on('ping', static function (Closure $ack) use (&$acks): void {
+            $acks[] = $ack;
+        });
+        $calls = 0;
+        $this->servers['A']->serverSideEmit('ping', static function () use (&$calls): void {
+            ++$calls;
+        });
+        $this->clocks['A']->advance(PubSubAdapter::REQUEST_TIMEOUT);
+
+        $acks[0]('late');
+
+        self::assertSame(1, $calls);
+    }
+
+    public function testServerSideEmitRefusesTheNamespacesOwnEvents(): void
+    {
+        $this->server('A');
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('"connection" is a reserved event name');
+
+        $this->servers['A']->serverSideEmit('connection');
+    }
+
+    public function testAReceivedReservedEventIsIgnored(): void
+    {
+        $this->server('B');
+        $connections = 0;
+        $this->servers['B']->on('connection', static function () use (&$connections): void {
+            ++$connections;
+        });
+
+        $this->broker->publish('socket.io#/#', [
+            'uid' => 'x',
+            'type' => 9,
+            'parts' => [['text', '2["connection"]']],
+        ]);
+
+        self::assertSame(0, $connections);
+    }
+
+    public function testTheInMemoryAdapterHasNoServersToReach(): void
+    {
+        $io = new SocketIO(scheduler: new FakeScheduler());
+
+        self::assertSame(1, $io->sockets->adapter()->serverCount());
+        $this->expectException(LogicException::class);
+        $this->expectExceptionMessage('serverSideEmit() needs an adapter that reaches other servers');
+
+        $io->serverSideEmit('hello');
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>}>
+     */
+    public static function malformedRequests(): iterable
+    {
+        $opts = ['rooms' => [], 'except' => [], 'volatile' => false];
+
+        yield 'join without rooms' => [['type' => 4, 'opts' => $opts]];
+        yield 'join with a room that is not a string' => [['type' => 4, 'opts' => $opts, 'rooms' => [1]]];
+        yield 'join without opts' => [['type' => 4, 'rooms' => ['x']]];
+        yield 'disconnect without close' => [['type' => 6, 'opts' => $opts]];
+        yield 'disconnect with close not a bool' => [['type' => 6, 'opts' => $opts, 'close' => 1]];
+        yield 'server-side emit without parts' => [['type' => 9]];
+        yield 'server-side emit of a packet that is not an event' => [['type' => 9, 'parts' => [['text', '30[1]']]]];
+        yield 'server-side emit of an event without a name' => [['type' => 9, 'parts' => [['text', '2[1]']]]];
+    }
+
+    /**
+     * @param array<string, mixed> $message
+     */
+    #[DataProvider('malformedRequests')]
+    public function testIgnoresMalformedRequests(array $message): void
+    {
+        $this->server('B');
+        [, $b] = $this->connect('B');
+        $calls = 0;
+        $this->servers['B']->on('1', static function () use (&$calls): void {
+            ++$calls;
+        });
+
+        $this->broker->publish('socket.io#/#', ['uid' => 'x'] + $message);
+
+        self::assertSame([$b->id], $b->rooms);
+        self::assertTrue($b->connected);
+        self::assertSame(0, $calls);
+    }
+
+    public function testIgnoresResponsesItDidNotAskFor(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        $this->servers['B']->on('ping', static function (): void {
+        });
+        $this->servers['A']->serverSideEmit('ping', $this->recorder());
+        $channel = $this->broker->channelsOf('A')[1];
+
+        // From a server that wasn't asked, then for an unknown request.
+        $requestId = $this->published()[array_key_last($this->published())][1]['requestId'] ?? '';
+        $response = ['uid' => 'stranger', 'type' => 10, 'parts' => [['text', '30["x"]']]];
+        $this->broker->publish($channel, ['requestId' => $requestId] + $response);
+        $this->broker->publish($channel, ['requestId' => 'nope'] + $response);
+
+        self::assertNull($this->result);
+    }
+
+    // Helpers
+
+    /**
+     * @return array{?Throwable, array<mixed>}
+     * @phpstan-impure
+     */
+    private function callbackResult(): array
+    {
+        self::assertNotNull($this->result, 'The callback did not run');
+
+        return $this->result;
+    }
+
+    /**
+     * @return Closure(?Throwable, array<mixed>): void
+     */
+    private function recorder(): Closure
+    {
+        return function (?Throwable $error, array $responses): void {
+            $this->result = [$error, $responses];
+        };
+    }
+
+    private function server(string $name): SocketIO
+    {
+        $clock = new FakeScheduler();
+        $io = new SocketIO(
+            options: ['pingInterval' => 100_000, 'pingTimeout' => 100_000],
+            scheduler: $clock,
+            sessionIds: new SequentialSessionIdGenerator(),
+            socketIds: new SequentialSocketIdGenerator(0x100 * (count($this->servers) + 1)),
+        );
+        $pubSub = $this->broker->connect($name);
+        $io->adapter(static fn (Nsp $nsp): Adapter => new ChannelAdapter($nsp, $pubSub));
+        $this->servers[$name] = $io;
+        $this->clocks[$name] = $clock;
+
+        return $io;
+    }
+
+    /**
+     * @return array{SocketIOClient, Socket}
+     */
+    private function connect(string $name): array
+    {
+        $io = $this->servers[$name];
+        $client = new SocketIOClient($io);
+        $client->send('0');
+        $client->received();
+        $sockets = $io->sockets->sockets();
+
+        return [$client, $sockets[array_key_last($sockets)]];
+    }
+
+    private function servers(string $name, string $namespace = '/'): int
+    {
+        return $this->servers[$name]->of($namespace)->adapter()->serverCount();
+    }
+
+    /**
+     * @return list<array{string, array<string, mixed>}>
+     */
+    private function published(): array
+    {
+        return $this->broker->published;
+    }
+
+    /**
+     * @return list<mixed> the type of each message published since the test cleared them
+     */
+    private function types(): array
+    {
+        return array_map(
+            static fn (array $published): mixed => $published[1]['type'] ?? null,
+            $this->broker->published,
+        );
+    }
+}

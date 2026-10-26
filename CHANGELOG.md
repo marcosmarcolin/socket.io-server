@@ -8,10 +8,15 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 - **`RedisAdapter`**: broadcasts across processes and machines through Redis publish and subscribe, set with `$io->adapter(RedisAdapter::factory('redis://127.0.0.1:6379'))` in `workerStart`. The URL (with an optional user and password), the channel key and the error handler are configurable, and every argument has a default. It has its own Redis client on Workerman, so it needs no extra package, and it reconnects and subscribes again by itself.
 - **The `redis` example**: four processes joined by Redis.
+- **The cluster protocol** in `ChannelAdapter` and `RedisAdapter`, as the reference's `ClusterAdapterWithHeartbeat`: servers count each other with heartbeats, and `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` now apply on every server.
+- **`serverSideEmit()`** on `SocketIO` and `Nsp`: events between servers, received with `on()`, with an optional callback that gets one response per other server or a `TimeoutException` after 5 seconds.
+- **`Adapter::serverCount()` and `Adapter::serverSideEmit()`**; `InMemoryAdapter` counts one server and throws on `serverSideEmit()`.
 - **The `dashboard` example**: live dashboards, where a timer started in `workerStart` pushes new numbers every few seconds to the viewers of each dashboard, as a room.
 
 ### Changed
 
+- `$io->on()` registers any event but `workerStart` and `workerStop` on the main namespace, as the reference does, so `$io->on('event')` receives `serverSideEmit()`.
+- The messages `ChannelAdapter` publishes have a new shape, with a `uid` and a `type`: during an upgrade, processes on the old and new versions don't hear each other's broadcasts.
 - The cross-process logic of `ChannelAdapter` moved to the abstract `PubSubAdapter`, which `ChannelAdapter` and `RedisAdapter` extend. Adapters for other brokers can extend it with their own `PubSub`. `ChannelAdapter::factory()` and `new ChannelAdapter($nsp, $pubSub)` work as before.
 
 ## [0.2.0] - 2026-10-25

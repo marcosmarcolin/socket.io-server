@@ -164,7 +164,8 @@ src/
     Adapter.php                 the extension point for other processes
     BroadcastOptions.php        rooms, except and volatile of a broadcast
     InMemoryAdapter.php         local rooms and broadcast; not final, the base of other adapters
-    PubSubAdapter.php           cross-process broadcast through a PubSub; abstract, the base of the two below
+    PubSubAdapter.php           the cluster protocol through a PubSub; abstract, the base of the two below
+    Cluster/                    MessageType (the reference's numbers), Nodes (server count), Request (waiting for responses)
     ChannelAdapter.php          PubSubAdapter on workerman/channel; final, only adds factory()
     RedisAdapter.php            PubSubAdapter on Redis; final, only adds factory()
     PubSub.php                  publish/subscribe between processes, faked in tests
@@ -349,7 +350,7 @@ $io->on('connection', function (Socket $socket) use ($io): void {
 Worker::runAll();
 ```
 
-- `SocketIO`: `of()`, `on()` (including `workerStart`/`workerStop`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- `SocketIO`: `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
 - **`close()`**, as the reference's:
   1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
   2. each adapter's `close()` runs (`PubSubAdapter` unsubscribes from its channels);
@@ -357,9 +358,9 @@ Worker::runAll();
   4. the attached worker stops accepting connections in this process (`unlisten()`, as `httpServer.close()`).
 
   Sockets still in their middlewares never connect. It is not called on `workerStop`: the reference has no such hook, and Workerman closes the connections itself.
-- `Nsp`: `on('connection')`, `use()`, `to/in/except`, `timeout`, `emit`, `fetchSockets()`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
+- `Nsp`: `on('connection')` and the `serverSideEmit()` events, `use()`, `to/in/except`, `timeout`, `emit`, `serverSideEmit()`, `fetchSockets()`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
 - `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `onAny`, `prependAny`, `offAny`, `listenersAny`, `onAnyOutgoing`, `prependAnyOutgoing`, `offAnyOutgoing`, `listenersAnyOutgoing`, `join`, `leave`, `to/in/except`, `broadcast`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
-- The broadcast helpers act on the local process only; cross-process delivery goes through the adapter.
+- Broadcasts, `socketsJoin`, `socketsLeave` and `disconnectSockets` go through the adapter, so they reach every process with `ChannelAdapter` or `RedisAdapter`; `fetchSockets` and `allSockets` read the local process.
 - **Broadcast** (`InMemoryAdapter`), as in the reference:
   - `to()` targets the sockets in any of the rooms, each once; with no room, every socket of the namespace;
   - `except()` leaves out the sockets in any of its rooms;
@@ -379,10 +380,15 @@ Worker::runAll();
   - creating the adapter outside the event loop throws a clear error (the right place is `workerStart`).
 - **How a broadcast crosses processes:**
   - `PubSubAdapter` delivers it to this process's sockets first, then publishes it already encoded, so no other process encodes it again;
-  - each adapter has a random id and ignores its own messages, since a publisher receives them too;
-  - the message is an array of scalars (`sender`, `parts` as `['text'|'binary', string]`, `rooms`, `except`, `volatile`), never objects. `unserialize()` then creates no class of ours, and the broker needs none of our code. Malformed messages are ignored.
+  - each adapter has a random `uid` and ignores its own messages, since a publisher receives them too;
+  - a message is an array of scalars, never objects: `uid`, `type` (`Cluster\MessageType`, numbered as the reference's) and the type's fields, such as `opts` (`rooms`, `except`, `volatile`) and `parts` (encoded packets as `['text'|'binary', string]`). `unserialize()` then creates no class of ours, and the broker needs none of our code. Malformed messages are ignored.
 - **One publish per broadcast.** A single room goes to its room channel. Several rooms, a sid room, or no room go once to the namespace channel, and each process filters by the rooms itself. phpsocket.io publishes to each room's channel, so a process with members in two of the rooms delivers twice; this fixes it.
-- **Only broadcasts cross processes.** `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` and `disconnectSockets` act on the local process, as in `InMemoryAdapter`. Broadcasts with an ack throw in `PubSubAdapter`, naming the adapter: collecting answers across processes needs the reference's `ClusterAdapter` protocol (client counts per process and a known server count), not built yet.
+- **The cluster protocol**, as the reference's `ClusterAdapterWithHeartbeat` (`packages/socket.io-adapter/lib/cluster-adapter.ts`):
+  - **Server count:** a new adapter publishes `InitialHeartbeat`, which the others answer with `Heartbeat`. Each adapter publishes `Heartbeat` after `HEARTBEAT_INTERVAL` (5 s) without publishing anything; every publish puts it off. A server unheard for `HEARTBEAT_TIMEOUT` (10 s) is gone, and so is one that sends `AdapterClose` (from `close()`). `Cluster\Nodes` keeps one timer per server; `serverCount()` is 1 plus them. Each namespace counts its own servers.
+  - **Requests and responses:** requests go to the namespace channel; a server answers on the requester's response channel, `<key>-response#<nsp>#<uid>#`. `Cluster\Request` waits for one response from each server known when asking, completes when all answered or left, and gives up after `REQUEST_TIMEOUT` (5 s) with a `TimeoutException` ("timeout reached: missing N responses") and the responses so far. Late or unasked-for responses are ignored.
+  - **`socketsJoin`, `socketsLeave`, `disconnectSockets`** publish `SocketsJoin`/`SocketsLeave`/`DisconnectSockets` with their options (to the room channel for a single room, as broadcasts), then apply locally; each other server applies them to its own sockets.
+  - **`serverSideEmit([$event, ...$args, ?$ack])`** publishes the event encoded as an `EVENT` packet, so its data follows `emit()`'s rules. Receivers dispatch it on the namespace (`Nsp::receiveServerSideEmit()`), with an ack `Closure` last when asked; it answers once, with its first argument encoded as an `ACK` packet. Without other servers, the ack runs at once with `[]`. `connect`, `connection` and `new_namespace` are reserved, as in the reference: sending one throws, receiving one is ignored. `InMemoryAdapter::serverSideEmit()` throws (the reference only warns).
+  - **Not yet:** `fetchSockets` and `allSockets` read the local process, and broadcasts with an ack throw in `PubSubAdapter`, naming the adapter. Next: `fetchSockets(Closure)` with `RemoteSocket`, then broadcast acks with the client counts per server.
 - **Setup:** in `workerStart`, call `$io->adapter(ChannelAdapter::factory($host, $port))` with a `Channel\Server` worker running, or `$io->adapter(RedisAdapter::factory($url, $key, $onError))`. `PubSub` is the seam that keeps the static `Channel\Client` and the Redis connections out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
 - **`RedisAdapter`** has its own client, on Workerman's `AsyncTcpConnection`, so it adds no dependency. `workerman/redis` doesn't fit: after its first `SUBSCRIBE` it sends no other command, so rooms couldn't subscribe or unsubscribe, and it prints errors with `echo`.
   - `factory()` arguments, all optional: `url` (`redis://127.0.0.1:6379`), `key` (`socket.io`; apps sharing one Redis need different keys), and `onError` (`Worker::log` by default). An invalid URL throws `InvalidArgumentException` before the event loop check; the message never includes the URL, which may hold a password.
@@ -394,7 +400,7 @@ Worker::runAll();
 - With several processes on the same port, clients must use `transports: ['websocket']`, because polling breaks across processes without sticky sessions. `docs/multiple-processes.md` says so.
 - **Multi-process tests** (`tests/Integration/multi-process-server.php`): two processes with `reusePort`, so the kernel spreads connections, plus a `Channel\Server`; or, with `ADAPTER=redis` (`run.sh multi-process-redis`), `RedisAdapter` on a pinned Redis image with a password, so the login is covered too. The `redis` example runs against the same Redis.
   - The tests first make sure clients landed on both processes, and that a broadcast crosses (retrying while the workers connect to the broker).
-  - They cover emits, rooms, several rooms at once, `except` and `broadcast` across processes.
+  - They cover emits, rooms, several rooms at once, `except`, `broadcast`, `socketsJoin`/`socketsLeave`, `disconnectSockets` and `serverSideEmit` with an ack across processes.
   - The **scale check** has 200 WebSocket clients get 20 broadcasts each: every client must get every message once and in order, and the time is printed. It catches loss and duplication, not performance.
 
 ## Roadmap
@@ -410,4 +416,7 @@ Worker::runAll();
 9. [x] Complete README, examples, and a migration guide from phpsocket.io 3.x.
 10. [x] First release, `v0.1.0`, on Packagist; the READMEs install with `composer require` and show its badges (version, downloads, PHP version).
 11. [x] `RedisAdapter`, with its own Redis client, the multi-process tests on Redis and an example.
-12. [ ] The reference's cluster protocol on `PubSub`: `fetchSockets`, `socketsJoin`/`socketsLeave`, `disconnectSockets`, `serverSideEmit` and broadcast acks across processes, for both adapters.
+12. [ ] The reference's cluster protocol on `PubSub`, for both adapters:
+    - [x] heartbeats and server count, `socketsJoin`/`socketsLeave`, `disconnectSockets` and `serverSideEmit` across processes;
+    - [ ] `fetchSockets(Closure)` across processes, with `RemoteSocket`;
+    - [ ] broadcast acks across processes.

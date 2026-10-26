@@ -47,7 +47,7 @@ final class ChannelAdapterTest extends TestCase
         foreach ([$a1, $b1, $b2] as $client) {
             self::assertSame(['2["news",1]'], $client->received());
         }
-        self::assertSame(['socket.io#/#'], array_column($this->broker->published, 0));
+        self::assertSame(['socket.io#/#'], $this->broadcastChannels());
     }
 
     public function testARoomBroadcastGoesToTheRoomChannel(): void
@@ -60,7 +60,7 @@ final class ChannelAdapterTest extends TestCase
 
         self::assertSame([], $a1->received());
         self::assertSame(['2["hi"]'], $b1->received());
-        self::assertSame(['socket.io#/#lobby#'], array_column($this->broker->published, 0));
+        self::assertSame(['socket.io#/#lobby#'], $this->broadcastChannels());
         self::assertSame(['B'], $this->broker->subscribers('socket.io#/#lobby#'));
     }
 
@@ -72,7 +72,7 @@ final class ChannelAdapterTest extends TestCase
         $this->processes['A']->to(['r1', 'r2'])->emit('once');
 
         self::assertSame(['2["once"]'], $b1->received());
-        self::assertSame(['socket.io#/#'], array_column($this->broker->published, 0));
+        self::assertSame(['socket.io#/#'], $this->broadcastChannels());
     }
 
     public function testExceptAppliesInEveryProcess(): void
@@ -99,7 +99,7 @@ final class ChannelAdapterTest extends TestCase
 
         self::assertSame(['2["private"]'], $b1->received());
         self::assertSame([], $b2->received());
-        self::assertSame(['socket.io#/#'], array_column($this->broker->published, 0));
+        self::assertSame(['socket.io#/#'], $this->broadcastChannels());
     }
 
     public function testBroadcastFromASocketLeavesOnlyItOut(): void
@@ -131,7 +131,9 @@ final class ChannelAdapterTest extends TestCase
     {
         $this->processes['A']->volatile->emit('maybe');
 
-        self::assertTrue($this->broker->published[0][1]['volatile'] ?? null);
+        $opts = $this->broadcasts()[0]['opts'] ?? null;
+        self::assertIsArray($opts);
+        self::assertTrue($opts['volatile'] ?? null);
     }
 
     public function testNamespacesHaveTheirOwnChannels(): void
@@ -145,7 +147,7 @@ final class ChannelAdapterTest extends TestCase
         $this->processes['A']->emit('main');
 
         self::assertSame(['2/admin,["alert"]', '2["main"]'], $b1->received());
-        self::assertSame(['socket.io#/admin#', 'socket.io#/#'], array_column($this->broker->published, 0));
+        self::assertSame(['socket.io#/admin#', 'socket.io#/#'], $this->broadcastChannels());
     }
 
     public function testSubscribesToARoomWhileThisProcessHasMembers(): void
@@ -169,18 +171,18 @@ final class ChannelAdapterTest extends TestCase
     {
         [, $socket] = $this->connect('A');
         $socket->join('lobby');
-        self::assertSame(['socket.io#/#', 'socket.io#/#lobby#'], $this->broker->channelsOf('A'));
+        self::assertSame(['socket.io#/#', 'socket.io#/#lobby#'], $this->channelsOf('A'));
 
         $this->processes['A']->close();
 
-        self::assertSame([], $this->broker->channelsOf('A'));
+        self::assertSame([], $this->channelsOf('A'));
     }
 
     public function testSocketRoomsGetNoChannel(): void
     {
         $this->connect('A');
 
-        self::assertSame(['socket.io#/#'], $this->broker->channelsOf('A'));
+        self::assertSame(['socket.io#/#'], $this->channelsOf('A'));
     }
 
     /**
@@ -188,16 +190,21 @@ final class ChannelAdapterTest extends TestCase
      */
     public static function malformedMessages(): iterable
     {
-        $valid = ['sender' => 'x', 'parts' => [['text', '2["a"]']], 'rooms' => [], 'except' => [], 'volatile' => false];
+        $opts = ['rooms' => [], 'except' => [], 'volatile' => false];
+        $valid = ['uid' => 'x', 'type' => 3, 'opts' => $opts, 'parts' => [['text', '2["a"]']]];
 
         yield 'no fields' => [['raw' => 'text']];
-        yield 'only a sender' => [['sender' => 'x']];
-        yield 'volatile not a bool' => [['volatile' => 'no'] + $valid];
+        yield 'only a uid' => [['uid' => 'x']];
+        yield 'no uid' => [['uid' => null] + $valid];
+        yield 'unknown type' => [['type' => 99] + $valid];
+        yield 'type not an int' => [['type' => '3'] + $valid];
+        yield 'volatile not a bool' => [['opts' => ['volatile' => 'no'] + $opts] + $valid];
         yield 'unknown part kind' => [['parts' => [['image', 'a']]] + $valid];
         yield 'no parts' => [['parts' => []] + $valid];
         yield 'part not a list' => [['parts' => ['text']] + $valid];
-        yield 'room not a string' => [['rooms' => [1]] + $valid];
-        yield 'except not a list' => [['except' => 'quiet'] + $valid];
+        yield 'room not a string' => [['opts' => ['rooms' => [1]] + $opts] + $valid];
+        yield 'except not a list' => [['opts' => ['except' => 'quiet'] + $opts] + $valid];
+        yield 'opts not an array' => [['opts' => 'all'] + $valid];
     }
 
     /**
@@ -218,11 +225,10 @@ final class ChannelAdapterTest extends TestCase
         [$a1] = $this->connect('A');
 
         $this->broker->publish('socket.io#/#', [
-            'sender' => 'x',
+            'uid' => 'x',
+            'type' => 3,
+            'opts' => ['rooms' => [], 'except' => [], 'volatile' => false],
             'parts' => [['text', '2["a"]']],
-            'rooms' => [],
-            'except' => [],
-            'volatile' => false,
         ]);
 
         self::assertSame(['2["a"]'], $a1->received());
@@ -270,11 +276,10 @@ final class ChannelAdapterTest extends TestCase
         });
 
         $this->broker->publish('socket.io#/#', [
-            'sender' => 'x',
+            'uid' => 'x',
+            'type' => 3,
+            'opts' => ['rooms' => [], 'except' => [], 'volatile' => false],
             'parts' => $parts,
-            'rooms' => [],
-            'except' => [],
-            'volatile' => false,
         ]);
 
         self::assertSame(0, $seen);
@@ -300,6 +305,44 @@ final class ChannelAdapterTest extends TestCase
     }
 
     // Helpers
+
+    /**
+     * @return list<array{string, array<string, mixed>}> the broadcasts published, leaving heartbeats out
+     */
+    private function published(): array
+    {
+        return array_values(array_filter(
+            $this->broker->published,
+            static fn (array $published): bool => ($published[1]['type'] ?? null) === 3,
+        ));
+    }
+
+    /**
+     * @return list<array<string, mixed>> each broadcast message
+     */
+    private function broadcasts(): array
+    {
+        return array_column($this->published(), 1);
+    }
+
+    /**
+     * @return list<string> the channel of each broadcast
+     */
+    private function broadcastChannels(): array
+    {
+        return array_column($this->published(), 0);
+    }
+
+    /**
+     * @return list<string> the namespace and room channels a process listens to, without its response channel
+     */
+    private function channelsOf(string $process): array
+    {
+        return array_values(array_filter(
+            $this->broker->channelsOf($process),
+            static fn (string $channel): bool => ! str_contains($channel, '-response#'),
+        ));
+    }
 
     private function process(string $name, int $firstSocketId): SocketIO
     {

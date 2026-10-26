@@ -35,8 +35,16 @@ final class RedisAdapterTest extends TestCase
         $a->to('lobby')->emit('hi');
 
         self::assertSame(['2["hi"]'], $client->received());
-        self::assertSame(['chat-app#/#lobby#'], array_column($broker->published, 0));
-        self::assertSame(['chat-app#/#', 'chat-app#/#lobby#'], $broker->channelsOf('B'));
+        $broadcasts = array_filter(
+            $broker->published,
+            static fn (array $published): bool => ($published[1]['type'] ?? null) === 3,
+        );
+        self::assertSame(['chat-app#/#lobby#'], array_column(array_values($broadcasts), 0));
+        self::assertSame(['chat-app#/#', 'chat-app-response#/#'], array_map(
+            static fn (string $channel): string => preg_replace('/#[0-9a-f]{16}#$/', '#', $channel) ?? $channel,
+            array_slice($broker->channelsOf('B'), 0, 2),
+        ));
+        self::assertContains('chat-app#/#lobby#', $broker->channelsOf('B'));
     }
 
     public function testAppsWithAnotherKeyDoNotHearEachOther(): void
