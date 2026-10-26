@@ -204,7 +204,16 @@ final class Nsp extends Emitter
      */
     public function initAdapter(): void
     {
+        $previous = $this->adapter;
         $this->adapter = $this->server->createAdapter($this);
+        // Room event listeners stay: an adapter is often set in workerStart, after listeners were added.
+        if ($previous instanceof Emitter) {
+            foreach ($previous->eventNames() as $event) {
+                foreach ($previous->listeners($event) as $listener) {
+                    $this->adapter->on($event, $listener);
+                }
+            }
+        }
     }
 
     /**

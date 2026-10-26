@@ -57,6 +57,8 @@ jobs:
 
       - run: tests/Integration/run.sh recovery
 
+      - run: tests/Integration/run.sh admin
+
   multi-process:
     runs-on: ubuntu-latest
     steps:
@@ -101,6 +103,7 @@ jobs:
       - run: tests/Compliance/socket-io.sh
       - run: tests/Integration/run.sh
       - run: tests/Integration/run.sh recovery
+      - run: tests/Integration/run.sh admin
       - run: tests/Integration/run.sh multi-process
 
   examples:

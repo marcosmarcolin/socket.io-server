@@ -20,6 +20,7 @@ It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and 
 - An `Emitter` that sends to the clients from any PHP code, such as a PHP-FPM request.
 - CORS with cookies, a hook to refuse connections before the handshake, and TLS.
 - Compression of polling answers and WebSocket messages, and a debug log.
+- The official [Admin UI](https://socket.io/docs/v4/admin-ui/): live sockets, rooms and events, and actions on them.
 - About 24 KB per connection: 10,000 WebSocket clients in one process take 250 MB, less than the official Node.js server's 290 MB (see [Performance and limits](docs/performance.md)).
 - An API shaped like [phpsocket.io](https://github.com/walkor/phpsocket.io)'s, to ease migration.
 
@@ -94,6 +95,7 @@ Each one runs with `php examples/<name>/start.php start`; then open http://local
 | Example | Shows |
 |---|---|
 | [chat](examples/chat) | a chat room: names, typing indicator, join and leave notices |
+| [admin-ui](examples/admin-ui) | the chat, watched and driven live from the official Admin UI |
 | [session-auth](examples/session-auth) | login with a PHP session, and a middleware that lets in only logged-in sessions' sockets |
 | [private-messaging](examples/private-messaging) | private messages to every tab of a user through a room per user, sessions kept across reconnections, and who is online |
 | [rooms](examples/rooms) | `join`, `leave`, messages to a room, live member lists |
@@ -111,6 +113,7 @@ Each one runs with `php examples/<name>/start.php start`; then open http://local
 - [API reference](docs/api.md): `SocketIO`, namespaces, sockets, acknowledgements, broadcasting, JSON and binary data.
 - [Several processes](docs/multiple-processes.md): `ChannelAdapter`, `RedisAdapter`, and the `Emitter`.
 - [Behind a reverse proxy](docs/reverse-proxy.md): nginx and HAProxy, TLS, and sticky sessions for polling.
+- [Admin UI](docs/admin-ui.md): watching and acting on the server from the official Admin UI.
 - [Performance and limits](docs/performance.md): what a process holds, the `event` extension, and the load test.
 - [Migrating from phpsocket.io](docs/migrating-from-phpsocket.io.md): moving an app and its clients.
 - [Development](docs/development.md): tests, linters and the compliance suites, all in Docker.

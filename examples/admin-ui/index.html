@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chat with the Admin UI</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    #messages { list-style: none; padding: 0; min-height: 300px; border: 1px solid #ddd; border-radius: 6px; padding: .5rem; overflow-y: auto; max-height: 60vh; }
+    #messages li { padding: .25rem 0; }
+    #messages .log { color: #888; font-size: 13px; }
+    form { display: flex; gap: .5rem; margin-top: .5rem; }
+    input { flex: 1; padding: .5rem; font: inherit; }
+    button { padding: .5rem 1rem; font: inherit; }
+    #typing { color: #888; height: 1.2em; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Chat</h1>
+  <p>Watch this chat live in the <a href="https://admin.socket.io" target="_blank" rel="noopener">Admin UI</a>: server URL http://localhost:3000, username and password admin.</p>
+  <form id="login">
+    <input id="username" placeholder="Your name" autocomplete="off" required>
+    <button>Join</button>
+  </form>
+  <div id="room" hidden>
+    <ul id="messages"></ul>
+    <div id="typing"></div>
+    <form id="send">
+      <input id="message" placeholder="Message" autocomplete="off">
+      <button>Send</button>
+    </form>
+  </div>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const socket = io(`http://${location.hostname}:3000`);
+    const messages = document.getElementById("messages");
+    const message = document.getElementById("message");
+    const typing = document.getElementById("typing");
+    let typingTimer;
+
+    function add(text, className) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      if (className) item.className = className;
+      messages.append(item);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    document.getElementById("login").addEventListener("submit", (event) => {
+      event.preventDefault();
+      socket.emit("add user", document.getElementById("username").value.trim());
+    });
+
+    document.getElementById("send").addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!message.value) return;
+      socket.emit("new message", message.value);
+      add(`you: ${message.value}`);
+      message.value = "";
+      socket.emit("stop typing");
+    });
+
+    message.addEventListener("input", () => {
+      socket.emit("typing");
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => socket.emit("stop typing"), 1000);
+    });
+
+    socket.on("login", ({ numUsers }) => {
+      document.getElementById("login").hidden = true;
+      document.getElementById("room").hidden = false;
+      add(`Welcome! ${numUsers} user(s) here.`, "log");
+      message.focus();
+    });
+    socket.on("new message", ({ username, message }) => add(`${username}: ${message}`));
+    socket.on("user joined", ({ username, numUsers }) => add(`${username} joined (${numUsers} here)`, "log"));
+    socket.on("user left", ({ username, numUsers }) => add(`${username} left (${numUsers} here)`, "log"));
+    socket.on("typing", ({ username }) => (typing.textContent = `${username} is typing…`));
+    socket.on("stop typing", () => (typing.textContent = ""));
+  </script>
+</body>
+</html>

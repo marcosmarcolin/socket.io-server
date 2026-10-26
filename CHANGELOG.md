@@ -6,7 +6,12 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- **The Admin UI's server side**: `AdminUi::instrument($io, ['auth' => ...])` lets the official [Socket.IO Admin UI](https://socket.io/docs/v4/admin-ui/), hosted or self-hosted, show the servers, sockets, rooms and events live and act on them, as the reference's `@socket.io/admin-ui` 0.5. A guide (`docs/admin-ui.md`) and an `admin-ui` example.
 - **Connection state recovery across processes, with sticky sessions:** with `ChannelAdapter` or `RedisAdapter`, each process keeps the sessions of its sockets and every recoverable broadcast, from any process, so a client that comes back to the process it left recovers, as with one process. Recoverable broadcasts then go through the namespace's channel.
+
+### Fixed
+
+- **Room event listeners survive `$io->adapter()`**: listeners added to a namespace's adapter before an adapter was set, often in `workerStart`, were lost with the old one.
 
 ## [0.4.0] - 2026-10-26
 
