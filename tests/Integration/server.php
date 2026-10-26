@@ -77,6 +77,10 @@ $io->on('connection', static function (Socket $socket) use ($io, &$lastConnectio
             $created[] = $packet->data;
         }
     });
+    // A big event, which a polling answer compresses unless told otherwise.
+    $socket->on('big', static function (int $size, bool $compress) use ($socket): void {
+        $socket->compress($compress)->emit('big', str_repeat('x', $size));
+    });
     $socket->on('say', static function (string $word) use ($socket): void {
         $socket->emit('said', $word);
     });

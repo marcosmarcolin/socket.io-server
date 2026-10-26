@@ -67,12 +67,12 @@ final class Client
      *
      * @param bool $volatile drop the packet if the transport can't take it right now
      */
-    public function packet(Packet $packet, bool $volatile = false): void
+    public function packet(Packet $packet, bool $volatile = false, bool $compress = true): void
     {
         if (! $this->isOpen()) {
             return;
         }
-        $this->write($this->server->encoder()->encode($packet), $volatile);
+        $this->write($this->server->encoder()->encode($packet), $volatile, $compress);
     }
 
     /**
@@ -80,13 +80,13 @@ final class Client
      *
      * @param list<string|Binary> $parts
      */
-    public function write(array $parts, bool $volatile = false): void
+    public function write(array $parts, bool $volatile = false, bool $compress = true): void
     {
         if (! $this->isOpen() || ($volatile && ! $this->conn->transport()->isWritable())) {
             return;
         }
         foreach ($parts as $part) {
-            $this->conn->send($part);
+            $this->conn->send($part, $compress);
         }
     }
 

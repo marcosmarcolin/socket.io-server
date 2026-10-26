@@ -26,6 +26,7 @@ final class ServerOptions
      *        false or a message refuses it with code 4 (Forbidden)
      * @param bool $allowUpgrades whether the handshake offers upgrades; without them, polling clients stay on polling
      * @param Cookie|null $cookie the cookie with the session id on the polling handshake, for sticky sessions
+     * @param int|null $httpCompression compress polling answers of at least this many bytes; null never does
      */
     public function __construct(
         public readonly int $pingInterval = 25_000,
@@ -38,6 +39,7 @@ final class ServerOptions
         public readonly ?Closure $allowRequest = null,
         public readonly bool $allowUpgrades = true,
         public readonly ?Cookie $cookie = null,
+        public readonly ?int $httpCompression = 1024,
     ) {
         self::assertPositive('pingInterval', $pingInterval);
         self::assertPositive('pingTimeout', $pingTimeout);
@@ -62,7 +64,16 @@ final class ServerOptions
      */
     public static function fromArray(array $options): self
     {
-        $known = [...self::INT_OPTIONS, 'path', 'cors', 'transports', 'allowRequest', 'allowUpgrades', 'cookie'];
+        $known = [
+            ...self::INT_OPTIONS,
+            'path',
+            'cors',
+            'transports',
+            'allowRequest',
+            'allowUpgrades',
+            'cookie',
+            'httpCompression',
+        ];
         foreach (array_keys($options) as $key) {
             if (! in_array($key, $known, true)) {
                 throw new InvalidArgumentException(sprintf('Unknown Engine.IO option "%s"', $key));
@@ -112,7 +123,25 @@ final class ServerOptions
             allowRequest: $allowRequest,
             allowUpgrades: $allowUpgrades,
             cookie: Cookie::fromOption($options['cookie'] ?? false),
+            httpCompression: self::httpCompression($options['httpCompression'] ?? true),
         );
+    }
+
+    /**
+     * The `httpCompression` option: true (1 KB threshold, the reference's default), false, or ['threshold' => n].
+     */
+    private static function httpCompression(mixed $option): ?int
+    {
+        if (is_bool($option)) {
+            return $option ? 1024 : null;
+        }
+        if (is_array($option) && array_keys($option) === ['threshold'] && is_int($option['threshold'])) {
+            return $option['threshold'] >= 0
+                ? $option['threshold']
+                : throw new InvalidArgumentException('The httpCompression "threshold" can\'t be negative');
+        }
+
+        throw new InvalidArgumentException('The "httpCompression" option must be a boolean or ["threshold" => bytes]');
     }
 
     private static function corsFromArray(mixed $cors): ?Cors

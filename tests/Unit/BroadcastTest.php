@@ -97,7 +97,7 @@ final class BroadcastTest extends TestCase
         $toA->emit('x');
 
         self::assertSame([1, 1, 0, 0], $this->counts('2["x"]'));
-        self::assertSame($toA, $toA->compress(false));
+        self::assertNotSame($toA, $toA->compress(false));
     }
 
     public function testBroadcastFromASocketLeavesItOut(): void

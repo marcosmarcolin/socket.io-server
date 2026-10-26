@@ -607,11 +607,15 @@ abstract class PubSubAdapter extends InMemoryAdapter
         $except = self::strings($value['except'] ?? null);
         $volatile = $value['volatile'] ?? null;
         $timeout = $value['timeout'] ?? null;
-        if ($rooms === null || $except === null || ! is_bool($volatile) || ($timeout !== null && ! is_int($timeout))) {
+        $compress = $value['compress'] ?? true;
+        if ($rooms === null || $except === null || ! is_bool($volatile) || ! is_bool($compress)) {
+            return null;
+        }
+        if ($timeout !== null && ! is_int($timeout)) {
             return null;
         }
 
-        return new BroadcastOptions($rooms, $except, $volatile, $timeout);
+        return new BroadcastOptions($rooms, $except, $volatile, $timeout, compress: $compress);
     }
 
 
