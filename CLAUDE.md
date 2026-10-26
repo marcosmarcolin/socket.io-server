@@ -80,11 +80,15 @@ tests/Integration/run.sh                       # the official socket.io-client a
 tests/Integration/run.sh multi-process         # the same over two processes and a channel server
 tests/Integration/run.sh multi-process-redis   # the same two processes, joined by a Redis server
 tests/Integration/run.sh examples              # every example in examples/, each against its test
+tests/Load/run.sh                              # the load test: 500 WebSocket clients on select()
+LOOP=event CLIENTS=10000 tests/Load/run.sh     # the same with the event extension, past select()'s 1,024
 ```
 
 The integration client (`tests/Integration/client/`) pins `socket.io-client` in `package.json`, and its `package-lock.json` is committed, so `npm ci` checks every package's integrity hash. Its tests use `node:test`, so the client is the only dependency. Each scenario runs over polling only, WebSocket only, and polling with the upgrade. To move to a newer client, regenerate the lockfile in Docker with `npm install --package-lock-only --ignore-scripts`, then read what changed.
 
 Both scripts share `tests/Compliance/suite.sh`, which downloads the suite at a pinned commit of `socketio/socket.io` into `.cache/`, checks each file against a SHA-256 checksum, and runs it with a pinned Node image that shares the server container's network. To move to a newer suite, update the commit and the checksums together, after reading what changed.
+
+The load test (`tests/Load/`) runs `server.php` in PHP and `load.mjs` with the integration client's pinned `socket.io-client` in Node. It measures the PHP heap and RSS per connection (from the server's `stats` event), the time to connect, acknowledgement round trips and broadcast deliveries per second. `LOOP=event` builds `tests/Load/Dockerfile`, the PHP image plus the `event` extension (loaded after `sockets`, by its `zz-event.ini`). Workerman without `event` uses `select()`, limited to 1,024 descriptors per process. CI runs a small load test so the script keeps working; the numbers in `docs/performance.md` come from local runs.
 
 ## Examples
 
@@ -104,6 +108,7 @@ User docs live in the README and in `docs/`, each in English (the reference) and
 | `docs/reverse-proxy.md` | nginx and HAProxy in front of the server: TLS, the upgrade headers, the read timeout, client addresses, and sticky sessions with one port per process | the `cookie` option, transports or anything a proxy must know changes; its configs were checked with nginx 1.27 and HAProxy 3.0 in Docker, and are checked again when they change |
 | `docs/multiple-processes.md` | `ChannelAdapter`, `RedisAdapter`, what crosses processes and the limits | an adapter or cross-process behavior changes |
 | `docs/migrating-from-phpsocket.io.md` | moving an app and its clients from phpsocket.io | a change affects how phpsocket.io code maps to ours |
+| `docs/performance.md` | what one process holds (memory per connection, echoes and broadcasts per second), the `event` extension, `memory_limit` and `ulimit`, and how to run the load test | a change could move the numbers (the connection objects, the write path, the encoders): rerun `tests/Load/run.sh` and update the table and its environment line |
 | `docs/development.md` | the Docker commands, the test suites, secret scanning | a test command, suite or tool changes |
 | `CHANGELOG.md` | every user-visible change, English only | always, under `[Unreleased]` |
 
