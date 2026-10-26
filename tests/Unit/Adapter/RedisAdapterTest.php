@@ -16,6 +16,9 @@ use Marcolin\SocketIO\Tests\Fake\SequentialSessionIdGenerator;
 use Marcolin\SocketIO\Tests\Fake\SequentialSocketIdGenerator;
 use Marcolin\SocketIO\Tests\Fake\SocketIOClient;
 use PHPUnit\Framework\TestCase;
+use ReflectionClass;
+use Workerman\Events\Swoole;
+use Workerman\Worker;
 
 /**
  * RedisAdapter shares its broadcasting with ChannelAdapter (see ChannelAdapterTest); these cover what differs.
@@ -66,6 +69,27 @@ final class RedisAdapterTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
 
         RedisAdapter::factory('http://127.0.0.1:6379');
+    }
+
+    public function testTheFactoryRefusesTlsOptionsWithoutRediss(): void
+    {
+        $this->expectExceptionObject(new InvalidArgumentException('TLS options need a rediss:// URL'));
+
+        RedisAdapter::factory('redis://127.0.0.1:6379', tls: ['cafile' => '/certs/ca.pem']);
+    }
+
+    public function testTheFactoryRefusesTlsOnSwoolesLoop(): void
+    {
+        // The loop object only, without its constructor, which needs the swoole extension.
+        Worker::$globalEvent = (new ReflectionClass(Swoole::class))->newInstanceWithoutConstructor();
+        try {
+            $this->expectException(LogicException::class);
+            $this->expectExceptionMessage('rediss:// on Swoole');
+
+            RedisAdapter::factory('rediss://127.0.0.1:6379');
+        } finally {
+            Worker::$globalEvent = null;
+        }
     }
 
     public function testTheFactoryNeedsTheEventLoop(): void

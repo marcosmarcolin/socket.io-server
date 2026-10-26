@@ -58,6 +58,54 @@ final class RedisUrlTest extends TestCase
         self::assertSame(['localhost', 6379], [$url->host, $url->port]);
     }
 
+    public function testAPlainUrlHasNoSslContext(): void
+    {
+        $url = RedisUrl::parse('redis://localhost');
+
+        self::assertFalse($url->tls);
+        self::assertNull($url->sslContext());
+    }
+
+    public function testRedissUsesTlsVerifyingTheHost(): void
+    {
+        $url = RedisUrl::parse('rediss://:s3cret@cache.internal:6380');
+
+        self::assertTrue($url->tls);
+        self::assertSame(['cache.internal', 6380, ['AUTH', 's3cret']], [$url->host, $url->port, $url->auth()]);
+        self::assertSame(['peer_name' => 'cache.internal'], $url->sslContext());
+    }
+
+    public function testThePeerNameOfAnIpv6HostHasNoBrackets(): void
+    {
+        self::assertSame(['peer_name' => '::1'], RedisUrl::parse('rediss://[::1]')->sslContext());
+    }
+
+    public function testTlsOptionsGoToTheSslContext(): void
+    {
+        $url = RedisUrl::parse('rediss://cache.internal')->withTlsOptions(['cafile' => '/certs/ca.pem']);
+
+        self::assertSame(['cafile' => '/certs/ca.pem', 'peer_name' => 'cache.internal'], $url->sslContext());
+    }
+
+    public function testTlsOptionsMayReplaceThePeerName(): void
+    {
+        $url = RedisUrl::parse('rediss://10.0.0.5')->withTlsOptions(['peer_name' => 'redis.internal']);
+
+        self::assertSame(['peer_name' => 'redis.internal'], $url->sslContext());
+    }
+
+    public function testTlsOptionsNeedRediss(): void
+    {
+        $this->expectExceptionObject(new InvalidArgumentException('TLS options need a rediss:// URL'));
+
+        RedisUrl::parse('redis://localhost')->withTlsOptions(['cafile' => '/certs/ca.pem']);
+    }
+
+    public function testNoTlsOptionsKeepAPlainUrl(): void
+    {
+        self::assertNull(RedisUrl::parse('redis://localhost')->withTlsOptions([])->sslContext());
+    }
+
     /**
      * @return iterable<string, array{string}>
      */
@@ -65,7 +113,7 @@ final class RedisUrlTest extends TestCase
     {
         yield 'no scheme' => ['127.0.0.1:6379'];
         yield 'another scheme' => ['tcp://127.0.0.1:6379'];
-        yield 'TLS, not supported' => ['rediss://127.0.0.1:6379'];
+        yield 'TLS without a host' => ['rediss://'];
         yield 'no host' => ['redis://'];
         yield 'a path that is not a database' => ['redis://localhost/cache'];
         yield 'a query' => ['redis://localhost?timeout=1'];

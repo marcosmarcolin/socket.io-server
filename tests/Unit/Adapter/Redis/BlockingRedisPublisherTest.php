@@ -135,6 +135,25 @@ final class BlockingRedisPublisherTest extends TestCase
         $publisher->publish('a', []);
     }
 
+    public function testAFailedTlsHandshakeSaysWhy(): void
+    {
+        // Accepts TCP connections in its backlog but never answers the TLS handshake.
+        $server = stream_socket_server('tcp://127.0.0.1:0');
+        self::assertIsResource($server);
+        $port = (int) substr((string) stream_socket_get_name($server, false), strlen('127.0.0.1:'));
+        $publisher = new BlockingRedisPublisher(RedisUrl::parse('rediss://127.0.0.1:' . $port), 0.3);
+
+        try {
+            $publisher->publish('a', []);
+            self::fail('The publish went through');
+        } catch (RuntimeException $error) {
+            self::assertStringStartsWith('Cannot connect to Redis at 127.0.0.1:' . $port . ': ', $error->getMessage());
+            self::assertStringContainsStringIgnoringCase('crypto', $error->getMessage());
+        } finally {
+            fclose($server);
+        }
+    }
+
     /**
      * A publisher whose every connection is a new socket pair; each entry of $replies is written ahead on the
      * next connection, and null closes it at once.

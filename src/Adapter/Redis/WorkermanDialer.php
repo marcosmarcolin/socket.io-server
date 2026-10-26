@@ -8,10 +8,17 @@ use Closure;
 use Workerman\Connection\AsyncTcpConnection;
 
 /**
- * TCP connections on Workerman's event loop.
+ * TCP connections on Workerman's event loop, with TLS when given an ssl context.
  */
 final class WorkermanDialer implements Dialer
 {
+    /**
+     * @param array<string, mixed>|null $ssl PHP's ssl stream context options, or null for plain TCP
+     */
+    public function __construct(private readonly ?array $ssl = null)
+    {
+    }
+
     public function dial(
         string $host,
         int $port,
@@ -20,7 +27,9 @@ final class WorkermanDialer implements Dialer
         Closure $onError,
         Closure $onClose,
     ): Link {
-        $connection = new AsyncTcpConnection('tcp://' . $host . ':' . $port);
+        $connection = $this->ssl === null
+            ? new AsyncTcpConnection('tcp://' . $host . ':' . $port)
+            : new AsyncTcpConnection('ssl://' . $host . ':' . $port, ['ssl' => $this->ssl]);
         $connection->onConnect = static function () use ($onOpen): void {
             $onOpen();
         };
