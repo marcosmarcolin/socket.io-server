@@ -77,6 +77,34 @@ Ele roda de forma síncrona no event loop, então mantenha-o rápido: uma verifi
 
 Um middleware faz o mesmo papel um passo depois, com a sessão já aberta: ele pode esperar trabalho assíncrono, e o seu `ConnectionError` chega ao cliente com mensagem e dados em qualquer transporte. Com `allowRequest`, o cliente só lê a mensagem no polling, em `err.context.responseText`; no WebSocket ele vê `websocket error`.
 
+## Eventos do engine
+
+`$io->engine` emite eventos sobre o lado HTTP de cada conexão, como o `io.engine` da referência:
+
+```php
+use Marcolin\SocketIO\Engine\Request;
+use Marcolin\SocketIO\Engine\ResponseHeaders;
+
+// The first answer of each session: the polling handshake, or the 101 of a WebSocket.
+$io->engine->on('initial_headers', function (ResponseHeaders $headers, Request $request): void {
+    $headers->append('Set-Cookie', 'lb=web-1; Path=/; HttpOnly');
+});
+
+// Every successful polling answer and every 101.
+$io->engine->on('headers', function (ResponseHeaders $headers, Request $request): void {
+    $headers->set('X-Served-By', gethostname());
+});
+
+// A refused request, such as an unknown session or a refusal from allowRequest.
+$io->engine->on('connection_error', function (Request $request, int $code, string $message): void {
+    Worker::log("refused {$request->uri}: $code $message");
+});
+```
+
+- `ResponseHeaders` tem `set()`, `append()` (uma linha por valor, como vários `Set-Cookie` precisam), `get()`, `remove()` e `all()`; os nomes não diferenciam maiúsculas, e um nome que não é um token de header ou um valor com quebra de linha lança exceção.
+- As respostas de erro e o preflight de CORS saem sem o evento `headers`.
+- O `code` do `connection_error` é o código de erro do Engine.IO (0 a 5) da resposta, e `message` a sua mensagem: a que o `allowRequest` devolveu, quando ele recusou.
+
 ## TLS
 
 Crie o worker com o certificado, marque-o como `ssl` e ligue-o:

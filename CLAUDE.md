@@ -132,6 +132,7 @@ src/
     ServerError.php             HTTP error codes and messages
     Rejection.php               a refused request: its ServerError and the message sent, which allowRequest may set
     Cors.php, CorsHttpExchange.php  CORS headers, added to every polling answer
+    ResponseHeaders.php, HeadersHttpExchange.php  the `initial_headers`/`headers` events on a session's answers
     Request.php                 an HTTP request: the session's handshake, or the one opening a WebSocket
     SessionIdGenerator.php, RandomSessionIdGenerator.php  20-character base64url session ids
     Socket.php                  session: state, heartbeat, upgrade, write buffer
@@ -201,6 +202,7 @@ src/
 - **Closing a WebSocket** sends a close frame with code 1000, then closes the TCP connection.
 - **Workerman 5 pitfalls:**
   - An exception inside `onWebSocketConnect` or `onWebSocketConnected` calls `Worker::stopAll(250)` and **kills the worker**. Never throw there: reject by closing the connection.
+  - The extra headers of a 101 go in `$connection->headers` inside `onWebSocketConnect`, as `"Name: value"` lines: `Websocket::dealHandshake()` writes them right after the callback. Workerman marks the property internal for HTTP, where `Http` consumes and clears it on each answer; on a connection that just upgraded, nothing reads it again.
   - Workerman calls `onWebSocketConnected` even when `onWebSocketConnect` already closed the connection, if the refusal is still in the send buffer (status `CLOSING`). `ServerBinding` skips a connection that is no longer established.
   - Workerman caches decoded packages by their raw bytes and may deliver a cached object without decoding again. Never keep state that depends on `decode()` running for every package, except the opcode, which is part of those bytes.
   - Workerman's files use `strict_types`, so `input()` must return an `int`.
@@ -263,6 +265,10 @@ src/
   - `'*'` with `credentials` throws: browsers reject that pair, and the `cors` package would send it anyway.
   - The preflight answers 204 with `GET, POST, OPTIONS` and echoes `Access-Control-Request-Headers`. With CORS disabled, `OPTIONS` is an ordinary request and gets code 2.
   - CORS doesn't cover WebSocket, in browsers or in the reference. `docs/configuration.md` shows the middleware that checks `Origin` on every transport.
+- **Engine events** on `Engine\Server` (`$io->engine`), as the reference's:
+  - `initial_headers` and `headers` get a mutable `ResponseHeaders` and the `Request`. `initial_headers` runs for a request without `sid` (the polling handshake, or a WebSocket that opens a session), then `headers` runs for it too. Over polling, `HeadersHttpExchange` runs them for each `200` answer of a session (the data and `ok` answers), not for errors or the CORS preflight. Over WebSocket, `ServerBinding` asks `Server::webSocketHeaders()` once `verifyWebSocket()` accepted, and writes the result into the 101.
+  - `ResponseHeaders` validates names (header tokens) and values (no CR, LF or NUL); `append()` keeps one line per value, for several `Set-Cookie`. `HttpExchange::respond()` takes `string|list<string>` values.
+  - `connection_error` gets `(Request, int $code, string $message)` for every request `verify()` refuses, over HTTP (`reject()`) or before a 101 (`verifyWebSocket()`), with the message `allowRequest` returned. The reference passes one object with a `context` we don't build.
 
 ### Socket.IO
 
@@ -351,7 +357,7 @@ $io->on('connection', function (Socket $socket) use ($io): void {
 Worker::runAll();
 ```
 
-- `SocketIO`: `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- `SocketIO`: `$io->engine` (its `initial_headers`, `headers` and `connection_error` events), `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
 - **`close()`**, as the reference's:
   1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
   2. each adapter's `close()` runs (`PubSubAdapter` unsubscribes from its channels);

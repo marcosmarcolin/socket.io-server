@@ -9,6 +9,7 @@
 | `new SocketIO(?int $port = null, array $options = [])` | With a port, it listens on `tcp://0.0.0.0:<port>`. Without one, call `attach()`. |
 | `attach(Worker $worker)` | Serves the server on your own `tcp` or `ssl` worker, for another address, several processes or TLS. Call it before `Worker::runAll()`. |
 | `$io->worker` | The attached worker, or `null`. |
+| `$io->engine` | The Engine.IO server, with the `initial_headers`, `headers` and `connection_error` events; see [Engine events](configuration.md#engine-events). |
 | `of(string $name): Nsp` | The namespace with that name, created on first use. |
 | `$io->sockets` | The main namespace, `/`. |
 | `on('connection', fn (Socket $socket))` | The main namespace's `connection` event; any other event but `workerStart` and `workerStop` is the main namespace's too, as with `serverSideEmit()`. |

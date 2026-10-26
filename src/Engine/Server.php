@@ -16,8 +16,14 @@ use Marcolin\SocketIO\Event\Emitter;
  *
  * It knows nothing about Workerman; the network side calls handleRequest() and handleWebSocket().
  *
- * Events:
- * - `connection` (Socket): a session was opened.
+ * Events, as in the reference:
+ * - `connection` (Socket): a session was opened;
+ * - `initial_headers` (ResponseHeaders, Request): the headers of a session's first answer, the handshake over
+ *   polling or the 101 of a WebSocket without sid, which listeners may change, such as to set a cookie;
+ * - `headers` (ResponseHeaders, Request): the same for every successful polling answer and every 101, after
+ *   `initial_headers`;
+ * - `connection_error` (Request, int $code, string $message): a request refused, with its Engine.IO error code
+ *   and the message sent to the client.
  */
 final class Server extends Emitter
 {
@@ -63,6 +69,7 @@ final class Server extends Emitter
 
             return;
         }
+        $exchange = new HeadersHttpExchange($exchange, $this->prepareHeaders(...));
 
         $sid = $exchange->query('sid');
         if ($sid !== null) {
@@ -91,7 +98,25 @@ final class Server extends Emitter
      */
     public function verifyWebSocket(Request $request): ?Rejection
     {
-        return $this->verifyWebSocketRequest($request, true);
+        $rejection = $this->verifyWebSocketRequest($request, true);
+        if ($rejection !== null) {
+            $this->dispatch('connection_error', $request, $rejection->error->value, $rejection->message);
+        }
+
+        return $rejection;
+    }
+
+    /**
+     * The extra headers of the 101 that accepts a WebSocket, from the `initial_headers` and `headers` listeners.
+     *
+     * @return array<string, string|list<string>>
+     */
+    public function webSocketHeaders(Request $request): array
+    {
+        $headers = new ResponseHeaders();
+        $this->prepareHeaders($headers, $request);
+
+        return $headers->all();
     }
 
     /**
@@ -210,7 +235,16 @@ final class Server extends Emitter
 
     private function reject(HttpExchange $exchange, Rejection $rejection): void
     {
+        $this->dispatch('connection_error', $exchange->request(), $rejection->error->value, $rejection->message);
         $exchange->respond($rejection->httpStatus(), $rejection->body(), ['Content-Type' => 'application/json']);
+    }
+
+    private function prepareHeaders(ResponseHeaders $headers, Request $request): void
+    {
+        if ($request->query('sid') === null) {
+            $this->dispatch('initial_headers', $headers, $request);
+        }
+        $this->dispatch('headers', $headers, $request);
     }
 
     private function open(Transport $transport, Request $request): Socket
