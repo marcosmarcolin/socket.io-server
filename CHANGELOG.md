@@ -4,33 +4,48 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-26
+
+Connection state recovery, engine middlewares and the rest of the reference's server API; compression, a debug log, Redis over TLS and Swoole's event loop; less memory per connection, measured against the reference Node.js server.
+
 ### Added
 
+#### Recovery and compatibility with the reference
+
+- **Connection state recovery**, as the reference's `connectionStateRecovery` option: a client whose connection dropped and that reconnects within `maxDisconnectionDuration` (2 minutes by default) gets back its socket id, rooms, `data`, and the events it missed; `$socket->recovered` says so. With the default adapter only.
 - **Engine middlewares**, as the reference's `engine.use()`: `$io->engine->use(fn (Request $request, Closure $next) => ...)` runs for every HTTP request, polling ones and the one that opens a WebSocket, and `$next($error)` refuses it with code 3. What a middleware puts in `$request->attributes` stays on `$socket->request`.
 - **The rest of the reference's server API:** `$io->engine->clientsCount()`, `$socket->conn->protocol` (always 4) and `$socket->client->request`. The guide documents custom session ids, the reference's `engine.generateId`, through a `SessionIdGenerator`.
-- **Connection state recovery**, as the reference's `connectionStateRecovery` option: a client whose connection dropped and that reconnects within `maxDisconnectionDuration` (2 minutes by default) gets back its socket id, rooms, `data`, and the events it missed; `$socket->recovered` says so. With the default adapter only.
-- **Redis over TLS**: `RedisAdapter` and the `Emitter` accept `rediss://` URLs, checking the server's certificate, and a `tls` argument with PHP's ssl context options (a private authority, a client certificate), for managed Redis services that require TLS. On Swoole's event loop the adapter refuses `rediss://`, since Workerman's TLS client connections hang there.
-- **A load test and the guide "Performance and limits"** (`docs/performance.md`): about 24 KB per WebSocket connection, 10,000 clients in one process, and what it takes past 1,000 connections (the `event` extension, `memory_limit`, `ulimit`). `tests/Load/run.sh` measures it on any machine.
-- **A comparison with the reference Node.js server** in `docs/performance.md`: the same load test against `socket.io` 4.8.4 (`SERVER=node tests/Load/run.sh`). This server uses less memory and answers acknowledgements on par up to 1,000 clients; Node delivers broadcasts 1.3 to 2.4 times as fast. The guide also lists the machine and versions measured.
-- **Swoole's event loop is supported and tested**: with `Worker::$eventLoopClass = Swoole::class`, the official suites and the integration tests pass, and CI runs them on it. `docs/performance.md` measures it against `event`: it isn't faster. The test scripts take `LOOP=select|event|swoole`.
-- **A compatibility section in the README**: the protocols, the clients tested, and the official compliance suites.
 - **The `new_namespace` event**: `$io->on('new_namespace', fn (Nsp $nsp) => ...)` runs when a namespace other than `/` is created, as in the reference, such as to give every namespace a middleware.
 - **The reference's listener methods**: `eventNames()`, `removeListener()` and `removeAllListeners()` on every emitter, and `once()`, `off()` and `listeners()` on `SocketIO` reach the main namespace, as `on()` does.
 - **`maxHttpBufferSize`**, the reference's name, as an alias of the `maxPayload` option.
-- **The `logger` option**: a `Closure(string $scope, string $message)` that gets a debug log of each connection's life, in the reference's `debug` scopes (`engine`, `engine:socket`, `socket.io:client`, `socket.io:socket`, `socket.io:adapter`).
-- **WebSocket compression**: `'perMessageDeflate' => true` deflates WebSocket messages of 1 KB or more when the client offers permessage-deflate, as the reference's option; off by default, as in the reference.
-- **HTTP compression**, as the reference's `httpCompression`, on by default: polling answers of 1 KB or more are compressed with gzip or deflate when the client accepts them. `compress(false)` on an emit or a broadcast now keeps it plain, instead of doing nothing.
 - **The `packetCreate` session event**: `$socket->conn->on('packetCreate', fn (Packet $packet) => ...)` sees each message and ping the server writes, before it is buffered, as in the reference.
 - **Adapter room events**, as the reference's adapter: `$nsp->adapter()->on('create-room' | 'delete-room' | 'join-room' | 'leave-room', ...)` reports when the rooms of the current process change, with any adapter.
 
+#### Compression, debugging and event loops
+
+- **WebSocket compression**: `'perMessageDeflate' => true` deflates WebSocket messages of 1 KB or more when the client offers permessage-deflate, as the reference's option; off by default, as in the reference.
+- **HTTP compression**, as the reference's `httpCompression`, on by default: polling answers of 1 KB or more are compressed with gzip or deflate when the client accepts them. `compress(false)` on an emit or a broadcast now keeps it plain, instead of doing nothing.
+- **The `logger` option**: a `Closure(string $scope, string $message)` that gets a debug log of each connection's life, in the reference's `debug` scopes (`engine`, `engine:socket`, `socket.io:client`, `socket.io:socket`, `socket.io:adapter`).
+- **Swoole's event loop is supported and tested**: with `Worker::$eventLoopClass = Swoole::class`, the official suites and the integration tests pass, and CI runs them on it. `docs/performance.md` measures it against `event`: it isn't faster. The test scripts take `LOOP=select|event|swoole`.
+
+#### Several processes
+
+- **Redis over TLS**: `RedisAdapter` and the `Emitter` accept `rediss://` URLs, checking the server's certificate, and a `tls` argument with PHP's ssl context options (a private authority, a client certificate), for managed Redis services that require TLS. On Swoole's event loop the adapter refuses `rediss://`, since Workerman's TLS client connections hang there.
+
+#### Performance and docs
+
+- **A load test and the guide "Performance and limits"** (`docs/performance.md`): about 24 KB per WebSocket connection, 10,000 clients in one process, and what it takes past 1,000 connections (the `event` extension, `memory_limit`, `ulimit`). `tests/Load/run.sh` measures it on any machine.
+- **A comparison with the reference Node.js server** in `docs/performance.md`: the same load test against `socket.io` 4.8.4 (`SERVER=node tests/Load/run.sh`). This server uses less memory and answers acknowledgements on par up to 1,000 clients; Node delivers broadcasts 1.3 to 2.4 times as fast. The guide also lists the machine and versions measured.
+- **A compatibility section in the README**: the protocols, the clients tested, and the official compliance suites.
+
 ### Changed
 
-- `Engine\Server::sessionCount()` is now `clientsCount()`, the reference's name.
-- **For custom adapters:** the `Adapter` interface has `persistSession()` and `restoreSession()`, for connection state recovery. Adapters that extend `InMemoryAdapter` get them; ones that implement the interface directly must add them (doing nothing and returning null opts out).
 - **Less memory per connection**: event listeners are stored in flat arrays per emitter, instead of an array per listener, which takes a WebSocket connection from about 30 KB to 24 KB and raises acknowledgements per second by about 10%.
 - **Polling answers of 1 KB or more are compressed by default**, as in the reference, when the client sends `Accept-Encoding`. `'httpCompression' => false` keeps them plain.
-- **For custom schedulers:** the `Scheduler` interface has `now()`, a monotonic clock in milliseconds.
+- `Engine\Server::sessionCount()` is now `clientsCount()`, the reference's name.
 - **For custom adapters:** the `Adapter` interface has `on()` and `off()`, for the room events. `InMemoryAdapter` now extends the package's event emitter, so adapters that extend it get them; ones that implement the interface directly must add them.
+- **For custom adapters:** the `Adapter` interface has `persistSession()` and `restoreSession()`, for connection state recovery. Adapters that extend `InMemoryAdapter` get them; ones that implement the interface directly must add them (doing nothing and returning null opts out).
+- **For custom schedulers:** the `Scheduler` interface has `now()`, a monotonic clock in milliseconds.
 
 ### Removed
 
@@ -133,7 +148,8 @@ The first release.
 - Across processes, only broadcasts travel; the socket helpers (`fetchSockets`, `socketsJoin`...) act on the current process.
 - With several processes on one port, clients must use `transports: ['websocket']`.
 
-[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/marcosmarcolin/socket.io-server/releases/tag/v0.1.0
