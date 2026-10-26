@@ -13,7 +13,9 @@ php_server() {
         # shellcheck disable=SC2086 # one word per option; the values have no spaces
         docker compose run -d --rm $envs php php "$@"
     else
-        docker build -q -t socket-io-load "$root/tests/Load" >/dev/null
+        # Quiet, but the build's log goes to stderr when it fails.
+        build_log=$(docker build --progress=plain -t socket-io-load "$root/tests/Load" 2>&1) \
+            || { echo "$build_log" | tail -60 >&2; return 1; }
         # shellcheck disable=SC2086
         docker run -d --rm --ulimit nofile=65536:65536 -v "$root:/app" -w /app $envs -e LOOP="$LOOP" socket-io-load \
             php -d auto_prepend_file=tests/event-loop.php "$@"
