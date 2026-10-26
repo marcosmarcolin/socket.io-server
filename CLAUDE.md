@@ -302,9 +302,9 @@ src/
   - With `timeout()`, the callback gets `null` and the answer, or a `TimeoutException` ("operation has timed out"). In that case, its other required parameters get `null`, so `function (?Throwable $err, $answer)` works.
   - **Broadcast acks**, as the reference's `BroadcastOperator::emit()`:
     - a broadcast takes a callback only after `timeout()`; without it, it throws (the reference fires at once);
-    - one ack id from the namespace's counter serves every socket reached;
-    - the adapter's `broadcastWithAck()` reports how many sockets it reached, and each answer counts once, with its first argument;
-    - the callback gets `null` and the answers in arrival order once all arrived (at once with `[]` when none was reached), or a `TimeoutException` and the answers so far, after which every socket of the namespace forgets the id;
+    - one ack id from the namespace's counter serves every socket reached in the process;
+    - each server's `broadcastWithAck()` reports how many sockets it reached, and each answer counts once, with its first argument; `AckCollector` waits for `serverCount()` reports;
+    - the callback gets `null` and the answers in arrival order once every server reported and all answered (at once with `[]` when none was reached), or a `TimeoutException` and the answers so far, after which every socket of the namespace forgets the id;
     - a `volatile` packet dropped for a busy transport still counts, so the wait ends with the timeout.
 - **Catch-all listeners**, as in the reference:
   - `onAny`/`prependAny`/`offAny`/`listenersAny` get each received event of a connected socket as `(string $event, ...$args)`, with the ack `Closure` last, before the event's own listeners; those are skipped if an `onAny` listener disconnected the socket. Numeric event names arrive as strings, as with `on()`.
@@ -391,8 +391,9 @@ Worker::runAll();
   - **`socketsJoin`, `socketsLeave`, `disconnectSockets`** publish `SocketsJoin`/`SocketsLeave`/`DisconnectSockets` with their options (to the room channel for a single room, as broadcasts), then apply locally; each other server applies them to its own sockets.
   - **`serverSideEmit([$event, ...$args, ?$ack])`** publishes the event encoded as an `EVENT` packet, so its data follows `emit()`'s rules. Receivers dispatch it on the namespace (`Nsp::receiveServerSideEmit()`), with an ack `Closure` last when asked; it answers once, with its first argument encoded as an `ACK` packet. Without other servers, the ack runs at once with `[]`. `connect`, `connection` and `new_namespace` are reserved, as in the reference: sending one throws, receiving one is ignored. `InMemoryAdapter::serverSideEmit()` throws (the reference only warns).
   - **`fetchSockets(Closure)`** (`Adapter::fetchClusterSockets()`): PHP has no promises, so `fetchSockets()` without arguments stays synchronous and local, and with a callback it asks every server. `FetchSockets` always goes to the namespace channel, never a room's, since every counted server must answer. Each server answers with `id`, `rooms`, and `handshake` and `data` as JSON strings (objects become arrays, what can't be encoded becomes null), so the message holds only scalars. The callback gets `(?TimeoutException, list<Socket|RemoteSocket>)`: this process's `Socket` objects first, then a `RemoteSocket` per socket elsewhere; on a timeout, the sockets so far (the reference rejects without them). A response with any malformed entry is ignored. `InMemoryAdapter` calls back at once with its sockets.
-  - **`RemoteSocket`**: `id`, `handshake`, `rooms`, `data`, and `emit()`, `join()`, `leave()`, `disconnect()`, each through `$nsp->to($id)`/`in($id)`, so through the adapter. No `timeout()` or ack until broadcast acks cross processes.
-  - **Not yet:** `allSockets` reads the local process, and broadcasts with an ack throw in `PubSubAdapter`, naming the adapter. Next: broadcast acks with the client counts per server.
+  - **`RemoteSocket`**: `id`, `handshake`, `rooms`, `data`, and `emit()`, `join()`, `leave()`, `disconnect()`, each through `$nsp->to($id)`/`in($id)`, so through the adapter. `timeout()` returns a copy whose `emit()` takes a callback getting `(?Throwable, mixed $answer)`, one answer instead of a list, as the reference's `expectSingleResponse`; a callback without `timeout()` throws.
+  - **Broadcast acks:** `BroadcastOptions` carries the `timeout`. `PubSubAdapter::broadcastWithAck()` publishes the packet with a `requestId` to the namespace channel (never a room's: every counted server must report), then delivers locally. Each other server decodes it, sends it under an ack id of its own namespace, and answers on the requester's response channel with `BroadcastClientCount`, then one `BroadcastAck` per answer (its first argument, as an `ACK` packet). Both sides drop the request after the timeout: the requester forgets the `requestId`, the others make their sockets forget the ack id. A server that never reports (gone without `AdapterClose`) makes the wait end with the timeout.
+  - **Not yet:** `allSockets` reads the local process (it is deprecated in the reference).
 - **Setup:** in `workerStart`, call `$io->adapter(ChannelAdapter::factory($host, $port))` with a `Channel\Server` worker running, or `$io->adapter(RedisAdapter::factory($url, $key, $onError))`. `PubSub` is the seam that keeps the static `Channel\Client` and the Redis connections out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
 - **`RedisAdapter`** has its own client, on Workerman's `AsyncTcpConnection`, so it adds no dependency. `workerman/redis` doesn't fit: after its first `SUBSCRIBE` it sends no other command, so rooms couldn't subscribe or unsubscribe, and it prints errors with `echo`.
   - `factory()` arguments, all optional: `url` (`redis://127.0.0.1:6379`), `key` (`socket.io`; apps sharing one Redis need different keys), and `onError` (`Worker::log` by default). An invalid URL throws `InvalidArgumentException` before the event loop check; the message never includes the URL, which may hold a password.
@@ -404,7 +405,7 @@ Worker::runAll();
 - With several processes on the same port, clients must use `transports: ['websocket']`, because polling breaks across processes without sticky sessions. `docs/multiple-processes.md` says so.
 - **Multi-process tests** (`tests/Integration/multi-process-server.php`): two processes with `reusePort`, so the kernel spreads connections, plus a `Channel\Server`; or, with `ADAPTER=redis` (`run.sh multi-process-redis`), `RedisAdapter` on a pinned Redis image with a password, so the login is covered too. The `redis` example runs against the same Redis.
   - The tests first make sure clients landed on both processes, and that a broadcast crosses (retrying while the workers connect to the broker).
-  - They cover emits, rooms, several rooms at once, `except`, `broadcast`, `socketsJoin`/`socketsLeave`, `disconnectSockets`, `serverSideEmit` with an ack, and `fetchSockets` with a callback plus `RemoteSocket::emit()` across processes.
+  - They cover emits, rooms, several rooms at once, `except`, `broadcast`, `socketsJoin`/`socketsLeave`, `disconnectSockets`, `serverSideEmit` with an ack, and `fetchSockets` with a callback plus `RemoteSocket::emit()`, broadcasts with an ack, and a `RemoteSocket` ack across processes.
   - The **scale check** has 200 WebSocket clients get 20 broadcasts each: every client must get every message once and in order, and the time is printed. It catches loss and duplication, not performance.
 
 ## Roadmap
@@ -420,7 +421,7 @@ Worker::runAll();
 9. [x] Complete README, examples, and a migration guide from phpsocket.io 3.x.
 10. [x] First release, `v0.1.0`, on Packagist; the READMEs install with `composer require` and show its badges (version, downloads, PHP version).
 11. [x] `RedisAdapter`, with its own Redis client, the multi-process tests on Redis and an example.
-12. [ ] The reference's cluster protocol on `PubSub`, for both adapters:
+12. [x] The reference's cluster protocol on `PubSub`, for both adapters:
     - [x] heartbeats and server count, `socketsJoin`/`socketsLeave`, `disconnectSockets` and `serverSideEmit` across processes;
     - [x] `fetchSockets(Closure)` across processes, with `RemoteSocket`;
-    - [ ] broadcast acks across processes.
+    - [x] broadcast acks across processes, and acks on `RemoteSocket`.

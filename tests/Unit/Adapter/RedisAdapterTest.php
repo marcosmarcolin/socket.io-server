@@ -61,17 +61,6 @@ final class RedisAdapterTest extends TestCase
         self::assertSame([], $client->received());
     }
 
-    public function testRefusesABroadcastWithAcknowledgementByName(): void
-    {
-        $io = $this->process(new FakeChannelBroker(), 'A', 'socket.io');
-
-        $this->expectException(LogicException::class);
-        $this->expectExceptionMessage('RedisAdapter doesn\'t support broadcasting with an acknowledgement yet');
-
-        $io->timeout(1000)->emit('ask', static function (): void {
-        });
-    }
-
     public function testTheFactoryChecksTheUrlFirst(): void
     {
         $this->expectException(InvalidArgumentException::class);

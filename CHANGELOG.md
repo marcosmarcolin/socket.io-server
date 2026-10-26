@@ -10,8 +10,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - **The `redis` example**: four processes joined by Redis.
 - **The cluster protocol** in `ChannelAdapter` and `RedisAdapter`, as the reference's `ClusterAdapterWithHeartbeat`: servers count each other with heartbeats, and `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` now apply on every server.
 - **`serverSideEmit()`** on `SocketIO` and `Nsp`: events between servers, received with `on()`, with an optional callback that gets one response per other server or a `TimeoutException` after 5 seconds.
+- **Broadcasts with an acknowledgement cross processes** in `ChannelAdapter` and `RedisAdapter`: the callback of `$io->timeout(5000)->emit('ask', $callback)` gets the answers of the sockets of every server. They used to throw.
+- **`RemoteSocket::timeout()`**: `$remote->timeout(5000)->emit('ask', fn (?Throwable $error, mixed $answer) => ...)` gets the socket's answer, as `Socket::timeout()` does.
 - **`fetchSockets()` with a callback** reaches every server: `$io->in('room')->fetchSockets(fn (?Throwable $error, array $sockets) => ...)` gets this process's `Socket` objects and a `RemoteSocket` (`id`, `handshake`, `rooms`, `data`, `emit()`, `join()`, `leave()`, `disconnect()`) for each socket elsewhere, or a `TimeoutException` with the sockets so far. Without a callback, `fetchSockets()` still returns this process's sockets at once.
-- **`Adapter::fetchClusterSockets()`**, `Adapter::serverCount()` and `Adapter::serverSideEmit()`; `InMemoryAdapter` counts one server, answers `fetchClusterSockets()` at once with its own sockets, and throws on `serverSideEmit()`.
+- **`BroadcastOptions::$timeout`**, `Adapter::fetchClusterSockets()`, `Adapter::serverCount()` and `Adapter::serverSideEmit()`; `InMemoryAdapter` counts one server, answers `fetchClusterSockets()` at once with its own sockets, and throws on `serverSideEmit()`.
 - **The `dashboard` example**: live dashboards, where a timer started in `workerStart` pushes new numbers every few seconds to the viewers of each dashboard, as a room.
 
 ### Changed

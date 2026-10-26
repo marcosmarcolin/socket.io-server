@@ -285,17 +285,6 @@ final class ChannelAdapterTest extends TestCase
         self::assertSame(0, $seen);
     }
 
-    public function testRefusesABroadcastWithAcknowledgement(): void
-    {
-        $this->connect('A');
-
-        $this->expectException(LogicException::class);
-        $this->expectExceptionMessage('acknowledgement');
-
-        $this->processes['A']->timeout(1000)->emit('ask', static function (): void {
-        });
-    }
-
     public function testTheFactoryNeedsTheEventLoop(): void
     {
         $this->expectException(LogicException::class);

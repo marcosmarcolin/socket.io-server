@@ -92,6 +92,21 @@ $io->on('connection', static function (Socket $socket) use ($io): void {
             }
         });
     });
+    // Asks every client, on every process, for its pid.
+    $socket->on('ask-all', static function (Closure $ack) use ($io): void {
+        $io->timeout(3000)->emit('question', static function (?Throwable $error, array $answers) use ($ack): void {
+            $ack(['error' => $error?->getMessage(), 'answers' => $answers]);
+        });
+    });
+    // Asks one socket, found with fetchSockets() wherever it is.
+    $socket->on('ask-one', static function (string $socketId, Closure $ack) use ($io): void {
+        $io->in($socketId)->fetchSockets(static function (?Throwable $error, array $sockets) use ($ack): void {
+            $reply = static function (?Throwable $error, mixed $answer) use ($ack): void {
+                $ack(['error' => $error?->getMessage(), 'answer' => $answer]);
+            };
+            $sockets[0]->timeout(3000)->emit('question', $reply);
+        });
+    });
     // Asks the other processes for their pid.
     $socket->on('servers', static function (Closure $ack) use ($io): void {
         $io->serverSideEmit('pid', static function (?Throwable $error, array $pids) use ($ack): void {
