@@ -229,6 +229,44 @@ final class SocketIO extends Emitter
     }
 
     /**
+     * The sockets of the main namespace; see BroadcastOperator::fetchSockets() for the callback, which reaches
+     * every server.
+     *
+     * @param (Closure(?\Throwable, list<Socket|RemoteSocket>): void)|null $callback
+     * @return ($callback is null ? list<Socket> : null)
+     */
+    public function fetchSockets(?Closure $callback = null): ?array
+    {
+        return $this->sockets->fetchSockets($callback);
+    }
+
+    /**
+     * Makes every socket of the main namespace join the rooms; use to() first to pick some.
+     *
+     * @param string|list<string> $rooms
+     */
+    public function socketsJoin(string|array $rooms): void
+    {
+        $this->sockets->socketsJoin($rooms);
+    }
+
+    /**
+     * @param string|list<string> $rooms
+     */
+    public function socketsLeave(string|array $rooms): void
+    {
+        $this->sockets->socketsLeave($rooms);
+    }
+
+    /**
+     * Disconnects every socket of the main namespace; with $close, closes their connections.
+     */
+    public function disconnectSockets(bool $close = false): void
+    {
+        $this->sockets->disconnectSockets($close);
+    }
+
+    /**
      * Sends a `message` event to every socket of the main namespace.
      */
     public function send(mixed ...$args): static
