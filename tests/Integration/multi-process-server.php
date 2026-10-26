@@ -23,6 +23,8 @@ require __DIR__ . '/../../vendor/autoload.php';
 const PROCESSES = 2;
 
 $redisUrl = getenv('ADAPTER') === 'redis' ? (string) getenv('REDIS_URL') : null;
+// The authority of the TLS-only Redis, for rediss:// URLs.
+$redisTls = (string) getenv('REDIS_TLS_CA') === '' ? [] : ['cafile' => (string) getenv('REDIS_TLS_CA')];
 if ($redisUrl === null) {
     new ChannelServer('127.0.0.1', 2206);
 }
@@ -30,9 +32,11 @@ if ($redisUrl === null) {
 $io = new SocketIO(options: ['pingInterval' => 5000, 'pingTimeout' => 5000]);
 
 // The broker connection needs each process's event loop, so the adapter is set when the process starts.
-$io->on('workerStart', static function () use ($io, $redisUrl): void {
+$io->on('workerStart', static function () use ($io, $redisUrl, $redisTls): void {
     $io->adapter(
-        $redisUrl === null ? ChannelAdapter::factory('127.0.0.1', 2206) : RedisAdapter::factory($redisUrl),
+        $redisUrl === null
+            ? ChannelAdapter::factory('127.0.0.1', 2206)
+            : RedisAdapter::factory($redisUrl, tls: $redisTls),
     );
 });
 

@@ -98,14 +98,27 @@ final class BlockingRedisPublisher implements Publisher
      */
     private function dial()
     {
-        $address = 'tcp://' . $this->url->host . ':' . $this->url->port;
-        $stream = @stream_socket_client($address, $code, $message, $this->timeout);
+        $ssl = $this->url->sslContext();
+        $address = ($ssl === null ? 'tcp://' : 'tls://') . $this->url->host . ':' . $this->url->port;
+        $context = stream_context_create($ssl === null ? [] : ['ssl' => $ssl]);
+        // A failed TLS handshake leaves $message empty and says why only in warnings.
+        $warnings = [];
+        set_error_handler(static function (int $type, string $warning) use (&$warnings): bool {
+            $warnings[] = preg_replace('/^stream_socket_client\(\): /', '', $warning);
+
+            return true;
+        });
+        try {
+            $stream = stream_socket_client($address, $code, $message, $this->timeout, STREAM_CLIENT_CONNECT, $context);
+        } finally {
+            restore_error_handler();
+        }
         if ($stream === false) {
             throw new RuntimeException(sprintf(
                 'Cannot connect to Redis at %s:%d: %s',
                 $this->url->host,
                 $this->url->port,
-                $message,
+                $message !== '' ? $message : implode(' ', $warnings),
             ));
         }
 

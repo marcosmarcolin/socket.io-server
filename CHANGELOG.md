@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- **Redis over TLS**: `RedisAdapter` and the `Emitter` accept `rediss://` URLs, checking the server's certificate, and a `tls` argument with PHP's ssl context options (a private authority, a client certificate), for managed Redis services that require TLS. On Swoole's event loop the adapter refuses `rediss://`, since Workerman's TLS client connections hang there.
 - **A load test and the guide "Performance and limits"** (`docs/performance.md`): about 24 KB per WebSocket connection, 10,000 clients in one process, and what it takes past 1,000 connections (the `event` extension, `memory_limit`, `ulimit`). `tests/Load/run.sh` measures it on any machine.
 - **A comparison with the reference Node.js server** in `docs/performance.md`: the same load test against `socket.io` 4.8.4 (`SERVER=node tests/Load/run.sh`). This server uses less memory and answers acknowledgements on par up to 1,000 clients; Node delivers broadcasts 1.3 to 2.4 times as fast. The guide also lists the machine and versions measured.
 - **Swoole's event loop is supported and tested**: with `Worker::$eventLoopClass = Swoole::class`, the official suites and the integration tests pass, and CI runs them on it. `docs/performance.md` measures it against `event`: it isn't faster. The test scripts take `LOOP=select|event|swoole`.
