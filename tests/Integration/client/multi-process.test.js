@@ -220,6 +220,16 @@ describe("multiple processes", () => {
     assert.deepEqual(await a1.emitWithAck("ask-one", b1.id), { error: null, answer: b1.pid });
   });
 
+  test("a local broadcast stays in the sender's process", TIMEOUT, async () => {
+    const [[a1, a2], [b1, b2]] = [...byProcess.values()];
+    const got = [a1, a2, b1, b2].map((socket) => record(socket, "local-message"));
+
+    a1.emit("everyone-here", "only here");
+    await sleep(300);
+
+    assert.deepEqual(got.map((messages) => messages.length), [1, 1, 0, 0]);
+  });
+
   test("scale: 200 clients get 20 broadcasts each, once and in order", { timeout: 60_000 }, async () => {
     const CLIENTS = 200;
     const MESSAGES = 20;

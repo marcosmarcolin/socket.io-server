@@ -47,6 +47,9 @@ $io->on('connection', static function (Socket $socket) use ($io): void {
     $socket->on('everyone', static function (string $message) use ($io): void {
         $io->emit('everyone', $message);
     });
+    $socket->on('everyone-here', static function (string $message) use ($io): void {
+        $io->local->emit('local-message', $message);
+    });
     $socket->on('to-rooms', static function (array $rooms, string $message) use ($io): void {
         $io->to(array_values(array_filter($rooms, 'is_string')))->emit('room-message', $message);
     });

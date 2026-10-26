@@ -29,6 +29,7 @@ use Workerman\Worker;
  * serverSideEmit(); only the server's own events, `workerStart` and `workerStop` (Worker), stay here.
  *
  * @property-read BroadcastOperator $volatile broadcasts that skip sockets whose transport is busy
+ * @property-read BroadcastOperator $local broadcasts and socket helpers on the main namespace, for this process only
  * @property-read Worker|null $worker the Workerman worker serving it, once attached
  */
 final class SocketIO extends Emitter
@@ -239,6 +240,7 @@ final class SocketIO extends Emitter
     {
         return match ($name) {
             'volatile' => $this->sockets->volatile,
+            'local' => $this->sockets->local,
             'worker' => $this->attachedWorker,
             default => throw new LogicException(sprintf('Undefined property %s::$%s', self::class, $name)),
         };

@@ -18,6 +18,7 @@ use Throwable;
  * Broadcasts and the socket helpers go through the namespace's adapter, which may reach other processes.
  *
  * @property-read BroadcastOperator $volatile the same selection, skipping sockets whose transport is busy
+ * @property-read BroadcastOperator $local the same selection, in this process only: the adapter reaches no other
  */
 final class BroadcastOperator
 {
@@ -32,16 +33,17 @@ final class BroadcastOperator
         private readonly array $except = [],
         private readonly bool $volatile = false,
         private readonly ?int $timeout = null,
+        private readonly bool $local = false,
     ) {
     }
 
     public function __get(string $name): self
     {
-        if ($name !== 'volatile') {
-            throw new LogicException(sprintf('Undefined property %s::$%s', self::class, $name));
-        }
-
-        return new self($this->nsp, $this->rooms, $this->except, true, $this->timeout);
+        return match ($name) {
+            'volatile' => $this->with(volatile: true),
+            'local' => $this->with(local: true),
+            default => throw new LogicException(sprintf('Undefined property %s::$%s', self::class, $name)),
+        };
     }
 
     /**
@@ -51,13 +53,7 @@ final class BroadcastOperator
      */
     public function to(string|array $rooms): self
     {
-        return new self(
-            $this->nsp,
-            self::merge($this->rooms, $rooms),
-            $this->except,
-            $this->volatile,
-            $this->timeout,
-        );
+        return $this->with(rooms: self::merge($this->rooms, $rooms));
     }
 
     /**
@@ -75,13 +71,7 @@ final class BroadcastOperator
      */
     public function except(string|array $rooms): self
     {
-        return new self(
-            $this->nsp,
-            $this->rooms,
-            self::merge($this->except, $rooms),
-            $this->volatile,
-            $this->timeout,
-        );
+        return $this->with(except: self::merge($this->except, $rooms));
     }
 
     /**
@@ -96,7 +86,7 @@ final class BroadcastOperator
             throw new InvalidArgumentException('The timeout can\'t be negative');
         }
 
-        return new self($this->nsp, $this->rooms, $this->except, $this->volatile, $milliseconds);
+        return $this->with(timeout: $milliseconds);
     }
 
     /**
@@ -217,7 +207,8 @@ final class BroadcastOperator
                     $socket->forgetAck($id);
                 }
             },
-            $adapter->serverCount(),
+            // A local broadcast hears from this server only.
+            $this->local ? 1 : $adapter->serverCount(),
         );
         $adapter->broadcastWithAck(
             $packet,
@@ -229,7 +220,30 @@ final class BroadcastOperator
 
     private function options(): BroadcastOptions
     {
-        return new BroadcastOptions($this->rooms, $this->except, $this->volatile, $this->timeout);
+        return new BroadcastOptions($this->rooms, $this->except, $this->volatile, $this->timeout, $this->local);
+    }
+
+    /**
+     * A copy with some settings changed.
+     *
+     * @param list<string>|null $rooms
+     * @param list<string>|null $except
+     */
+    private function with(
+        ?array $rooms = null,
+        ?array $except = null,
+        ?bool $volatile = null,
+        ?int $timeout = null,
+        ?bool $local = null,
+    ): self {
+        return new self(
+            $this->nsp,
+            $rooms ?? $this->rooms,
+            $except ?? $this->except,
+            $volatile ?? $this->volatile,
+            $timeout ?? $this->timeout,
+            $local ?? $this->local,
+        );
     }
 
     /**

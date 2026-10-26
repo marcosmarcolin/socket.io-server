@@ -694,6 +694,90 @@ final class ClusterTest extends TestCase
         self::assertSame([null, []], $this->callbackResult());
     }
 
+    public function testALocalBroadcastStaysInThisProcess(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [$a1] = $this->connect('A');
+        [$a2, $a2Socket] = $this->connect('A');
+        [$b] = $this->connect('B');
+        $a2Socket->join('lobby');
+        $this->broker->published = [];
+
+        $this->servers['A']->local->emit('news');
+        $this->servers['A']->local->to('lobby')->emit('lobby-only');
+        $this->servers['A']->to('lobby')->local->volatile->emit('chained');
+
+        self::assertSame(['2["news"]'], $a1->received());
+        self::assertSame(['2["news"]', '2["lobby-only"]', '2["chained"]'], $a2->received());
+        self::assertSame([], $b->received());
+        self::assertSame([], $this->published());
+    }
+
+    public function testASocketsLocalBroadcastLeavesItOut(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [$a1, $a1Socket] = $this->connect('A');
+        [$a2] = $this->connect('A');
+        [$b] = $this->connect('B');
+
+        $a1Socket->local->emit('hi');
+
+        self::assertSame([], $a1->received());
+        self::assertSame(['2["hi"]'], $a2->received());
+        self::assertSame([], $b->received());
+    }
+
+    public function testLocalSocketHelpersStayInThisProcess(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [, $a] = $this->connect('A');
+        [, $b] = $this->connect('B');
+        $this->broker->published = [];
+
+        $this->servers['A']->local->socketsJoin('here');
+        $this->servers['B']->sockets->local->socketsJoin('there');
+        $this->servers['A']->local->socketsLeave('here');
+        $this->servers['A']->local->disconnectSockets();
+
+        self::assertFalse($a->connected);
+        self::assertTrue($b->connected);
+        self::assertSame([$b->id, 'there'], $b->rooms);
+        self::assertSame([], $this->published());
+    }
+
+    public function testALocalFetchWithACallbackAsksNoOtherServer(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [, $a] = $this->connect('A');
+        $this->connect('B');
+        $this->broker->published = [];
+
+        $this->servers['A']->local->fetchSockets($this->recorder());
+
+        self::assertSame([null, [$a]], $this->callbackResult());
+        self::assertSame([], $this->published());
+    }
+
+    public function testALocalBroadcastWithAckWaitsForThisProcessOnly(): void
+    {
+        $this->server('A');
+        $this->server('B');
+        [$a] = $this->connect('A');
+        [$b] = $this->connect('B');
+        $this->broker->published = [];
+
+        $this->servers['A']->local->timeout(1000)->emit('ask', $this->recorder());
+        $a->send('30["a"]');
+
+        self::assertSame([null, ['a']], $this->callbackResult());
+        self::assertSame([], $b->received());
+        self::assertSame([], $this->published());
+    }
+
     public function testServerSideEmitRefusesTheNamespacesOwnEvents(): void
     {
         $this->server('A');

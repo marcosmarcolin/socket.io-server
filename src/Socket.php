@@ -28,6 +28,7 @@ use Throwable;
  *
  * @property-read SocketEmitter $volatile emits that are dropped when the transport can't take them right now
  * @property-read BroadcastOperator $broadcast every other socket of the namespace
+ * @property-read BroadcastOperator $local every other socket of the namespace, in this process only
  * @property-read bool $connected
  * @property-read bool $disconnected
  * @property-read list<string> $rooms
@@ -103,6 +104,7 @@ final class Socket extends Emitter
         return match ($name) {
             'volatile' => new SocketEmitter($this, volatile: true),
             'broadcast' => $this->broadcastOperator(),
+            'local' => $this->broadcastOperator()->local,
             'connected' => $this->isConnected,
             'disconnected' => ! $this->isConnected,
             'rooms' => $this->nsp->adapter()->socketRooms($this->id),

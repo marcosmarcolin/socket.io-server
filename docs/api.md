@@ -17,7 +17,7 @@
 | `use(fn (Socket $socket, Closure $next))` | A middleware on `/`. |
 | `adapter(fn (Nsp $nsp): Adapter)` | How namespaces keep rooms and broadcast, such as `ChannelAdapter::factory()` or `RedisAdapter::factory()`. |
 | `close()` | Shuts the server down: every socket leaves with `server shutting down`, the connections close, and the worker stops accepting new ones in this process. |
-| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcasting on `/`, as on a namespace. |
+| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `local`, `compress()`, `timeout()` | Broadcasting on `/`, as on a namespace. |
 | `serverSideEmit(string $event, ...$args)` | An event to `/` on the other servers; see `Nsp`. |
 
 ## Namespaces: `Nsp`
@@ -26,7 +26,7 @@
 |---|---|
 | `on('connection', fn (Socket $socket))` | A socket joined, after the middlewares let it in. `connect` is the same. |
 | `use(fn (Socket $socket, Closure $next))` | Runs before each connection, in order. Call `$next()` to let the socket in, or `$next($error)` to refuse it; `$next` may be called later, from an asynchronous callback. A `ConnectionError` also sends its `data`. An exception thrown before `$next` refuses the socket. |
-| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcasting to the namespace. See [Acknowledgements](#acknowledgements) for `timeout()`. |
+| `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `local`, `compress()`, `timeout()` | Broadcasting to the namespace. See [Acknowledgements](#acknowledgements) for `timeout()`. |
 | `sockets(): array<string, Socket>` | The connected sockets, by id. |
 | `allSockets(): list<string>` | Their ids. |
 | `fetchSockets(): list<Socket>`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets(bool $close = false)` | Act on the selected sockets; use `to()` and `except()` first to select. With `ChannelAdapter` or `RedisAdapter`, `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` reach every process; `fetchSockets()` reads this one. |
@@ -49,7 +49,7 @@
 | `use(fn (array $event, Closure $next))` | A middleware for the events from the client, after the `onAny()` listeners and before the event's own; see [Socket middlewares](#socket-middlewares). |
 | `timeout(int $ms)`, `volatile`, `compress(bool)` | Emit modifiers, which return a new object. See [Acknowledgements](#acknowledgements). |
 | `join(string\|array $rooms)`, `leave(string $room)` | Rooms. |
-| `to()`, `in()`, `except()`, `broadcast` | Broadcasting to other sockets; the socket itself is left out. |
+| `to()`, `in()`, `except()`, `broadcast`, `local` | Broadcasting to other sockets; the socket itself is left out. `local` keeps to this process. |
 | `disconnect(bool $close = false)` | Leaves the namespace; with `true`, closes the whole connection. |
 
 Events: `disconnecting` and `disconnect` get `(string $reason, ?Throwable $description)`; `disconnecting` still sees the rooms. The reasons are `transport close`, `transport error`, `ping timeout`, `parse error`, `forced close`, `server namespace disconnect`, `client namespace disconnect`, `forced server close` and `server shutting down`. `error` gets a `Throwable` when the client sent a packet that breaks the protocol, just before the connection closes, or when a `use()` middleware stopped an event.
@@ -126,7 +126,7 @@ $io->to('room1')->timeout(5000)->emit('vote', function (?Throwable $error, array
 
 ## Broadcasting: `BroadcastOperator`
 
-`to()`, `in()`, `except()` and `volatile` return an immutable operator:
+`to()`, `in()`, `except()`, `volatile` and `local` return an immutable operator:
 
 ```php
 $io->emit('news', $data);                         // every socket of "/"
@@ -136,6 +136,7 @@ $io->of('/admin')->to($socketId)->emit('ping');   // one socket, by its id
 $socket->broadcast->emit('joined', $socket->id);  // everyone but this socket
 $socket->to('room1')->emit('typing');             // the room, but not this socket
 $io->volatile->emit('position', $x, $y);          // skipped where the transport is busy
+$io->local->emit('reload');                       // this process only, whatever the adapter
 ```
 
 `compress()` exists for compatibility and has no effect: the server doesn't compress.
