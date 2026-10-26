@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **A `pong` example**: multiplayer Pong, with a queue that pairs players, one room per match, and the game loop on the server at 30 frames a second, sending the state `volatile`.
+
 ## [0.5.0] - 2026-10-26
 
 The official Admin UI works with this server, and connection state recovery works across processes with sticky sessions.

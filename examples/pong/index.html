@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pong</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #111; color: #eee; margin: 0; display: flex; flex-direction: column; align-items: center; padding: 16px; }
+    h1 { margin: 8px 0; }
+    #board { display: flex; justify-content: space-between; width: min(640px, 100%); font-size: 20px; margin-bottom: 8px; }
+    canvas { width: min(640px, 100%); background: #000; border: 2px solid #444; touch-action: none; }
+    #status { min-height: 1.4em; margin: 10px 0; color: #9cf; }
+    form { display: flex; gap: 8px; }
+    input, button { font-size: 16px; padding: 6px 10px; }
+    .help { color: #888; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Pong</h1>
+  <div id="board"><span id="left">&nbsp;</span><span id="right">&nbsp;</span></div>
+  <canvas id="field" width="640" height="400"></canvas>
+  <div id="status">Enter your name and press Play.</div>
+  <form id="play">
+    <input id="name" placeholder="Your name" maxlength="20" autocomplete="off" required>
+    <button>Play</button>
+  </form>
+  <p class="help">W/S or the arrow keys move your paddle; on a phone, touch the top or the bottom of the field.</p>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const socket = io(`http://${location.hostname}:3000`);
+    const canvas = document.getElementById("field");
+    const context = canvas.getContext("2d");
+    const status = document.getElementById("status");
+    const form = document.getElementById("play");
+    const left = document.getElementById("left");
+    const right = document.getElementById("right");
+
+    let match = null; // { side, names, field }
+    let score = { left: 0, right: 0 };
+    let state = null;
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      socket.emit("play", document.getElementById("name").value);
+      form.hidden = true;
+    });
+
+    socket.on("waiting", () => {
+      status.textContent = "Waiting for an opponent… open this page in another tab to play against yourself.";
+    });
+
+    socket.on("start", (data) => {
+      match = data;
+      score = { left: 0, right: 0 };
+      status.textContent = `You are on the ${data.side}. First to ${data.field.pointsToWin} wins!`;
+      showScore();
+    });
+
+    socket.on("state", (data) => { state = data; });
+
+    socket.on("score", (data) => {
+      score = data;
+      showScore();
+    });
+
+    socket.on("game over", ({ winner, reason, score: final }) => {
+      score = final;
+      showScore();
+      const won = match && winner === match.side;
+      status.textContent = (won ? "You won!" : "You lost.") + (reason === "opponent left" ? " Your opponent left." : "");
+      match = null;
+      state = null;
+      form.hidden = false;
+    });
+
+    socket.on("disconnect", () => { status.textContent = "Disconnected, reconnecting…"; });
+
+    function showScore() {
+      if (!match) return;
+      left.textContent = `${match.names.left}: ${score.left}`;
+      right.textContent = `${score.right} :${match.names.right}`;
+    }
+
+    // The paddle moves while a key is held; the server only hears when the direction changes.
+    let direction = 0;
+    function move(next) {
+      if (next !== direction && match) {
+        direction = next;
+        socket.emit("move", direction);
+      }
+    }
+    const keys = { ArrowUp: -1, KeyW: -1, ArrowDown: 1, KeyS: 1 };
+    document.addEventListener("keydown", (event) => { if (event.code in keys) { move(keys[event.code]); event.preventDefault(); } });
+    document.addEventListener("keyup", (event) => { if (keys[event.code] === direction) move(0); });
+    canvas.addEventListener("pointerdown", (event) => {
+      const box = canvas.getBoundingClientRect();
+      move(event.clientY - box.top < box.height / 2 ? -1 : 1);
+    });
+    canvas.addEventListener("pointerup", () => move(0));
+    canvas.addEventListener("pointerleave", () => move(0));
+
+    function draw() {
+      context.fillStyle = "#000";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#333";
+      for (let y = 0; y < canvas.height; y += 20) context.fillRect(canvas.width / 2 - 1, y, 2, 10);
+      if (match && state) {
+        const f = match.field;
+        context.fillStyle = "#eee";
+        context.fillRect(f.paddleMargin, state.paddles.left, f.paddleWidth, f.paddleHeight);
+        context.fillRect(f.width - f.paddleMargin - f.paddleWidth, state.paddles.right, f.paddleWidth, f.paddleHeight);
+        context.fillStyle = "#9cf";
+        context.fillRect(state.ball.x, state.ball.y, f.ball, f.ball);
+      }
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+</body>
+</html>
