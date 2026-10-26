@@ -18,7 +18,7 @@ tests/Load/run.sh                              # the load test; see docs/perform
 LOOP=swoole tests/Integration/run.sh           # any of the scripts above on another event loop
 ```
 
-`LOOP=select`, `event` or `swoole` runs the server of the compliance, integration and load scripts on that Workerman event loop, in the image of `tests/Load/Dockerfile`, which has the `event` and `swoole` extensions. CI runs the suites and the integration tests on Swoole too.
+`LOOP=select`, `event` or `swoole` runs the server of the compliance, integration and load scripts on that Workerman event loop, in the image of `tests/Load/Dockerfile`, which has the `event` extension, or of `tests/Load/swoole.Dockerfile`, on the Swoole project's PHP image. CI runs the suites and the integration tests on Swoole too.
 
 ## Secret scanning
 
