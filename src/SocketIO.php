@@ -406,6 +406,17 @@ final class SocketIO extends Emitter
     }
 
     /**
+     * The namespaces created so far, by name.
+     *
+     * @internal
+     * @return array<string, Nsp>
+     */
+    public function namespaces(): array
+    {
+        return $this->namespaces;
+    }
+
+    /**
      * @internal
      */
     public function hasNamespace(string $name): bool

@@ -12,6 +12,7 @@ tests/Integration/run.sh                       # the official socket.io-client a
 tests/Integration/run.sh multi-process         # the same over two processes and a channel server
 tests/Integration/run.sh multi-process-redis   # the same two processes, joined by Redis over TLS
 tests/Integration/run.sh examples              # every example, each against its test
+tests/Integration/run.sh admin                 # the Admin UI's protocol, with the official client
 tests/Integration/run.sh recovery              # connection state recovery, with the official client
 tests/Integration/run.sh recovery-processes    # the same over two processes, one port each
 tests/Load/run.sh                              # the load test; see docs/performance.md
