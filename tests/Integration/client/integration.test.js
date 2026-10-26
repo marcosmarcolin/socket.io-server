@@ -163,6 +163,18 @@ for (const mode of Object.keys(MODES)) {
       assert.equal(error.message, "Invalid namespace");
     });
 
+    test("a socket middleware stops an event and the server reports it", TIMEOUT, async () => {
+      const socket = await connected(mode);
+      const letThrough = record(socket, "let-through");
+
+      const refused = next(socket, "refused");
+      socket.emit("forbidden");
+
+      assert.deepEqual(await refused, ["forbidden event"]);
+      assert.deepEqual(await socket.emitWithAck("echo", "still fine"), "still fine");
+      assert.deepEqual(letThrough, []);
+    });
+
     test("lets the server see every event both ways with onAny and onAnyOutgoing", TIMEOUT, async () => {
       const socket = await connected(mode);
       socket.emit("first", 1, { a: true });
