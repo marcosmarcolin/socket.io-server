@@ -106,6 +106,6 @@ RedisAdapter::factory(
 
 ## Limits
 
-- Clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee. Setting `'transports' => ['websocket']` on the server too refuses polling outright. Across machines, a load balancer with sticky sessions lets polling work.
+- With several processes on one port, clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee. Setting `'transports' => ['websocket']` on the server too refuses polling outright. Behind a proxy with sticky sessions and one port per process, polling works; see [Behind a reverse proxy](reverse-proxy.md).
 - `fetchSockets()` without a callback and `allSockets()` read the current process.
 - `local` keeps any of the above in the current process: `$io->local->emit('reload')`, `$io->local->disconnectSockets()`.
