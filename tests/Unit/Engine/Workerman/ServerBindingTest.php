@@ -396,6 +396,24 @@ final class ServerBindingTest extends TestCase
         self::assertCount(1, $this->errors);
     }
 
+    public function testWhatAHandlerSentBeforeThrowingStillGoesOut(): void
+    {
+        $pair = $this->connect();
+        $this->openWebSocket($pair, '/engine.io/?EIO=4&transport=websocket');
+        $socket = $this->connections[0];
+        // After the echo of setUp(), which sends the first frame of the pass at once: this one is grouped.
+        $socket->on('message', static function () use ($socket): void {
+            $socket->send('before the error');
+            throw new RuntimeException('boom');
+        });
+
+        $pair->write(WebSocketFrames::client('4hello'));
+
+        self::assertTrue($pair->isClosed());
+        $frames = WebSocketFrames::parse($pair->read());
+        self::assertSame(['4hello', '4before the error'], array_column(array_slice($frames, 0, 2), 'data'));
+    }
+
     // Helpers
 
     /**

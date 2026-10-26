@@ -182,6 +182,8 @@ final class ServerBinding
                 if ($beforeClose !== null) {
                     $beforeClose();
                 }
+                // What the handler sent before it threw goes out first, as it did before writes were grouped.
+                ($this->webSockets[$connection] ?? null)?->flush();
                 $connection->close();
             } finally {
                 ($this->onError)($e);
