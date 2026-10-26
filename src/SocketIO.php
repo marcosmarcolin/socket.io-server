@@ -26,7 +26,8 @@ use Workerman\Worker;
  * The Socket.IO server.
  *
  * Listeners belong to the main namespace, as $io->sockets->on() would, and so do the broadcast methods and
- * serverSideEmit(); only the server's own events, `workerStart` and `workerStop` (Worker), stay here.
+ * serverSideEmit(); only the server's own events, `workerStart` and `workerStop` (Worker), stay here. As in the
+ * reference, the main namespace emits `new_namespace` (Nsp) when another namespace is created.
  *
  * @property-read BroadcastOperator $volatile broadcasts that skip sockets whose transport is busy
  * @property-read BroadcastOperator $local broadcasts and socket helpers on the main namespace, for this process only
@@ -157,17 +158,81 @@ final class SocketIO extends Emitter
             throw new InvalidArgumentException(sprintf('A namespace name can\'t contain a comma, got "%s"', $name));
         }
 
-        return $this->namespaces[$name] ??= new Nsp($this, $name);
+        $nsp = $this->namespaces[$name] ?? null;
+        if ($nsp === null) {
+            $nsp = $this->namespaces[$name] = new Nsp($this, $name);
+            // On the main namespace, as the reference does, so $io->on('new_namespace') gets it.
+            if ($name !== '/') {
+                $this->sockets->announce($nsp);
+            }
+        }
+
+        return $nsp;
+    }
+
+    /**
+     * The server's own events, which stay here; every other listener belongs to the main namespace.
+     */
+    private static function isOwnEvent(string $event): bool
+    {
+        return $event === 'workerStart' || $event === 'workerStop';
     }
 
     public function on(string $event, Closure $listener): static
     {
-        if ($event === 'workerStart' || $event === 'workerStop') {
+        if (self::isOwnEvent($event)) {
             return parent::on($event, $listener);
         }
         $this->sockets->on($event, $listener);
 
         return $this;
+    }
+
+    public function once(string $event, Closure $listener): static
+    {
+        if (self::isOwnEvent($event)) {
+            return parent::once($event, $listener);
+        }
+        $this->sockets->once($event, $listener);
+
+        return $this;
+    }
+
+    public function off(string $event, ?Closure $listener = null): static
+    {
+        if (self::isOwnEvent($event)) {
+            return parent::off($event, $listener);
+        }
+        $this->sockets->off($event, $listener);
+
+        return $this;
+    }
+
+    public function listeners(string $event): array
+    {
+        return self::isOwnEvent($event) ? parent::listeners($event) : $this->sockets->listeners($event);
+    }
+
+    /**
+     * The server's own events with listeners, then the main namespace's.
+     */
+    public function eventNames(): array
+    {
+        return [...parent::eventNames(), ...$this->sockets->eventNames()];
+    }
+
+    /**
+     * Without an event, removes the server's own listeners and the main namespace's.
+     */
+    public function removeAllListeners(?string $event = null): static
+    {
+        if ($event === null) {
+            $this->sockets->removeAllListeners();
+
+            return parent::removeAllListeners();
+        }
+
+        return $this->off($event);
     }
 
     /**

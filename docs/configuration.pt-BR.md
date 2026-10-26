@@ -10,7 +10,7 @@
 |---|---|---|
 | `pingInterval` | `25000` | De quanto em quanto tempo o servidor manda ping para cada cliente. |
 | `pingTimeout` | `20000` | Quanto ele espera o pong antes de fechar a conexão. |
-| `maxPayload` | `1000000` | Maior mensagem, em bytes; corpos HTTP maiores recebem 413. |
+| `maxPayload` | `1000000` | Maior mensagem, em bytes; corpos HTTP maiores recebem 413. `maxHttpBufferSize`, o nome na referência, também é aceito. |
 | `upgradeTimeout` | `10000` | Quanto tempo um upgrade de polling para WebSocket pode levar. |
 | `connectTimeout` | `45000` | Quanto tempo um cliente pode ficar sem entrar em um namespace. |
 | `path` | `'/socket.io/'` | O caminho da URL; a opção `path` do cliente precisa ser igual. |
