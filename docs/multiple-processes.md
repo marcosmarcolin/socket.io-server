@@ -104,6 +104,28 @@ RedisAdapter::factory(
 - Servers of different apps sharing one Redis need different `key`s, or they get each other's broadcasts.
 - When Redis is unreachable, the adapter retries every second and reports the failure once to `onError` (`Worker::log` by default). Up to 1,000 publishes wait for the connection; messages published while a process was disconnected are lost, as always with Redis pub/sub.
 
+## Sending from your PHP app: the Emitter
+
+The `Emitter` sends to the clients from any PHP code that isn't a Socket.IO server, such as a PHP-FPM request in your app. It publishes to Redis what a server would, and the servers running `RedisAdapter` deliver it to their sockets:
+
+```php
+use Marcolin\SocketIO\Emitter;
+
+$emitter = Emitter::redis('redis://127.0.0.1:6379');
+
+$emitter->emit('announcement', 'Maintenance at 22:00');          // everyone on "/"
+$emitter->to('user:42')->emit('order-approved', ['id' => 1001]); // one room, on every server
+$emitter->of('/admin')->except('muted')->emit('alert', $alert);
+$emitter->in('user:42')->disconnectSockets();                     // log a user out everywhere
+$emitter->serverSideEmit('cache-clear', 'users');                 // the servers' on('cache-clear')
+```
+
+- It uses blocking I/O, so it needs no event loop. It connects on the first send and keeps the connection; `Emitter::redis($url, $key, $timeout)` takes the servers' URL and `key`, and how long to wait for Redis, 5 seconds by default. Failures throw a `RuntimeException`.
+- `of()`, `to()`, `in()`, `except()` and `volatile` return a new emitter, so one can be kept and reused.
+- It only sends: no acknowledgements and no `fetchSockets()`, as in the reference's emitter packages. Data follows the rules of `emit()`, `Binary` included.
+- Servers don't count an emitter as a server, so it never makes them wait for answers.
+- The [emitter example](../examples/emitter) has a plain PHP endpoint that sends notifications to the open tabs.
+
 ## Limits
 
 - Clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee. Setting `'transports' => ['websocket']` on the server too refuses polling outright. Across machines, a load balancer with sticky sessions lets polling work.
