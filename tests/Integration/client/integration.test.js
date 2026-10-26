@@ -242,6 +242,18 @@ for (const mode of Object.keys(MODES)) {
       assert.deepEqual(await created, [room]);
     });
 
+    test("packetCreate on the session reports each message written to the client", TIMEOUT, async () => {
+      const socket = await connected(mode);
+
+      const said = next(socket, "said");
+      socket.emit("say", "hello");
+      await said;
+
+      // The listener starts in the connection handler, after the CONNECT answer; the acknowledgement that carries
+      // this list is written after it is built.
+      assert.deepEqual(await socket.emitWithAck("created"), ['2["said","hello"]']);
+    });
+
     test("lets the server see every event both ways with onAny and onAnyOutgoing", TIMEOUT, async () => {
       const socket = await connected(mode);
       socket.emit("first", 1, { a: true });

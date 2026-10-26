@@ -10,6 +10,8 @@ declare(strict_types=1);
 
 use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\ConnectionError;
+use Marcolin\SocketIO\Engine\Packet;
+use Marcolin\SocketIO\Engine\PacketType;
 use Marcolin\SocketIO\Engine\Request;
 use Marcolin\SocketIO\Engine\ResponseHeaders;
 use Marcolin\SocketIO\Socket;
@@ -67,6 +69,19 @@ $io->on('connection', static function (Socket $socket) use ($io, &$lastConnectio
     });
     $socket->on('last-connection-error', static function (Closure $ack) use (&$lastConnectionError): void {
         $ack($lastConnectionError);
+    });
+    // The text messages written to this connection, seen through the session's packetCreate event.
+    $created = [];
+    $socket->conn->on('packetCreate', static function (Packet $packet) use (&$created): void {
+        if ($packet->type === PacketType::Message && ! $packet->binary) {
+            $created[] = $packet->data;
+        }
+    });
+    $socket->on('say', static function (string $word) use ($socket): void {
+        $socket->emit('said', $word);
+    });
+    $socket->on('created', static function (Closure $ack) use (&$created): void {
+        $ack($created);
     });
 
     // Answers with the arguments it got, through the acknowledgement or as an event.
