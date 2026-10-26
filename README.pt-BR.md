@@ -98,6 +98,7 @@ Cada um roda com `php examples/<nome>/start.php start`; depois abra http://local
 - [Configuração](docs/configuration.pt-BR.md): opções do servidor, CORS e cookies, recusar conexões, TLS.
 - [Referência da API](docs/api.pt-BR.md): `SocketIO`, namespaces, sockets, acknowledgements, broadcast, dados JSON e binários.
 - [Vários processos](docs/multiple-processes.pt-BR.md): `ChannelAdapter`, `RedisAdapter` e o `Emitter`.
+- [Atrás de um proxy reverso](docs/reverse-proxy.pt-BR.md): nginx e HAProxy, TLS e sticky sessions para o polling.
 - [Migrando do phpsocket.io](docs/migrating-from-phpsocket.io.pt-BR.md): como mover uma aplicação e os seus clientes.
 - [Desenvolvimento](docs/development.pt-BR.md): testes, linters e as suítes de conformidade, tudo no Docker.
 - [Changelog](CHANGELOG.md), em inglês.

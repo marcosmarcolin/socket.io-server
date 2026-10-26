@@ -18,7 +18,13 @@ use Workerman\Worker;
 
 require __DIR__ . '/../../vendor/autoload.php';
 
-$io = new SocketIO(options: ['pingInterval' => 1000, 'pingTimeout' => 1000, 'connectTimeout' => 2000]);
+$io = new SocketIO(options: [
+    'pingInterval' => 1000,
+    'pingTimeout' => 1000,
+    'connectTimeout' => 2000,
+    // The session id in a cookie on the polling handshake, for sticky sessions.
+    'cookie' => true,
+]);
 
 // A cookie on each session's first answer, and a header on every answer.
 $io->engine->on('initial_headers', static function (ResponseHeaders $headers): void {
