@@ -7,6 +7,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Added
 
 - **A load test and the guide "Performance and limits"** (`docs/performance.md`): about 30 KB per WebSocket connection, 10,000 clients in one process, and what it takes past 1,000 connections (the `event` extension, `memory_limit`, `ulimit`). `tests/Load/run.sh` measures it on any machine.
+- **A comparison with the reference Node.js server** in `docs/performance.md`: the same load test against `socket.io` 4.8.4 (`SERVER=node tests/Load/run.sh`). Memory and acknowledgements are on par; Node delivers broadcasts 1.5 to 2.2 times as fast.
 - **A compatibility section in the README**: the protocols, the clients tested, and the official compliance suites.
 - **The `new_namespace` event**: `$io->on('new_namespace', fn (Nsp $nsp) => ...)` runs when a namespace other than `/` is created, as in the reference, such as to give every namespace a middleware.
 - **The reference's listener methods**: `eventNames()`, `removeListener()` and `removeAllListeners()` on every emitter, and `once()`, `off()` and `listeners()` on `SocketIO` reach the main namespace, as `on()` does.

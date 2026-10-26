@@ -1,0 +1,8 @@
+{
+  "name": "socket-io-server-load-reference",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "socket.io": "4.8.4"
+  }
+}

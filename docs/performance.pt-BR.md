@@ -34,6 +34,29 @@ Um processo, clientes WebSocket do `socket.io-client` oficial, medidos com `test
 
 Medido num Apple M4 Pro, no Docker Desktop (14 CPUs, 8 GB), com PHP 8.1 e Node.js 24 na mesma máquina. Os seus números vão ser outros; a forma, não.
 
+## Comparado ao servidor Node.js da referência
+
+O mesmo teste de carga contra o servidor oficial `socket.io` 4.8.4 (`tests/Load/node`), um processo com os mesmos handlers, na mesma máquina, na mesma sessão:
+
+| Clientes | Servidor | RSS total | Ecos por segundo (p50 / p99) | Entregas de broadcast por segundo |
+|---|---|---|---|---|
+| 1.000 | Node.js | 98 MB | 55.000 (16 / 40 ms) | 477.000 |
+| 1.000 | este servidor | 43 MB | 59.000 (15 / 33 ms) | 310.000 |
+| 5.000 | Node.js | 201 MB | 71.000 (61 / 146 ms) | 438.000 |
+| 5.000 | este servidor | 157 MB | 70.000 (66 / 131 ms) | 227.000 |
+| 10.000 | Node.js | 288 MB | 84.000 (111 / 146 ms) | 460.000 |
+| 10.000 | este servidor | 297 MB | 62.000 (136 / 229 ms) | 210.000 |
+
+- **A memória fica empatada.** Este servidor começa menor (cerca de 13 MB contra os 64 MB do Node), então usa menos até alguns milhares de clientes, e mais ou menos o mesmo com 10.000.
+- **Os acknowledgements empatam** até 5.000 clientes; com 10.000, o Node responde cerca de 35% mais por segundo.
+- **No broadcast o Node lidera**, de 1,5 vez com 1.000 clientes até 2,2 vezes com 10.000. Aqui o pacote é codificado uma vez, mas cada socket ainda monta o seu próprio pacote Engine.IO e o seu frame WebSocket, que é onde este servidor gasta o tempo: o ponto a otimizar em seguida.
+
+As rodadas de 10.000 clientes foram repetidas: os números variaram menos de 10%.
+
+```sh
+SERVER=node CLIENTS=10000 tests/Load/run.sh
+```
+
 ## Medindo na sua máquina
 
 ```sh
