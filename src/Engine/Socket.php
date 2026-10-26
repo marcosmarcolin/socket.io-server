@@ -373,6 +373,13 @@ final class Socket extends Emitter
         }
         $packet = new Packet($type, $data, $binary, $compress);
         $this->dispatch('packetCreate', $packet);
+        // Nothing waiting and a writable transport, as for most messages over WebSocket: straight to it.
+        if ($this->writeBuffer === [] && $this->transport->isWritable()) {
+            $this->transport->send([$packet]);
+            $this->dispatch('drain');
+
+            return;
+        }
         $this->writeBuffer[] = $packet;
         $this->flush();
     }

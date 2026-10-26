@@ -42,6 +42,9 @@ final class ServerBinding
     /** @var Closure(Throwable): void */
     private readonly Closure $onError;
 
+    // The WebSocket connections' frames, written once per pass of the event loop.
+    private readonly WriteGroup $writeGroup;
+
     /**
      * @param (Closure(Throwable): void)|null $onError receives exceptions from the callbacks; Worker::log by default
      */
@@ -50,6 +53,7 @@ final class ServerBinding
         $this->requests = new WeakMap();
         $this->webSockets = new WeakMap();
         $this->webSocketRequests = new WeakMap();
+        $this->writeGroup = new WriteGroup($server->scheduler());
         $this->onError = $onError ?? static function (Throwable $error): void {
             Worker::log((string) $error);
         };
@@ -144,7 +148,7 @@ final class ServerBinding
         }
         $connection->maxPackageSize = $this->server->options->maxPayload + self::FRAME_HEADER_ALLOWANCE;
 
-        $webSocket = new WorkermanWebSocketConnection($connection);
+        $webSocket = new WorkermanWebSocketConnection($connection, $this->writeGroup);
         $this->webSockets[$connection] = $webSocket;
         $engineRequest = $this->webSocketRequests[$connection] ?? RequestValues::request($connection, $request);
         unset($this->webSocketRequests[$connection]);

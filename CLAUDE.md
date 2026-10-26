@@ -161,7 +161,8 @@ src/
     Transport/HttpExchange.php, Transport/WebSocketConnection.php  I/O interfaces, faked in tests
     Protocol/HttpOrWebSocket.php  ProtocolInterface: Workerman HTTP, or switch to WebSocket
     Protocol/WebSocket.php      extends Workerman\Protocols\Websocket, exposes the opcode
-    Workerman/                  Workerman implementations of Scheduler, HttpExchange and WebSocketConnection,
+    Workerman/                  Workerman implementations of Scheduler, HttpExchange and WebSocketConnection (with
+                                WriteGroup, which groups its writes per pass of the event loop),
                                 and the wiring of a Worker's callbacks to Server
     Parser.php, Packet.php, PacketType.php, InvalidPacketException.php
     Scheduler.php
@@ -225,7 +226,13 @@ src/
   - `onClose` reports the close to the WebSocket, or aborts an unanswered HTTP request.
 - **Per-connection state** lives in `WeakMap`s keyed by `TcpConnection`. A `WorkermanHttpExchange` copies its request up front, because Workerman recycles `Request` objects and a poll is answered later.
 - **Exceptions never leave a callback.** `ServerBinding` closes the connection (after a 500 if the request had no answer yet) and passes the exception to its error handler, which defaults to `Worker::log`.
-- **Closing a WebSocket** sends a close frame with code 1000, then closes the TCP connection.
+- **Closing a WebSocket** writes what is grouped, then sends a close frame with code 1000, then closes the TCP connection.
+- **Grouped WebSocket writes** (`WorkermanWebSocketConnection`, `WriteGroup`): the write system call costs far more than our code or Workerman's `send()` (about 1.5 µs against 0.6 and 0.25 per delivery), so:
+  - the first frame a connection writes in a pass of the event loop goes out at once (a lone message isn't delayed); the next ones in the same pass are appended, already framed, and written in one `send($frames, true)` at the pass's end;
+  - one `WriteGroup` per `ServerBinding` keeps the connections that wrote in the pass and one zero-delay `Scheduler` timer for all of them, which calls `endPass()` on each (flush, and the next frame goes out at once again). A timer per connection cost more than it saved for one message to many clients; grouping the first frame too delayed every delivery until the emit loop ended (-30% for one message to 10,000 clients);
+  - Workerman's `Select` runs timers after the sockets of the pass, so grouped frames don't wait for another pass; `event` runs it at the next pass, Swoole within a millisecond;
+  - frames are built here as Workerman's `Websocket::encode()` does (final, unmasked, 7/16/64-bit lengths); a deflated frame (`perMessageDeflate`) goes through Workerman, after what is grouped, since its deflate context needs the order; `closed()` drops what is grouped.
+  - `Engine\Socket::sendPacket()` hands a packet straight to the transport when nothing is buffered and it is writable, skipping the buffer and `flush()` (the same effect, about 10% of our code's cost per delivery).
 - **Workerman 5 pitfalls:**
   - An exception inside `onWebSocketConnect` or `onWebSocketConnected` calls `Worker::stopAll(250)` and **kills the worker**. Never throw there: reject by closing the connection.
   - The extra headers of a 101 go in `$connection->headers` inside `onWebSocketConnect`, as `"Name: value"` lines: `Websocket::dealHandshake()` writes them right after the callback. Workerman marks the property internal for HTTP, where `Http` consumes and clears it on each answer; on a connection that just upgraded, nothing reads it again.

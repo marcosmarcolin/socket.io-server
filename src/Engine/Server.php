@@ -258,6 +258,14 @@ final class Server extends Emitter
     }
 
     /**
+     * @internal for the network side, such as the WebSocket connections that group their writes
+     */
+    public function scheduler(): Scheduler
+    {
+        return $this->scheduler;
+    }
+
+    /**
      * How many sessions are open, as the reference's clientsCount.
      */
     public function clientsCount(): int
