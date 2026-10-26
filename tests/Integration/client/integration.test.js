@@ -212,6 +212,14 @@ for (const mode of Object.keys(MODES)) {
       assert.equal(Object.keys(manager.nsps).length, 2);
     });
 
+    test("a new_namespace listener put a middleware on /admin", TIMEOUT, async () => {
+      const admin = client(mode, "/admin");
+
+      const [checkedBy] = await next(admin, "admin-checked");
+
+      assert.equal(checkedBy, "new_namespace:/admin");
+    });
+
     test("refuses an unknown namespace", TIMEOUT, async () => {
       const socket = client(mode, "/unknown");
 

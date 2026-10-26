@@ -14,8 +14,9 @@ use Throwable;
 /**
  * A namespace.
  *
- * Events: `connection` and `connect` (Socket), when a socket joined, after the middlewares let it in; and the events
- * other servers send with serverSideEmit().
+ * Events: `connection` and `connect` (Socket), when a socket joined, after the middlewares let it in; on the main
+ * namespace, `new_namespace` (Nsp) when another namespace is created; and the events other servers send with
+ * serverSideEmit().
  *
  * Broadcasts, socketsJoin, socketsLeave and disconnectSockets reach every server through the adapter, and so does
  * fetchSockets with a callback; allSockets and fetchSockets without one read this process.
@@ -260,6 +261,16 @@ final class Nsp extends Emitter
     public function remove(Socket $socket): void
     {
         unset($this->sockets[$socket->id], $this->connecting[$socket->id]);
+    }
+
+    /**
+     * Tells the main namespace's `new_namespace` listeners about a namespace just created.
+     *
+     * @internal
+     */
+    public function announce(Nsp $nsp): void
+    {
+        $this->dispatch('new_namespace', $nsp);
     }
 
     /**

@@ -10,7 +10,7 @@
 |---|---|---|
 | `pingInterval` | `25000` | How often the server pings each client. |
 | `pingTimeout` | `20000` | How long it waits for the pong before closing the connection. |
-| `maxPayload` | `1000000` | Largest message, in bytes; longer HTTP bodies get 413. |
+| `maxPayload` | `1000000` | Largest message, in bytes; longer HTTP bodies get 413. `maxHttpBufferSize`, the reference's name, is accepted too. |
 | `upgradeTimeout` | `10000` | How long an upgrade from polling to WebSocket may take. |
 | `connectTimeout` | `45000` | How long a client may stay without joining a namespace. |
 | `logger` | `null` | A `Closure(string $scope, string $message)` that gets the debug log; see [Debug log](#debug-log). |

@@ -13,6 +13,7 @@ use Marcolin\SocketIO\ConnectionError;
 use Marcolin\SocketIO\Engine\Packet;
 use Marcolin\SocketIO\Engine\PacketType;
 use Marcolin\SocketIO\Engine\Request;
+use Marcolin\SocketIO\Nsp;
 use Marcolin\SocketIO\Engine\ResponseHeaders;
 use Marcolin\SocketIO\Socket;
 use Marcolin\SocketIO\SocketIO;
@@ -171,8 +172,17 @@ $io->on('connection', static function (Socket $socket) use ($io, &$lastConnectio
     });
 });
 
+// As the reference's docs suggest: a middleware for every namespace created after this point.
+$io->on('new_namespace', static function (Nsp $nsp): void {
+    $nsp->use(static function (Socket $socket, Closure $next) use ($nsp): void {
+        $socket->data['checkedBy'] = 'new_namespace:' . $nsp->name;
+        $next();
+    });
+});
+
 $io->of('/admin')->on('connection', static function (Socket $socket): void {
     $socket->emit('admin-welcome', $socket->nsp->name);
+    $socket->emit('admin-checked', $socket->data['checkedBy'] ?? null);
 });
 
 // Dual-stack: the client connects to "localhost", which may resolve to ::1.
