@@ -53,8 +53,9 @@ $io->use(static function (Socket $socket, Closure $next) use (&$sessions): void 
 });
 
 $io->on('connection', static function (Socket $socket) use ($io, &$sessions): void {
-    $userId = (string) $socket->data['userId'];
-    $username = (string) $socket->data['username'];
+    // Set by the middleware above.
+    $userId = is_string($socket->data['userId'] ?? null) ? $socket->data['userId'] : '';
+    $username = is_string($socket->data['username'] ?? null) ? $socket->data['username'] : '';
     $room = 'user:' . $userId;
     $socket->join($room);
 
