@@ -17,6 +17,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - **`Socket::use()`**: middlewares for the events a socket receives, as the reference's `socket.use()`. `$next($error)` stops the event and emits `error` on the socket.
 - **Engine events** on `$io->engine`, as the reference's: `initial_headers` and `headers` let listeners change a session's response headers through `ResponseHeaders`, such as to set a cookie, over polling and in the WebSocket 101; `connection_error` reports each refused request with its code and message.
 - **The `local` flag**: `$io->local`, `$nsp->local`, `$socket->local` and `->local` on a broadcast keep a broadcast, the socket helpers or `fetchSockets()` in the current process, whatever the adapter, as in the reference.
+- **The `session-auth` example**: a page logs in with a PHP session, and a middleware lets in only the sockets whose cookie belongs to a logged-in session, across origins with `withCredentials`.
 - **The `dashboard` example**: live dashboards, where a timer started in `workerStart` pushes new numbers every few seconds to the viewers of each dashboard, as a room.
 
 ### Changed

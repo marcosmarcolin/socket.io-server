@@ -83,6 +83,7 @@ Cada um roda com `php examples/<nome>/start.php start`; depois abra http://local
 | Exemplo | Mostra |
 |---|---|
 | [chat](examples/chat) | uma sala de chat: nomes, indicador de digitação, avisos de entrada e saída |
+| [session-auth](examples/session-auth) | login com sessão PHP, e um middleware que só deixa entrar os sockets de sessões logadas |
 | [rooms](examples/rooms) | `join`, `leave`, mensagens para uma sala, lista de membros ao vivo |
 | [acks](examples/acks) | acknowledgements nos dois sentidos, e o `timeout()` do servidor |
 | [namespaces](examples/namespaces) | `/public` e `/admin`, um middleware com token, `ConnectionError` |

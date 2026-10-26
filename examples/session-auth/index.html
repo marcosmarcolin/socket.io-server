@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authentication by session</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    #log { list-style: none; padding: .5rem; border: 1px solid #ddd; border-radius: 6px; min-height: 200px; }
+    #log li { padding: .2rem 0; }
+    form { display: flex; gap: .5rem; margin: .5rem 0; flex-wrap: wrap; }
+    input { flex: 1; padding: .5rem; font: inherit; }
+    button { padding: .5rem 1rem; font: inherit; }
+    .muted { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Authentication by session</h1>
+  <p class="muted">The socket gets in only with the cookie of a logged-in PHP session.</p>
+  <form id="login"><input id="name" placeholder="Your name" required><button>Log in</button></form>
+  <form id="logout"><button>Log out</button></form>
+  <form id="send"><input id="text" placeholder="Message" required><button>Send</button></form>
+  <ul id="log"></ul>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    function log(text) {
+      const item = document.createElement("li");
+      item.textContent = text;
+      document.getElementById("log").append(item);
+    }
+    function onSubmit(id, handler) {
+      document.getElementById(id).addEventListener("submit", (event) => {
+        event.preventDefault();
+        handler();
+      });
+    }
+    const value = (id) => document.getElementById(id).value;
+
+    // The socket is on port 3000 and the page on 3001: withCredentials sends the session cookie anyway.
+    const socket = io(`http://${location.hostname}:3000`, { withCredentials: true, autoConnect: false });
+    socket.on("connect", async () => log(`connected as ${await socket.emitWithAck("whoami")}`));
+    socket.on("connect_error", (error) => log(`refused: ${error.message}`));
+    socket.on("disconnect", () => log("disconnected"));
+    socket.on("chat", ({ from, text }) => log(`${from}: ${text}`));
+    socket.connect();
+
+    onSubmit("login", async () => {
+      await fetch("/login", { method: "POST", body: new URLSearchParams({ name: value("name") }) });
+      socket.disconnect().connect();
+    });
+    onSubmit("logout", async () => {
+      await fetch("/logout", { method: "POST" });
+      socket.disconnect().connect();
+    });
+    onSubmit("send", () => socket.emit("chat", value("text")));
+  </script>
+</body>
+</html>

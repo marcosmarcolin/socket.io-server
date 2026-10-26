@@ -48,6 +48,8 @@ $io->on('connection', function (Socket $socket): void {
 
 With `credentials`, `origin` can't be `'*'`: browsers reject that pair, so it throws.
 
+The [session-auth example](../examples/session-auth) puts it together: a page on another port logs in with a PHP session, and a middleware lets in only the sockets of logged-in sessions.
+
 CORS only covers HTTP long-polling: browsers don't apply it to WebSocket, so a page on another site can open a WebSocket to your server, with your cookies if they are `SameSite=None`. To refuse other origins on every transport, check the `Origin` header in a middleware too:
 
 ```php
