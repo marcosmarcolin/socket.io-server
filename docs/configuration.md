@@ -11,6 +11,7 @@
 | `maxPayload` | `1000000` | Largest message, in bytes; longer HTTP bodies get 413. `maxHttpBufferSize`, the reference's name, is accepted too. |
 | `upgradeTimeout` | `10000` | How long an upgrade from polling to WebSocket may take. |
 | `connectTimeout` | `45000` | How long a client may stay without joining a namespace. |
+| `connectionStateRecovery` | `false` | With `true`, a client that lost its connection and comes back within 2 minutes gets its socket back; see [Connection state recovery](#connection-state-recovery). An array changes `maxDisconnectionDuration` (ms, `120000`) and `skipMiddlewares` (`true`). |
 | `logger` | `null` | A `Closure(string $scope, string $message)` that gets the debug log; see [Debug log](#debug-log). |
 | `path` | `'/socket.io/'` | The URL path; the client's `path` option must match. |
 | `transports` | `['polling', 'websocket']` | The transports clients may use. With `['websocket']`, polling requests are refused, so clients need `transports: ['websocket']` too (otherwise they get `xhr poll error`). With `['polling']`, no upgrade is offered. |
@@ -22,6 +23,36 @@
 | `allowRequest` | `null` | A `Closure` that accepts or refuses each handshake before the session opens. See [Refusing a connection before the handshake](#refusing-a-connection-before-the-handshake). |
 
 Unknown options and wrong types throw `InvalidArgumentException`.
+
+## Connection state recovery
+
+As the reference's [connection state recovery](https://socket.io/docs/v4/connection-state-recovery), a client whose connection dropped gets back, when it reconnects within `maxDisconnectionDuration`:
+
+- the same `$socket->id`, its rooms and its `$socket->data`;
+- the events it missed meanwhile, in order, which the client handles before its `connect` event.
+
+```php
+$io = new SocketIO(3000, [
+    'connectionStateRecovery' => [
+        'maxDisconnectionDuration' => 2 * 60 * 1000,
+        'skipMiddlewares' => true,                     // a recovered socket doesn't run them again
+    ],
+]);
+
+$io->on('connection', function (Socket $socket): void {
+    if ($socket->recovered) {
+        return;                                        // rooms and data are back already
+    }
+    $socket->join('news');
+});
+```
+
+On the client, `socket.recovered` tells the same. Things to know:
+
+- **Only drops are recovered:** a lost transport, a ping timeout, or the server shutting down. A client or a server that calls `disconnect()`, with `true` too, starts over.
+- **Every event the server keeps gets an offset as its last argument**, a string the client sends back when it reconnects. Listeners that take a fixed number of arguments don't notice it; ones that read all their arguments see it. Events with an acknowledgement and volatile ones are neither kept nor given an offset.
+- **Events and sessions stay in the process's memory** for `maxDisconnectionDuration`, then go. A client that comes back later, or that received no event before it dropped, starts over.
+- **One process only:** with `ChannelAdapter` or `RedisAdapter` nothing is recovered, as with the reference's pub/sub adapters, since the client may come back on another process. See [Several processes](multiple-processes.md#limits).
 
 ## Cookies across origins
 

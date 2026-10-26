@@ -7,6 +7,8 @@ namespace Marcolin\SocketIO;
 use Closure;
 use InvalidArgumentException;
 use LogicException;
+use Marcolin\SocketIO\Adapter\BroadcastOptions;
+use Marcolin\SocketIO\Adapter\Session;
 use Marcolin\SocketIO\Engine\Request;
 use Marcolin\SocketIO\Engine\Socket as EngineSocket;
 use Marcolin\SocketIO\Event\AnyListeners;
@@ -25,6 +27,9 @@ use Throwable;
  * - `disconnecting` and `disconnect` (string $reason, ?Throwable $description);
  * - `error` (Throwable), for a packet that broke the protocol, just before the connection closes, or for an event a
  *   use() middleware stopped.
+ *
+ * With the connectionStateRecovery option, a socket that comes back within maxDisconnectionDuration of a disconnection
+ * it didn't ask for gets its id, rooms and data back, and the events it missed; $recovered says so.
  *
  * @property-read SocketEmitter $volatile emits that are dropped when the transport can't take them right now
  * @property-read BroadcastOperator $broadcast every other socket of the namespace
@@ -81,6 +86,10 @@ final class Socket extends Emitter
         public readonly Client $client,
         array $auth,
         public readonly string $id,
+        // The private id the client keeps to recover the session; null without connectionStateRecovery.
+        private readonly ?string $pid = null,
+        /** Whether this socket came back after a temporary disconnection, with its rooms, data and missed events. */
+        public readonly bool $recovered = false,
     ) {
         $this->anyListeners = new AnyListeners();
         $this->anyOutgoingListeners = new AnyListeners();
@@ -330,8 +339,18 @@ final class Socket extends Emitter
             $this->registerAck($id, $last, $timeout);
         }
 
+        $packet = new Packet(PacketType::Event, $this->nsp->name, [$event, ...$args], $id);
+        if ($this->pid !== null) {
+            // Through the adapter, which keeps the event for recovery; local, since this socket lives here.
+            $this->nsp->adapter()->broadcast(
+                $packet,
+                new BroadcastOptions([$this->id], volatile: $volatile, local: true, compress: $compress),
+            );
+
+            return;
+        }
         $this->anyOutgoingListeners->notify($event, ...$args);
-        $this->packet(new Packet(PacketType::Event, $this->nsp->name, [$event, ...$args], $id), $volatile, $compress);
+        $this->packet($packet, $volatile, $compress);
     }
 
     /**
@@ -387,7 +406,8 @@ final class Socket extends Emitter
     {
         $this->isConnected = true;
         $this->join($this->id);
-        $this->packet(new Packet(PacketType::Connect, $this->nsp->name, ['sid' => $this->id]));
+        $data = $this->pid === null ? ['sid' => $this->id] : ['sid' => $this->id, 'pid' => $this->pid];
+        $this->packet(new Packet(PacketType::Connect, $this->nsp->name, $data));
     }
 
     /**
@@ -426,6 +446,11 @@ final class Socket extends Emitter
             $reason->value,
         ));
         $this->dispatch('disconnecting', $reason->value, $description);
+        if ($this->pid !== null && $reason->isRecoverable()) {
+            $this->nsp->adapter()->persistSession(
+                new Session($this->id, $this->pid, $this->nsp->adapter()->socketRooms($this->id), $this->data),
+            );
+        }
         $this->cleanup();
         $this->client->remove($this);
         $this->isConnected = false;

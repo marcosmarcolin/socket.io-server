@@ -113,6 +113,17 @@ interface Adapter
     public function serverSideEmit(array $packet): void;
 
     /**
+     * Keeps the session of a socket that left, for the connectionStateRecovery option.
+     */
+    public function persistSession(Session $session): void;
+
+    /**
+     * The session kept under this private id, with the events sent after the offset that its socket missed, or null
+     * when the session expired, is unknown, or the offset is no longer kept.
+     */
+    public function restoreSession(string $pid, string $offset): ?RestoredSession;
+
+    /**
      * Releases what the adapter holds outside this process, when the server shuts down.
      */
     public function close(): void;

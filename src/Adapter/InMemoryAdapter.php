@@ -10,6 +10,7 @@ use Marcolin\SocketIO\Binary;
 use Marcolin\SocketIO\Event\Emitter;
 use Marcolin\SocketIO\Nsp;
 use Marcolin\SocketIO\Parser\Packet;
+use Marcolin\SocketIO\Parser\PacketType;
 use Marcolin\SocketIO\Socket;
 
 /**
@@ -19,6 +20,10 @@ use Marcolin\SocketIO\Socket;
  * `delete-room` (string $room) when a room gets its first member or loses its last; `join-room` and `leave-room`
  * (string $room, string $id) when a socket joins or leaves one, after `create-room` and before `delete-room`.
  * A socket's own room counts too.
+ *
+ * With the connectionStateRecovery option, it also keeps, for maxDisconnectionDuration, the sessions of the sockets
+ * that left and the events broadcast meanwhile, as the reference's SessionAwareAdapter: each event without an
+ * acknowledgement that isn't volatile gets an offset as its last argument, which the client sends back to recover.
  */
 class InMemoryAdapter extends Emitter implements Adapter
 {
@@ -27,6 +32,19 @@ class InMemoryAdapter extends Emitter implements Adapter
 
     /** @var array<string, array<string, true>> rooms by socket id */
     protected array $sids = [];
+
+    /** @var array<string, array{session: Session, disconnectedAt: int}> by private id, oldest first */
+    private array $sessions = [];
+
+    /**
+     * @var list<array{offset: string, emittedAt: int, parts: list<string|Binary>, rooms: list<string>,
+     *     except: list<string>}> the events kept for recovery, oldest first
+     */
+    private array $packets = [];
+
+    private ?string $offsetPrefix = null;
+
+    private int $nextOffset = 0;
 
     public function __construct(protected readonly Nsp $nsp)
     {
@@ -79,6 +97,22 @@ class InMemoryAdapter extends Emitter implements Adapter
 
     public function broadcast(Packet $packet, BroadcastOptions $options): void
     {
+        // As the reference: an acknowledgement can't be restored, and a volatile event may be lost anyway.
+        if (
+            $this->nsp->server->connectionStateRecovery !== null
+            && $packet->type === PacketType::Event
+            && $packet->id === null
+            && ! $options->volatile
+            && is_array($packet->data)
+        ) {
+            $offset = $this->offset();
+            $packet = new Packet($packet->type, $packet->nsp, [...array_values($packet->data), $offset]);
+            $parts = $this->encode($packet);
+            $this->keep($offset, $parts, $options);
+            $this->deliver($parts, $options, self::eventData($packet));
+
+            return;
+        }
         $this->deliver($this->encode($packet), $options, self::eventData($packet));
     }
 
@@ -160,6 +194,55 @@ class InMemoryAdapter extends Emitter implements Adapter
         );
     }
 
+    public function persistSession(Session $session): void
+    {
+        $recovery = $this->nsp->server->connectionStateRecovery;
+        if ($recovery === null) {
+            return;
+        }
+        $now = $this->nsp->server->scheduler()->now();
+        foreach ($this->sessions as $pid => $kept) {
+            if ($kept['disconnectedAt'] + $recovery->maxDisconnectionDuration >= $now) {
+                break;
+            }
+            unset($this->sessions[$pid]);
+        }
+        // Removed first, so the newest stays last.
+        unset($this->sessions[$session->pid]);
+        $this->sessions[$session->pid] = ['session' => $session, 'disconnectedAt' => $now];
+    }
+
+    public function restoreSession(string $pid, string $offset): ?RestoredSession
+    {
+        $recovery = $this->nsp->server->connectionStateRecovery;
+        $kept = $this->sessions[$pid] ?? null;
+        if ($recovery === null || $kept === null) {
+            return null;
+        }
+        $now = $this->nsp->server->scheduler()->now();
+        if ($kept['disconnectedAt'] + $recovery->maxDisconnectionDuration < $now) {
+            unset($this->sessions[$pid]);
+
+            return null;
+        }
+        $found = false;
+        $missed = [];
+        foreach ($this->packets as $packet) {
+            if ($found && self::reaches($kept['session']->rooms, $packet['rooms'], $packet['except'])) {
+                $missed[] = $packet['parts'];
+            }
+            $found = $found || $packet['offset'] === $offset;
+        }
+        if (! $found) {
+            // The offset may be too old.
+            return null;
+        }
+        // Unlike the reference, a session is recovered once: two clients can't take the same socket id.
+        unset($this->sessions[$pid]);
+
+        return new RestoredSession($kept['session'], $missed);
+    }
+
     public function close(): void
     {
     }
@@ -207,6 +290,60 @@ class InMemoryAdapter extends Emitter implements Adapter
             }
             $socket->client->write($parts, $options->volatile, $options->compress);
         }
+    }
+
+    /**
+     * A new offset, unique in this adapter: a random prefix, so a client from before a restart matches nothing.
+     */
+    private function offset(): string
+    {
+        $this->offsetPrefix ??= bin2hex(random_bytes(4));
+
+        return $this->offsetPrefix . '.' . base_convert((string) $this->nextOffset++, 10, 36);
+    }
+
+    /**
+     * Keeps an event for recovery, dropping the ones older than maxDisconnectionDuration.
+     *
+     * @param list<string|Binary> $parts
+     */
+    private function keep(string $offset, array $parts, BroadcastOptions $options): void
+    {
+        $recovery = $this->nsp->server->connectionStateRecovery;
+        if ($recovery === null) {
+            return;
+        }
+        $now = $this->nsp->server->scheduler()->now();
+        $expired = 0;
+        while (
+            isset($this->packets[$expired])
+            && $this->packets[$expired]['emittedAt'] + $recovery->maxDisconnectionDuration < $now
+        ) {
+            ++$expired;
+        }
+        if ($expired > 0) {
+            $this->packets = array_slice($this->packets, $expired);
+        }
+        $this->packets[] = [
+            'offset' => $offset,
+            'emittedAt' => $now,
+            'parts' => $parts,
+            'rooms' => $options->rooms,
+            'except' => $options->except,
+        ];
+    }
+
+    /**
+     * Whether a kept event reaches a socket in these rooms, as the reference's shouldIncludePacket().
+     *
+     * @param list<string> $socketRooms
+     * @param list<string> $rooms
+     * @param list<string> $except
+     */
+    private static function reaches(array $socketRooms, array $rooms, array $except): bool
+    {
+        return ($rooms === [] || array_intersect($socketRooms, $rooms) !== [])
+            && array_intersect($socketRooms, $except) === [];
     }
 
     /**

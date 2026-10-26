@@ -216,7 +216,13 @@ final class Nsp extends Emitter
      */
     public function add(Client $client, array $auth, Closure $onConnect): void
     {
-        $socket = new Socket($this, $client, $auth, $this->server->newSocketId());
+        $socket = $this->recover($client, $auth) ?? new Socket(
+            $this,
+            $client,
+            $auth,
+            $this->server->newSocketId(),
+            $this->server->connectionStateRecovery === null ? null : $this->server->newPrivateSessionId(),
+        );
         $this->connecting[$socket->id] = $socket;
 
         $done = function (?Throwable $error) use ($client, $socket, $onConnect): void {
@@ -252,7 +258,46 @@ final class Nsp extends Emitter
             $this->dispatch('connect', $socket);
             $this->dispatch('connection', $socket);
         };
+        if ($socket->recovered && $this->server->connectionStateRecovery?->skipMiddlewares) {
+            $done(null);
+
+            return;
+        }
         $this->run($this->middlewares, 0, $socket, $done);
+    }
+
+    /**
+     * The socket of a session the client asks back with the pid and offset of its CONNECT, as the reference does:
+     * same id, rooms and data, and the events it missed sent first, so the client handles them on connecting.
+     *
+     * @param array<mixed> $auth
+     */
+    private function recover(Client $client, array $auth): ?Socket
+    {
+        $pid = $auth['pid'] ?? null;
+        $offset = $auth['offset'] ?? null;
+        if ($this->server->connectionStateRecovery === null || ! is_string($pid) || ! is_string($offset)) {
+            return null;
+        }
+        $restored = $this->adapter->restoreSession($pid, $offset);
+        if ($restored === null) {
+            return null;
+        }
+        $session = $restored->session;
+        $socket = new Socket($this, $client, $auth, $session->sid, $session->pid, recovered: true);
+        $socket->join($session->rooms);
+        $socket->data = $session->data;
+        foreach ($restored->missedPackets as $parts) {
+            $client->write($parts);
+        }
+        $this->server->logger()->debug('socket.io:socket', sprintf(
+            'socket %s recovered on %s with %d missed packets',
+            $session->sid,
+            $this->name,
+            count($restored->missedPackets),
+        ));
+
+        return $socket;
     }
 
     /**

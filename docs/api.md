@@ -41,6 +41,7 @@
 | `$socket->id` | 24 hexadecimal characters, different from the Engine.IO session id and per namespace. |
 | `$socket->handshake` | `headers` (lower-case names), `time`, `address`, `xdomain`, `secure`, `issued` (ms), `url`, `query`, and `auth`, the client's `auth` option. |
 | `$socket->data` | A free-form array for your own data. |
+| `$socket->recovered` | Whether the socket came back after a dropped connection, with its id, rooms, data and the missed events; see [Connection state recovery](configuration.md#connection-state-recovery). |
 | `$socket->rooms`, `$socket->connected`, `$socket->disconnected` | Its rooms (its own id included) and its state. |
 | `$socket->nsp`, `$socket->request`, `$socket->conn` | Its namespace, the HTTP request that opened the connection, and the Engine.IO session. |
 | `on(string $event, Closure $listener)` | An event from the client. The listener gets the arguments, plus an acknowledgement `Closure` last when the client asked for one; it answers once. |
