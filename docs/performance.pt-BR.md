@@ -94,7 +94,7 @@ Todos os números acima vêm de uma máquina, com o servidor e os clientes no Do
 |---|---|
 | Máquina | Mac16,7 (MacBook Pro), Apple M4 Pro, 14 núcleos, 24 GB de memória, macOS 27.2 |
 | Docker | Docker Desktop, engine 29.9.2; VM Linux com 14 CPUs e 8 GB, kernel 7.0.14 |
-| Servidor PHP | PHP 8.1.34, Workerman 5.2.3, `event` 3.1.4 e Swoole 6.1.11 (`tests/Load/Dockerfile`), `memory_limit=1G` |
+| Servidor PHP | PHP 8.1.34, Workerman 5.2.3, `event` 3.1.4 e Swoole 6.1.11, `memory_limit=1G` |
 | Servidor Node.js | Node.js 24.21.0, `socket.io` 4.8.4 |
 | Clientes | Node.js 24.21.0, `socket.io-client` 4.8.4, só WebSocket, num contêiner próprio que compartilha a rede do servidor |
 

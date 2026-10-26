@@ -87,7 +87,7 @@ SERVER=node CLIENTS=10000 tests/Load/run.sh    # the reference Node.js server, f
 LOOP=swoole tests/Integration/run.sh           # any compliance, integration or load script on another event loop
 ```
 
-`tests/php-server.sh` starts the PHP server of every script: in the php service, or, with `LOOP=select|event|swoole`, in the image of `tests/Load/Dockerfile` (PHP 8.1 with `event` and Swoole 6.1, the last line for PHP 8.1), where `tests/event-loop.php`, loaded with `auto_prepend_file`, sets `Worker::$eventLoopClass`, so the servers run unchanged. CI's `swoole` job runs both suites and the integration tests on Swoole.
+`tests/php-server.sh` starts the PHP server of every script: in the php service, or, with `LOOP=select|event|swoole`, in the image of `tests/Load/Dockerfile` (PHP 8.1 with `event`) or, for Swoole, `tests/Load/swoole.Dockerfile` (the Swoole project's prebuilt `phpswoole/swoole:6.1.10-php8.1`, 6.1 being the last line for PHP 8.1, plus `pcntl`; compiling Swoole took minutes per CI run), where `tests/event-loop.php`, loaded with `auto_prepend_file`, sets `Worker::$eventLoopClass`, so the servers run unchanged. A failed image build prints its log. CI's `swoole` job runs both suites and the integration tests on Swoole.
 
 The integration client (`tests/Integration/client/`) pins `socket.io-client` in `package.json`, and its `package-lock.json` is committed, so `npm ci` checks every package's integrity hash. Its tests use `node:test`, so the client is the only dependency. Each scenario runs over polling only, WebSocket only, and polling with the upgrade. To move to a newer client, regenerate the lockfile in Docker with `npm install --package-lock-only --ignore-scripts`, then read what changed.
 
