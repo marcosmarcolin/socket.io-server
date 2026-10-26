@@ -104,8 +104,30 @@ RedisAdapter::factory(
 - Servidores de apps diferentes no mesmo Redis precisam de `key`s diferentes, senão recebem os broadcasts uns dos outros.
 - Quando o Redis está inacessível, o adapter tenta de novo a cada segundo e informa a falha uma vez ao `onError` (`Worker::log` por padrão). Até 1.000 publicações esperam a conexão; mensagens publicadas enquanto um processo estava desconectado se perdem, como sempre no pub/sub do Redis.
 
+## Enviando do seu app PHP: o Emitter
+
+O `Emitter` envia para os clientes a partir de qualquer código PHP que não seja um servidor Socket.IO, como um request do PHP-FPM no seu app. Ele publica no Redis o que um servidor publicaria, e os servidores com o `RedisAdapter` entregam aos seus sockets:
+
+```php
+use Marcolin\SocketIO\Emitter;
+
+$emitter = Emitter::redis('redis://127.0.0.1:6379');
+
+$emitter->emit('announcement', 'Maintenance at 22:00');          // everyone on "/"
+$emitter->to('user:42')->emit('order-approved', ['id' => 1001]); // one room, on every server
+$emitter->of('/admin')->except('muted')->emit('alert', $alert);
+$emitter->in('user:42')->disconnectSockets();                     // log a user out everywhere
+$emitter->serverSideEmit('cache-clear', 'users');                 // the servers' on('cache-clear')
+```
+
+- Usa I/O bloqueante, então não precisa de event loop. Conecta no primeiro envio e mantém a conexão; `Emitter::redis($url, $key, $timeout)` recebe a URL e a `key` dos servidores, e quanto esperar pelo Redis, 5 segundos por padrão. Falhas lançam `RuntimeException`.
+- `of()`, `to()`, `in()`, `except()` e `volatile` devolvem um emitter novo, então um pode ser guardado e reaproveitado.
+- Ele só envia: sem acknowledgements e sem `fetchSockets()`, como os pacotes de emitter da referência. Os dados seguem as regras do `emit()`, incluindo `Binary`.
+- Os servidores não contam um emitter como servidor, então ele nunca os faz esperar por respostas.
+- O [exemplo emitter](../examples/emitter) tem um endpoint PHP comum que envia notificações para as abas abertas.
+
 ## Limites
 
-- Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem. Definir `'transports' => ['websocket']` também no servidor recusa o polling de vez. Entre máquinas, um load balancer com sticky sessions permite o polling.
+- Com vários processos na mesma porta, os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem. Definir `'transports' => ['websocket']` também no servidor recusa o polling de vez. Atrás de um proxy com sticky sessions e uma porta por processo, o polling funciona; veja [Atrás de um proxy reverso](reverse-proxy.pt-BR.md).
 - `fetchSockets()` sem callback e `allSockets()` leem o processo atual.
 - `local` mantém qualquer um dos itens acima no processo atual: `$io->local->emit('reload')`, `$io->local->disconnectSockets()`.

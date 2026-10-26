@@ -12,7 +12,7 @@ use Closure;
  * Messages are arrays of scalars and nested arrays, never objects, so they cross any serialization safely.
  * A publisher receives its own messages too, when it is subscribed to the channel.
  */
-interface PubSub
+interface PubSub extends Publisher
 {
     /**
      * Sets the one listener of a channel, replacing any previous one.
@@ -22,9 +22,4 @@ interface PubSub
     public function subscribe(string $channel, Closure $listener): void;
 
     public function unsubscribe(string $channel): void;
-
-    /**
-     * @param array<string, mixed> $message
-     */
-    public function publish(string $channel, array $message): void;
 }

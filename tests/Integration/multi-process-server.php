@@ -36,7 +36,7 @@ $io->on('workerStart', static function () use ($io, $redisUrl): void {
     );
 });
 
-$io->on('connection', static function (Socket $socket) use ($io): void {
+$io->on('connection', static function (Socket $socket) use ($io, $redisUrl): void {
     $socket->on('whoami', static function (Closure $ack): void {
         $ack(getmypid());
     });
@@ -60,11 +60,11 @@ $io->on('connection', static function (Socket $socket) use ($io): void {
         $socket->broadcast->emit('broadcast-message', $message);
     });
     $socket->on('join-all', static function (string $room, Closure $ack) use ($io): void {
-        $io->sockets->socketsJoin($room);
+        $io->socketsJoin($room);
         $ack(true);
     });
     $socket->on('leave-all', static function (string $room, Closure $ack) use ($io): void {
-        $io->sockets->socketsLeave($room);
+        $io->socketsLeave($room);
         $ack(true);
     });
     $socket->on('kick', static function (string $socketId) use ($io): void {
@@ -110,6 +110,18 @@ $io->on('connection', static function (Socket $socket) use ($io): void {
             $sockets[0]->timeout(3000)->emit('question', $reply);
         });
     });
+    // Runs another PHP process that emits through Redis with the Emitter, as a PHP-FPM request would.
+    $emitFromAnotherProcess = static function (string $room, string $message, Closure $ack) use ($redisUrl): void {
+        if ($redisUrl === null) {
+            $ack(['skipped' => true]);
+
+            return;
+        }
+        $command = [PHP_BINARY, __DIR__ . '/emitter.php', $room, $message];
+        exec(implode(' ', array_map('escapeshellarg', $command)) . ' 2>&1', $output, $status);
+        $ack(['skipped' => false, 'status' => $status, 'output' => implode("\n", $output)]);
+    };
+    $socket->on('emit-from-another-process', $emitFromAnotherProcess);
     // Asks the other processes for their pid.
     $socket->on('servers', static function (Closure $ack) use ($io): void {
         $io->serverSideEmit('pid', static function (?Throwable $error, array $pids) use ($ack): void {

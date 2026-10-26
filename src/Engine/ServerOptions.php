@@ -25,6 +25,7 @@ final class ServerOptions
      * @param (Closure(Request $request): (bool|string))|null $allowRequest decides each handshake: true lets it in,
      *        false or a message refuses it with code 4 (Forbidden)
      * @param bool $allowUpgrades whether the handshake offers upgrades; without them, polling clients stay on polling
+     * @param Cookie|null $cookie the cookie with the session id on the polling handshake, for sticky sessions
      */
     public function __construct(
         public readonly int $pingInterval = 25_000,
@@ -36,6 +37,7 @@ final class ServerOptions
         public readonly array $transports = self::TRANSPORTS,
         public readonly ?Closure $allowRequest = null,
         public readonly bool $allowUpgrades = true,
+        public readonly ?Cookie $cookie = null,
     ) {
         self::assertPositive('pingInterval', $pingInterval);
         self::assertPositive('pingTimeout', $pingTimeout);
@@ -60,7 +62,7 @@ final class ServerOptions
      */
     public static function fromArray(array $options): self
     {
-        $known = [...self::INT_OPTIONS, 'path', 'cors', 'transports', 'allowRequest', 'allowUpgrades'];
+        $known = [...self::INT_OPTIONS, 'path', 'cors', 'transports', 'allowRequest', 'allowUpgrades', 'cookie'];
         foreach (array_keys($options) as $key) {
             if (! in_array($key, $known, true)) {
                 throw new InvalidArgumentException(sprintf('Unknown Engine.IO option "%s"', $key));
@@ -109,6 +111,7 @@ final class ServerOptions
             transports: $names,
             allowRequest: $allowRequest,
             allowUpgrades: $allowUpgrades,
+            cookie: Cookie::fromOption($options['cookie'] ?? false),
         );
     }
 

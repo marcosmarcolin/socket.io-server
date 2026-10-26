@@ -54,11 +54,14 @@ after(() => {
 });
 
 describe("engine events", () => {
-  test("initial_headers and headers change the polling answers", TIMEOUT, async () => {
+  test("initial_headers and headers change the polling answers, after the cookie option", TIMEOUT, async () => {
     const handshake = await fetch(`${URL}/socket.io/?EIO=4&transport=polling`);
     const [, sid] = /"sid":"([^"]+)"/.exec(await handshake.text());
 
-    assert.deepEqual(handshake.headers.getSetCookie(), ["io-test=1; Path=/"]);
+    assert.deepEqual(handshake.headers.getSetCookie(), [
+      `io=${sid}; Path=/; HttpOnly; SameSite=Lax`,
+      "io-test=1; Path=/",
+    ]);
     assert.equal(handshake.headers.get("x-engine"), "php");
 
     const post = await fetch(`${URL}/socket.io/?EIO=4&transport=polling&sid=${sid}`, { method: "POST", body: "1" });

@@ -24,7 +24,7 @@ case "${1:-single}" in
     example)
         [ -n "${2:-}" ] || { echo "usage: $0 example <name>" >&2; exit 2; }
         server_script="examples/$2/start.php"; test_file="examples/$2.test.js"
-        [ "$2" != "redis" ] || redis=1 ;;
+        case "$2" in redis|emitter) redis=1 ;; esac ;;
     *) echo "usage: $0 [single|multi-process|multi-process-redis|example <name>|examples]" >&2; exit 2 ;;
 esac
 echo "integration: $server_script${redis:+ with Redis}"
