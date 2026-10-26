@@ -67,6 +67,14 @@ final class ServerOptions
      */
     public static function fromArray(array $options): self
     {
+        // The reference calls maxPayload maxHttpBufferSize; either name works, not both.
+        if (array_key_exists('maxHttpBufferSize', $options)) {
+            if (array_key_exists('maxPayload', $options)) {
+                throw new InvalidArgumentException('Give "maxPayload" or its alias "maxHttpBufferSize", not both');
+            }
+            $options['maxPayload'] = $options['maxHttpBufferSize'];
+            unset($options['maxHttpBufferSize']);
+        }
         $known = [
             ...self::INT_OPTIONS,
             'path',
@@ -150,6 +158,7 @@ final class ServerOptions
             sprintf('The "%s" option must be a boolean or ["threshold" => bytes]', $name),
         );
     }
+
 
     private static function corsFromArray(mixed $cors): ?Cors
     {

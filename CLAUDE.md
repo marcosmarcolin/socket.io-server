@@ -55,10 +55,11 @@ A change is done only when all of these hold:
   - network I/O stays behind small interfaces that tests can replace with fakes.
 - Classes are `final` by default. Inheritance only where there's a documented extension point, such as adapters.
 - **No dynamic properties**, neither on our classes nor on Workerman objects. Per-connection state goes in a `WeakMap` or in `$connection->context`.
+- Every emitter (`Event\Emitter`) has `on`, `once`, `off`, `listeners`, and the reference's names `eventNames`, `removeListener`, `removeAllListeners`.
 - Magic only where the public API requires it and it's documented: `__get` for `broadcast`, `volatile` and `local` (and `volatile` on the `Emitter`), for the read-only `connected`, `disconnected` and `rooms` of `Socket`, and for `$io->worker`, annotated with `@property-read`.
 - PHPStan at level `max`. No new `ignoreErrors` without a written justification. Third-party docblocks PHPStan can't read are corrected with stubs in `phpstan-stubs/`, each explaining why.
 - Short comments, one line, only to explain why.
-- No `echo`/`print`. Errors become exceptions or `error` events.
+- No `echo`/`print`. Errors become exceptions or `error` events, and the debug log goes to the `logger` option.
 - No production dependencies besides Workerman. `workerman/channel` is optional (in `suggest`).
 - Everything in English: code, comments, docs, commits, PRs. The exceptions are the Brazilian Portuguese translations of the user documentation: `README.pt-BR.md` and `docs/*.pt-BR.md`.
 - **`CHANGELOG.md`** follows Keep a Changelog, in English only, like the commits it summarizes. A PR that changes behavior, the API or the requirements adds its line under `[Unreleased]`. A release renames that section to the version and date.
@@ -138,7 +139,7 @@ src/
     SessionIdGenerator.php, RandomSessionIdGenerator.php  20-character base64url session ids
     Socket.php                  session: state, heartbeat, upgrade, write buffer
     SocketState.php, CloseReason.php  session state; close reasons with the reference's strings
-    ServerOptions.php           pingInterval, pingTimeout, maxPayload, upgradeTimeout, path, cors, transports, allowRequest, allowUpgrades, cookie; fromArray()
+    ServerOptions.php           pingInterval, pingTimeout, maxPayload (alias maxHttpBufferSize), upgradeTimeout, path, cors, transports, allowRequest, allowUpgrades, cookie; fromArray()
     Cookie.php                  the cookie option: io=<sid> on the polling handshake, for sticky sessions
     Transport/Transport.php     base transport (Emitter): packet, ready, drain, error, close
     Transport/Polling.php       pending GET, POST, noop on upgrade
@@ -161,6 +162,7 @@ src/
   RemoteSocket.php              a socket on another server, from fetchSockets() with a callback
   AckCollector.php              the answers to one broadcast with acknowledgement, until all arrive or the timeout
   Emitter.php                   sends to the servers' clients from outside them (PHP-FPM), through a Publisher
+  Logger.php                    the debug log of the logger option, or nothing
   Parser/                       socket.io-parser (protocol v5)
     Encoder.php                 Packet → list<string|Binary>: the text part, then one Binary per attachment
     Decoder.php                 one per connection: add(string|Binary): ?Packet, reset()
@@ -322,6 +324,7 @@ src/
     - each server's `broadcastWithAck()` reports how many sockets it reached, and each answer counts once, with its first argument; `AckCollector` waits for `serverCount()` reports;
     - the callback gets `null` and the answers in arrival order once every server reported and all answered (at once with `[]` when none was reached), or a `TimeoutException` and the answers so far, after which every socket of the namespace forgets the id;
     - a `volatile` packet dropped for a busy transport still counts, so the wait ends with the timeout.
+- **Debug log** (`logger` option, a `Closure(string $scope, string $message)`), in place of the reference's `debug` module: scopes `engine` (session opened with transport and address, request refused with code and message), `engine:socket` (upgraded, closed with reason), `socket.io:client` (unknown namespace, connect timeout, invalid or out-of-turn packet), `socket.io:socket` (joined, refused by a middleware, left with reason, event stopped by a `use()` middleware), `socket.io:adapter` (cluster servers joining and leaving). The engine lines come from the engine's events, wired by `SocketIO` only when the option is set; the others call `SocketIO::logger()`. Lifecycle steps only, never per packet, and never event data.
 - **Socket middlewares** (`$socket->use()`), as the reference's `socket.use()`:
   - they run in order for each received event of a connected socket, after the `onAny` listeners and before the event's own, getting `[name, ...args]` with the ack `Closure` last when asked;
   - `$next()` lets the event through; `$next($error)` stops it and dispatches `error` with `$error`, and the socket stays connected; only the first call counts, and it may come later;
@@ -374,7 +377,7 @@ $io->on('connection', function (Socket $socket) use ($io): void {
 Worker::runAll();
 ```
 
-- `SocketIO`: `$io->engine` (its `initial_headers`, `headers` and `connection_error` events), `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `fetchSockets(?Closure)`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()` (all on `/`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- `SocketIO`: `$io->engine` (its `initial_headers`, `headers` and `connection_error` events), `of()`, `on()`, `once()`, `off()`, `listeners()`, `eventNames()`, `removeListener()`, `removeAllListeners()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method; `eventNames()` lists both), `new_namespace` (Nsp) on the `/` namespace when another namespace is created, as the reference's `of()` emits it on `this.sockets` (its docs say the server, its code says the main namespace), `serverSideEmit()`, `fetchSockets(?Closure)`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()` (all on `/`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
 - **`close()`**, as the reference's:
   1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
   2. each adapter's `close()` runs (`PubSubAdapter` unsubscribes from its channels);
