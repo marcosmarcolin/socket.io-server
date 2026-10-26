@@ -2,12 +2,34 @@
 
 [English](multiple-processes.md) · **Português (Brasil)**
 
-O broadcast chega aos outros processos por um adapter, definido no `workerStart` de cada processo:
+O broadcast e os helpers de sockets chegam aos outros processos por um adapter, definido no `workerStart` de cada processo:
 
 - `ChannelAdapter`, sobre um servidor [workerman/channel](https://github.com/walkor/channel): nada mais para rodar, bom para uma máquina.
 - `RedisAdapter`, sobre um servidor Redis: para várias máquinas, ou quando você já usa Redis. Não precisa de nenhum pacote extra.
 
 Os dois funcionam do mesmo jeito: cada broadcast é codificado uma vez e publicado uma vez, e cada processo o entrega aos seus próprios sockets.
+
+## O que atravessa processos
+
+- Broadcasts: `emit`, `to`, `except`, `broadcast`, `volatile`.
+- `socketsJoin()`, `socketsLeave()` e `disconnectSockets()`: `$io->in($userRoom)->disconnectSockets()` desconecta um usuário onde quer que estejam os sockets dele.
+- `serverSideEmit()`: eventos de um servidor para os outros, que escutam com `on()` no mesmo namespace. Um `Closure` no fim recebe uma resposta por servidor:
+
+```php
+// On every server: answers the others.
+$io->on('ping', function (string $from, Closure $ack): void {
+    $ack(gethostname());
+});
+
+// On one server: asks the others, and gets one answer per server.
+$io->serverSideEmit('ping', 'web-1', function (?Throwable $error, array $hosts): void {
+    // $error is a TimeoutException when some server didn't answer within 5 seconds.
+});
+```
+
+Cada servidor sabe quantos outros rodam o namespace pelos heartbeats deles, enviados depois de 5 segundos sem publicar nada; um servidor em silêncio por 10 segundos, ou que fechou, deixa de contar. Os dados do `serverSideEmit()` seguem as mesmas regras do `emit()`, incluindo `Binary`.
+
+`fetchSockets()` e `allSockets()` ainda leem o processo atual.
 
 ## workerman/channel
 
@@ -86,5 +108,5 @@ RedisAdapter::factory(
 ## Limites
 
 - Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem. Definir `'transports' => ['websocket']` também no servidor recusa o polling de vez. Entre máquinas, um load balancer com sticky sessions permite o polling.
-- Só o broadcast atravessa processos (`emit`, `to`, `except`, `broadcast`). `fetchSockets`, `allSockets`, `socketsJoin`, `socketsLeave` e `disconnectSockets` agem no processo atual.
+- `fetchSockets()` e `allSockets()` leem o processo atual.
 - Broadcasts com acknowledgement (`timeout()->emit(..., $callback)`) ainda não atravessam processos: os dois adapters lançam exceção.

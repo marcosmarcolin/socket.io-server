@@ -11,12 +11,13 @@
 | `$io->worker` | O worker ligado, ou `null`. |
 | `of(string $name): Nsp` | O namespace com esse nome, criado no primeiro uso. |
 | `$io->sockets` | O namespace principal, `/`. |
-| `on('connection', fn (Socket $socket))` | O evento `connection` do namespace principal. |
+| `on('connection', fn (Socket $socket))` | O evento `connection` do namespace principal; qualquer outro evento, menos `workerStart` e `workerStop`, também é do namespace principal, como os do `serverSideEmit()`. |
 | `on('workerStart' \| 'workerStop', fn (Worker $worker))` | Cada processo iniciando ou parando. |
 | `use(fn (Socket $socket, Closure $next))` | Um middleware em `/`. |
 | `adapter(fn (Nsp $nsp): Adapter)` | Como os namespaces guardam as salas e fazem broadcast, por exemplo `ChannelAdapter::factory()` ou `RedisAdapter::factory()`. |
 | `close()` | Desliga o servidor: cada socket sai com `server shutting down`, as conexões fecham, e o worker para de aceitar novas neste processo. |
 | `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcast em `/`, como num namespace. |
+| `serverSideEmit(string $event, ...$args)` | Um evento para `/` nos outros servidores; veja `Nsp`. |
 
 ## Namespaces: `Nsp`
 
@@ -27,7 +28,8 @@
 | `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `compress()`, `timeout()` | Broadcast para o namespace. Veja [Acknowledgements](#acknowledgements) para o `timeout()`. |
 | `sockets(): array<string, Socket>` | Os sockets conectados, por id. |
 | `allSockets(): list<string>` | Os ids deles. |
-| `fetchSockets(): list<Socket>`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets(bool $close = false)` | Agem nos sockets selecionados; use `to()` e `except()` antes para selecionar. |
+| `fetchSockets(): list<Socket>`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets(bool $close = false)` | Agem nos sockets selecionados; use `to()` e `except()` antes para selecionar. Com `ChannelAdapter` ou `RedisAdapter`, `socketsJoin()`, `socketsLeave()` e `disconnectSockets()` chegam a todos os processos; `fetchSockets()` lê este. |
+| `serverSideEmit(string $event, ...$args)` | Envia um evento para este namespace nos outros servidores, cujos listeners `on($event)` o recebem. Um `Closure` no fim recebe `(?Throwable $error, array $responses)`, uma resposta por servidor; o erro é um `TimeoutException` depois de 5 segundos. Precisa do `ChannelAdapter` ou do `RedisAdapter`; `connect`, `connection` e `new_namespace` são reservados. Veja [Vários processos](multiple-processes.pt-BR.md#o-que-atravessa-processos). |
 
 ## `Socket`
 

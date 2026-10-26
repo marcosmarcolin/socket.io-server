@@ -127,6 +127,21 @@ class InMemoryAdapter implements Adapter
         }
     }
 
+    public function serverCount(): int
+    {
+        return 1;
+    }
+
+    /**
+     * @throws LogicException always: there are no other servers to reach
+     */
+    public function serverSideEmit(array $packet): void
+    {
+        throw new LogicException(
+            'serverSideEmit() needs an adapter that reaches other servers, such as ChannelAdapter or RedisAdapter',
+        );
+    }
+
     public function close(): void
     {
     }

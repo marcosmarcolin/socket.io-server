@@ -55,12 +55,33 @@ $io->on('connection', static function (Socket $socket) use ($io): void {
     $socket->on('broadcast', static function (string $message) use ($socket): void {
         $socket->broadcast->emit('broadcast-message', $message);
     });
+    $socket->on('join-all', static function (string $room, Closure $ack) use ($io): void {
+        $io->sockets->socketsJoin($room);
+        $ack(true);
+    });
+    $socket->on('leave-all', static function (string $room, Closure $ack) use ($io): void {
+        $io->sockets->socketsLeave($room);
+        $ack(true);
+    });
+    $socket->on('kick', static function (string $socketId) use ($io): void {
+        $io->in($socketId)->disconnectSockets();
+    });
+    // Asks the other processes for their pid.
+    $socket->on('servers', static function (Closure $ack) use ($io): void {
+        $io->serverSideEmit('pid', static function (?Throwable $error, array $pids) use ($ack): void {
+            $ack(['error' => $error?->getMessage(), 'pids' => $pids]);
+        });
+    });
     // Sends numbered events to every client, for the scale check.
     $socket->on('flood', static function (int $count) use ($io): void {
         for ($i = 0; $i < $count; $i++) {
             $io->emit('flood', $i);
         }
     });
+});
+
+$io->on('pid', static function (Closure $ack): void {
+    $ack(getmypid());
 });
 
 // Dual-stack: the client connects to "localhost", which may resolve to ::1.
