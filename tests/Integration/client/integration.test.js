@@ -248,6 +248,29 @@ for (const mode of Object.keys(MODES)) {
       await assert.rejects(socket.timeout(200).emitWithAck("never-answer"), /operation has timed out/);
     });
 
+    test("sends and receives binary data with forceBase64", TIMEOUT, async () => {
+      // The client sends binary as base64 text and asks for the same with b64, even over WebSocket.
+      const socket = await connected(mode, "/", { forceBase64: true });
+      const bytes = Buffer.from([0, 1, 2, 255]);
+
+      const echoed = await socket.emitWithAck("echo", { file: bytes });
+      assert.deepEqual(echoed.file, bytes);
+
+      socket.emit("get-binary");
+      const [message] = await next(socket, "binary");
+      assert.deepEqual(message.file, Buffer.from([0, 1, 2, 255]));
+    });
+
+    test("accepts the first WebSocket subprotocol the client offers", TIMEOUT, async () => {
+      // The client refuses a 101 without one of the subprotocols it offered.
+      const socket = await connected(mode, "/", { protocols: ["chat.v2", "chat.v1"] });
+
+      assert.equal(await socket.emitWithAck("echo", "with a subprotocol"), "with a subprotocol");
+      if (socket.io.engine.transport.name === "websocket") {
+        assert.equal(socket.io.engine.transport.ws.protocol, "chat.v2");
+      }
+    });
+
     test("sends and receives binary data", TIMEOUT, async () => {
       const socket = await connected(mode);
       const bytes = Buffer.from([0, 1, 2, 255]);

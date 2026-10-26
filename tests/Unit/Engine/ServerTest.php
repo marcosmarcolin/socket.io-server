@@ -779,6 +779,50 @@ final class ServerTest extends TestCase
         self::assertFalse($ran);
     }
 
+    public function testAWebSocketWithB64GetsBinaryAsBase64Text(): void
+    {
+        $connection = new FakeWebSocketConnection();
+        $request = $this->webSocketRequest('/engine.io/?EIO=4&transport=websocket&b64=1');
+        $this->server->handleWebSocket($request, $connection);
+        $connection->sent = [];
+
+        $this->connections[0]->send(new Binary("\x01\x02"));
+
+        self::assertSame([['data' => 'bAQI=', 'binary' => false]], $connection->sent);
+    }
+
+    public function testAWebSocketWithoutB64GetsBinaryFrames(): void
+    {
+        $connection = new FakeWebSocketConnection();
+        $this->server->handleWebSocket($this->webSocketRequest('/engine.io/?EIO=4&transport=websocket'), $connection);
+        $connection->sent = [];
+
+        $this->connections[0]->send(new Binary("\x01\x02"));
+
+        self::assertSame([['data' => "\x01\x02", 'binary' => true]], $connection->sent);
+    }
+
+    /**
+     * @return iterable<string, array{string|null, string|null}>
+     */
+    public static function subprotocols(): iterable
+    {
+        yield 'none offered' => [null, null];
+        yield 'one' => ['chat', 'chat'];
+        yield 'the first of several' => ['chat.v2, chat.v1', 'chat.v2'];
+        yield 'not a token' => ['bad protocol', null];
+        yield 'empty' => ['', null];
+    }
+
+    #[DataProvider('subprotocols')]
+    public function testPicksTheFirstSubprotocolOffered(?string $offered, ?string $picked): void
+    {
+        $headers = $offered === null ? [] : ['Sec-WebSocket-Protocol' => $offered];
+        $request = new Request('/engine.io/', ['EIO' => '4', 'transport' => 'websocket'], $headers);
+
+        self::assertSame($picked, $this->server->webSocketProtocol($request));
+    }
+
     public function testClientsCountCountsTheOpenSessions(): void
     {
         $this->handshake();

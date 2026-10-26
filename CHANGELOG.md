@@ -38,6 +38,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- **Clients with `forceBase64`** work over WebSocket: a text frame starting with `b` is read as base64 binary instead of closing the connection, and a client that asks with `b64` gets binary as base64 text, as in the reference.
+- **Clients that offer WebSocket subprotocols** (the client's `protocols` option) connect: the 101 accepts the first one, as the reference's `ws` does, where a browser refused a 101 without it.
 - **A session whose ping timeout just ended no longer answers.** Workerman handles ready sockets before due timers, so a request or a pong arriving as the timeout ended found the session still open; the session now closes with `ping timeout` first, as the reference does. It made the official compliance suites fail now and then.
 - **A ping timer that fires late no longer extends the session.** The pong's deadline counted from when the ping went out; it now counts from when the ping was due, so a late timer (Swoole's fire a few milliseconds late) can't keep a dead session open past `pingInterval` plus `pingTimeout`.
 

@@ -213,6 +213,18 @@ final class ServerBindingTest extends TestCase
         self::assertSame(['user' => 'ana'], $this->server->session('sid1')?->request->attributes);
     }
 
+    public function testThe101AcceptsTheFirstSubprotocolOffered(): void
+    {
+        $pair = $this->connect();
+        $pair->write("GET /engine.io/?EIO=4&transport=websocket HTTP/1.1\r\n" . WebSocketFrames::upgradeHeaders()
+            . "Sec-WebSocket-Protocol: chat, superchat\r\n\r\n");
+
+        [$head] = WebSocketFrames::afterHandshake($pair->read());
+
+        self::assertStringStartsWith('HTTP/1.1 101', $head);
+        self::assertMatchesRegularExpression('/\r\nSec-WebSocket-Protocol: chat(\r\n|$)/', $head);
+    }
+
     public function testAnInvalidRequestGetsAnHttpError(): void
     {
         $pair = $this->connect();

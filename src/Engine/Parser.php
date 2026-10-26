@@ -20,12 +20,30 @@ final class Parser
     }
 
     /**
-     * Decodes the content of a WebSocket frame.
+     * Encodes a binary packet as text, `b` and base64, for polling and for clients that can't take binary frames.
+     */
+    public static function encodeBase64Packet(Packet $packet): string
+    {
+        return 'b' . base64_encode($packet->data);
+    }
+
+    /**
+     * Decodes the content of a WebSocket frame, or one packet of a polling payload. A text packet starting with
+     * `b` is binary in base64, as the reference's decodePacket(): polling payloads, and WebSocket clients with
+     * forceBase64.
      */
     public static function decodePacket(string $data, bool $binary = false): Packet
     {
         if ($binary) {
             return new Packet(PacketType::Message, $data, true);
+        }
+        if (str_starts_with($data, 'b')) {
+            $decoded = base64_decode(substr($data, 1), true);
+            if ($decoded === false) {
+                throw new InvalidPacketException('Invalid base64 payload');
+            }
+
+            return new Packet(PacketType::Message, $decoded, true);
         }
         if ($data === '' || ! ctype_digit($data[0])) {
             throw new InvalidPacketException('Invalid packet type');
@@ -44,7 +62,7 @@ final class Parser
     {
         return implode(self::SEPARATOR, array_map(
             static fn (Packet $packet): string => $packet->binary
-                ? 'b' . base64_encode($packet->data)
+                ? self::encodeBase64Packet($packet)
                 : $packet->type->value . $packet->data,
             $packets,
         ));
@@ -59,14 +77,6 @@ final class Parser
     {
         $packets = [];
         foreach (explode(self::SEPARATOR, $payload) as $encoded) {
-            if (str_starts_with($encoded, 'b')) {
-                $data = base64_decode(substr($encoded, 1), true);
-                if ($data === false) {
-                    throw new InvalidPacketException('Invalid base64 payload');
-                }
-                $packets[] = new Packet(PacketType::Message, $data, true);
-                continue;
-            }
             $packets[] = self::decodePacket($encoded);
         }
 

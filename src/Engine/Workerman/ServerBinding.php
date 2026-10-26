@@ -122,6 +122,10 @@ final class ServerBinding
                     $connection->headers[] = $name . ': ' . $value;
                 }
             }
+            $protocol = $this->server->webSocketProtocol($engineRequest);
+            if ($protocol !== null) {
+                $connection->headers[] = 'Sec-WebSocket-Protocol: ' . $protocol;
+            }
             // Accepting the extension in the 101 is what turns on Workerman's deflate for this connection.
             $extension = $this->server->webSocketExtension($engineRequest);
             if ($extension !== null) {

@@ -181,7 +181,8 @@ final class Server extends Emitter
         }
 
         $deflate = $this->webSocketExtension($request) !== null ? $this->options->perMessageDeflate : null;
-        $transport = new WebSocket($connection, $deflate);
+        // A client with forceBase64 asks with b64, as in the reference: any non-empty value.
+        $transport = new WebSocket($connection, $deflate, ($request->query('b64') ?? '') === '');
         $sid = $request->query('sid');
         if ($sid !== null) {
             $this->sessions[$sid]->maybeUpgrade($transport);
@@ -190,6 +191,18 @@ final class Server extends Emitter
         }
 
         $this->dispatch('connection', $this->open($transport, $request));
+    }
+
+    /**
+     * The Sec-WebSocket-Protocol value of the 101: the first subprotocol the client offers, as the reference's ws
+     * picks by default, or null when it offers none. A browser that offered some refuses a 101 without one.
+     */
+    public function webSocketProtocol(Request $request): ?string
+    {
+        $first = trim(explode(',', $request->header('Sec-WebSocket-Protocol') ?? '')[0]);
+
+        // A token, as RFC 6455 requires; anything else would break the header.
+        return preg_match('/^[!#$%&\'*+.^_`|~0-9A-Za-z-]+$/', $first) === 1 ? $first : null;
     }
 
     /**
