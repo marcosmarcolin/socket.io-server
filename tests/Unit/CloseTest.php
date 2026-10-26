@@ -94,7 +94,7 @@ final class CloseTest extends TestCase
         // As in the reference: no DISCONNECT, the transport just closes.
         self::assertSame([], $client->received());
         self::assertTrue($client->isClosed());
-        self::assertSame(0, $this->io->engine->sessionCount());
+        self::assertSame(0, $this->io->engine->clientsCount());
     }
 
     public function testAPendingPollGetsTheClosePacket(): void
@@ -106,7 +106,7 @@ final class CloseTest extends TestCase
         $this->io->close();
 
         self::assertSame('1', $poll->responseBody);
-        self::assertSame(0, $this->io->engine->sessionCount());
+        self::assertSame(0, $this->io->engine->clientsCount());
     }
 
     public function testEveryAdapterCloses(): void

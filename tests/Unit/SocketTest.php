@@ -118,6 +118,25 @@ final class SocketTest extends TestCase
         self::assertSame('1', $session->request->query('x'));
     }
 
+    public function testTheClientKeepsTheRequestAndTheProtocolOfItsSession(): void
+    {
+        self::assertSame($this->socket->conn->request, $this->socket->client->request);
+        self::assertSame($this->socket->request, $this->socket->client->request);
+        self::assertSame(4, $this->socket->conn->protocol);
+    }
+
+    public function testWhatAnEngineMiddlewareAttachesReachesTheSocketsRequest(): void
+    {
+        $this->io->engine->use(static function (Request $request, Closure $next): void {
+            $request->attributes['user'] = 'ana';
+            $next();
+        });
+
+        [, $socket] = $this->connect();
+
+        self::assertSame(['user' => 'ana'], $socket->request->attributes);
+    }
+
     public function testUnknownPropertiesThrow(): void
     {
         $this->expectException(LogicException::class);

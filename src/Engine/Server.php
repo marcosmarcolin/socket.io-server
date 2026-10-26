@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace Marcolin\SocketIO\Engine;
 
+use Closure;
 use Marcolin\SocketIO\Engine\Transport\HttpExchange;
 use Marcolin\SocketIO\Engine\Transport\Polling;
 use Marcolin\SocketIO\Engine\Transport\Transport;
 use Marcolin\SocketIO\Engine\Transport\WebSocket;
 use Marcolin\SocketIO\Engine\Transport\WebSocketConnection;
 use Marcolin\SocketIO\Event\Emitter;
+use Throwable;
 
 /**
  * The Engine.IO server: validates requests, opens sessions and routes requests to them.
@@ -24,17 +26,41 @@ use Marcolin\SocketIO\Event\Emitter;
  *   `initial_headers`;
  * - `connection_error` (Request, int $code, string $message): a request refused, with its Engine.IO error code
  *   and the message sent to the client.
+ *
+ * use() adds middlewares for every request, as the reference's engine.use().
  */
 final class Server extends Emitter
 {
     /** @var array<string, Socket> */
     private array $sessions = [];
 
+    /** @var list<Closure(Request, Closure(?Throwable=): void): void> */
+    private array $middlewares = [];
+
     public function __construct(
         public readonly ServerOptions $options,
         private readonly Scheduler $scheduler,
         private readonly SessionIdGenerator $ids = new RandomSessionIdGenerator(),
     ) {
+    }
+
+    /**
+     * Adds a middleware for every HTTP request of the server, polling ones and the request that opens a WebSocket,
+     * with a sid or not, as the reference's engine.use(). It runs before the request is validated, and may attach
+     * data to $request->attributes, which the session keeps on $socket->request when the request opened it.
+     *
+     * It calls $next() to let the request through, or $next($error) to refuse it with code 3 (Bad request), as in
+     * the reference. Unlike Node, $next must be called before the middleware returns, since a WebSocket handshake
+     * is answered at once: a middleware that returns without calling it refuses the request too. An exception it
+     * throws propagates.
+     *
+     * @param Closure(Request, Closure(?Throwable=): void): void $middleware
+     */
+    public function use(Closure $middleware): static
+    {
+        $this->middlewares[] = $middleware;
+
+        return $this;
     }
 
     /**
@@ -63,6 +89,12 @@ final class Server extends Emitter
             }
         }
 
+        $rejection = $this->applyMiddlewares($exchange->request());
+        if ($rejection !== null) {
+            $this->reject($exchange, $rejection);
+
+            return;
+        }
         $this->expireIfOverdue($exchange->request());
         $rejection = $this->verify($exchange->request(), $exchange->method(), false, true);
         if ($rejection !== null) {
@@ -111,8 +143,11 @@ final class Server extends Emitter
      */
     public function verifyWebSocket(Request $request): ?Rejection
     {
-        $this->expireIfOverdue($request);
-        $rejection = $this->verifyWebSocketRequest($request, true);
+        $rejection = $this->applyMiddlewares($request);
+        if ($rejection === null) {
+            $this->expireIfOverdue($request);
+            $rejection = $this->verifyWebSocketRequest($request, true);
+        }
         if ($rejection !== null) {
             $this->dispatch('connection_error', $request, $rejection->error->value, $rejection->message);
         }
@@ -146,7 +181,8 @@ final class Server extends Emitter
         }
 
         $deflate = $this->webSocketExtension($request) !== null ? $this->options->perMessageDeflate : null;
-        $transport = new WebSocket($connection, $deflate);
+        // A client with forceBase64 asks with b64, as in the reference: any non-empty value.
+        $transport = new WebSocket($connection, $deflate, ($request->query('b64') ?? '') === '');
         $sid = $request->query('sid');
         if ($sid !== null) {
             $this->sessions[$sid]->maybeUpgrade($transport);
@@ -155,6 +191,18 @@ final class Server extends Emitter
         }
 
         $this->dispatch('connection', $this->open($transport, $request));
+    }
+
+    /**
+     * The Sec-WebSocket-Protocol value of the 101: the first subprotocol the client offers, as the reference's ws
+     * picks by default, or null when it offers none. A browser that offered some refuses a 101 without one.
+     */
+    public function webSocketProtocol(Request $request): ?string
+    {
+        $first = trim(explode(',', $request->header('Sec-WebSocket-Protocol') ?? '')[0]);
+
+        // A token, as RFC 6455 requires; anything else would break the header.
+        return preg_match('/^[!#$%&\'*+.^_`|~0-9A-Za-z-]+$/', $first) === 1 ? $first : null;
     }
 
     /**
@@ -209,7 +257,10 @@ final class Server extends Emitter
         return $this->sessions[$sid] ?? null;
     }
 
-    public function sessionCount(): int
+    /**
+     * How many sessions are open, as the reference's clientsCount.
+     */
+    public function clientsCount(): int
     {
         return count($this->sessions);
     }
@@ -293,6 +344,24 @@ final class Server extends Emitter
 
         // An empty message falls back to the default one, as in the reference.
         return new Rejection(ServerError::Forbidden, is_string($answer) && $answer !== '' ? $answer : null);
+    }
+
+    /**
+     * Runs the middlewares in order; null when every one let the request through.
+     */
+    private function applyMiddlewares(Request $request): ?Rejection
+    {
+        foreach ($this->middlewares as $middleware) {
+            $passed = false;
+            $middleware($request, static function (?Throwable $error = null) use (&$passed): void {
+                $passed = $error === null;
+            });
+            if (! $passed) {
+                return new Rejection(ServerError::BadRequest);
+            }
+        }
+
+        return null;
     }
 
     private function reject(HttpExchange $exchange, Rejection $rejection): void

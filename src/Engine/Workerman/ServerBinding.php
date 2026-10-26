@@ -9,6 +9,7 @@ use Marcolin\SocketIO\Engine\Protocol\HttpOrWebSocket;
 use Marcolin\SocketIO\Engine\Protocol\WebSocket;
 use Marcolin\SocketIO\Engine\Server;
 use Marcolin\SocketIO\Engine\Rejection;
+use Marcolin\SocketIO\Engine\Request as EngineRequest;
 use Throwable;
 use WeakMap;
 use Workerman\Connection\TcpConnection;
@@ -35,6 +36,9 @@ final class ServerBinding
     /** @var WeakMap<TcpConnection, WorkermanWebSocketConnection> */
     private WeakMap $webSockets;
 
+    /** @var WeakMap<TcpConnection, EngineRequest> the request accepted before the 101, with what middlewares attached */
+    private WeakMap $webSocketRequests;
+
     /** @var Closure(Throwable): void */
     private readonly Closure $onError;
 
@@ -45,6 +49,7 @@ final class ServerBinding
     {
         $this->requests = new WeakMap();
         $this->webSockets = new WeakMap();
+        $this->webSocketRequests = new WeakMap();
         $this->onError = $onError ?? static function (Throwable $error): void {
             Worker::log((string) $error);
         };
@@ -110,11 +115,16 @@ final class ServerBinding
 
                 return;
             }
+            $this->webSocketRequests[$connection] = $engineRequest;
             // Workerman writes these lines into the 101.
             foreach ($this->server->webSocketHeaders($engineRequest) as $name => $values) {
                 foreach (is_string($values) ? [$values] : $values as $value) {
                     $connection->headers[] = $name . ': ' . $value;
                 }
+            }
+            $protocol = $this->server->webSocketProtocol($engineRequest);
+            if ($protocol !== null) {
+                $connection->headers[] = 'Sec-WebSocket-Protocol: ' . $protocol;
             }
             // Accepting the extension in the 101 is what turns on Workerman's deflate for this connection.
             $extension = $this->server->webSocketExtension($engineRequest);
@@ -136,8 +146,10 @@ final class ServerBinding
 
         $webSocket = new WorkermanWebSocketConnection($connection);
         $this->webSockets[$connection] = $webSocket;
-        $this->guard($connection, function () use ($connection, $request, $webSocket): void {
-            $this->server->handleWebSocket(RequestValues::request($connection, $request), $webSocket);
+        $engineRequest = $this->webSocketRequests[$connection] ?? RequestValues::request($connection, $request);
+        unset($this->webSocketRequests[$connection]);
+        $this->guard($connection, function () use ($engineRequest, $webSocket): void {
+            $this->server->handleWebSocket($engineRequest, $webSocket);
         });
     }
 

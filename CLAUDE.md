@@ -146,7 +146,7 @@ src/
     Rejection.php               a refused request: its ServerError and the message sent, which allowRequest may set
     Cors.php, CorsHttpExchange.php  CORS headers, added to every polling answer
     ResponseHeaders.php, HeadersHttpExchange.php  the `initial_headers`/`headers` events on a session's answers
-    Request.php                 an HTTP request: the session's handshake, or the one opening a WebSocket
+    Request.php                 an HTTP request: the session's handshake, or the one opening a WebSocket; `attributes` for middlewares
     SessionIdGenerator.php, RandomSessionIdGenerator.php  20-character base64url session ids
     Socket.php                  session: state, heartbeat, upgrade, write buffer
     SocketState.php, CloseReason.php  session state; close reasons with the reference's strings
@@ -283,6 +283,7 @@ src/
 
   After the upgrade, HTTP requests or another WebSocket with the same `sid` are rejected. A second WebSocket during an upgrade is closed too. If the upgrade doesn't complete within `upgradeTimeout` (10 s), or any packet other than `2probe` or `5` arrives on the new transport, the WebSocket is closed and the session stays on polling.
 - **Polling payload:** packets separated by `\x1e`; binary as `b` + base64. Over WebSocket, binary goes as a raw binary frame.
+- **Base64 binary and subprotocols on WebSocket**, as the reference: a text frame starting with `b` is a binary message in base64 (`Parser::decodePacket()`, what clients with `forceBase64` send); a WebSocket whose query has a non-empty `b64` gets binary packets as `b` + base64 text frames (the reference's `supportsBinary`). The 101 accepts the first subprotocol the client offers in `Sec-WebSocket-Protocol` (`Server::webSocketProtocol()`, a token only), as `ws` does without `handleProtocols`; a browser that offered some refuses a 101 without one.
 - **HTTP compression** (`httpCompression` option, on by default with a 1024-byte threshold, as the reference's): a polling data answer is compressed when it reaches the threshold, at least one of its packets may be compressed, and `Accept-Encoding` allows gzip (preferred) or deflate (zlib, `gzcompress()`), q-values and `*` included; it then carries `Content-Encoding`. The `ok` of a POST, errors and handshakes under the threshold go plain. `false` turns it off, `['threshold' => n]` sets the size.
 - **WebSocket compression** (`perMessageDeflate` option, off by default as in the reference; `true` is a 1024-byte threshold): `Server::webSocketExtension()` accepts the client's first `permessage-deflate` offer whose parameters fit Workerman's deflater, which keeps its context with a 15-bit window: `client_max_window_bits` and `client_no_context_takeover` are fine, `server_max_window_bits` only at 15, and `server_no_context_takeover` or unknown parameters decline that offer (RFC 7692). `ServerBinding` adds `Sec-WebSocket-Extensions: permessage-deflate` to the 101, which turns on Workerman's deflate for the connection, and `handleWebSocket()` gives the transport the threshold. Messages of at least the threshold whose packet may be compressed go as Workerman's `*_DEFLATE` frame types (`Protocol\WebSocket::send()`); Workerman inflates what the client deflates.
 - **CORS:** the `cors` option, as the `cors` package the reference uses, including the `OPTIONS` preflight.
@@ -297,6 +298,12 @@ src/
   - `initial_headers` and `headers` get a mutable `ResponseHeaders` and the `Request`. `initial_headers` runs for a request without `sid` (the polling handshake, or a WebSocket that opens a session), then `headers` runs for it too. Over polling, `HeadersHttpExchange` runs them for each `200` answer of a session (the data and `ok` answers), not for errors or the CORS preflight. Over WebSocket, `ServerBinding` asks `Server::webSocketHeaders()` once `verifyWebSocket()` accepted, and writes the result into the 101.
   - `ResponseHeaders` validates names (header tokens) and values (no CR, LF or NUL); `append()` keeps one line per value, for several `Set-Cookie`. `HttpExchange::respond()` takes `string|list<string>` values.
   - `connection_error` gets `(Request, int $code, string $message)` for every request `verify()` refuses, over HTTP (`reject()`) or before a 101 (`verifyWebSocket()`), with the message `allowRequest` returned. The reference passes one object with a `context` we don't build.
+- **Engine middlewares** (`$io->engine->use(Closure(Request, Closure(?Throwable=): void))`), as the reference's `engine.use()`:
+  - they run in order for every request: in `handleRequest()` after the CORS preflight and before `verify()`, polling requests with or without a sid, and in `verifyWebSocket()` before the 101 (not again in `handleWebSocket()`);
+  - `$next($error)` refuses with code 3 (`Bad request`, HTTP 400, `connection_error`), as the reference's `MIDDLEWARE_FAILURE`, and skips the later ones;
+  - unlike Node, `$next` must be called before the middleware returns (a WebSocket handshake is answered synchronously); returning without calling it refuses the same way. Exceptions propagate, as with `allowRequest`;
+  - `Request::$attributes` is a free-form array they decorate, as Node middlewares decorate `req`. A request keeps one `Request` object throughout: `WorkermanHttpExchange` copies it once, and `ServerBinding` keeps the one `verifyWebSocket()` saw for `handleWebSocket()` in a `WeakMap`, so the session's `$socket->request` has what was attached. The test fakes (`FakeHttpExchange`, `SocketIOClient`) do the same.
+- **Engine API parity:** `clientsCount()` (open sessions; the reference's `clientsCount`), `Engine\Socket::$protocol` (always 4) and `Client::$request` (the session's request). `engine.generateId` maps to the `SessionIdGenerator` given to the `SocketIO` constructor.
 
 ### Socket.IO
 

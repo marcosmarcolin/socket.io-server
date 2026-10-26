@@ -6,6 +6,7 @@ namespace Marcolin\SocketIO;
 
 use Closure;
 use Marcolin\SocketIO\Engine\CloseReason;
+use Marcolin\SocketIO\Engine\Request;
 use Marcolin\SocketIO\Engine\Socket as EngineSocket;
 use Marcolin\SocketIO\Engine\SocketState;
 use Marcolin\SocketIO\Parser\Decoder;
@@ -33,8 +34,12 @@ final class Client
     /** @var array<string, Closure> listeners on the Engine.IO session */
     private array $listeners;
 
+    /** The request that opened the Engine.IO session, as the reference's client.request. */
+    public readonly Request $request;
+
     public function __construct(private readonly SocketIO $server, public readonly EngineSocket $conn)
     {
+        $this->request = $conn->request;
         $this->decoder = new Decoder();
         $this->listeners = [
             'message' => function (string|Binary $data): void {

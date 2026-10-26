@@ -139,6 +139,48 @@ $io->engine->on('connection_error', function (Request $request, int $code, strin
 - `ResponseHeaders` has `set()`, `append()` (one line per value, as several `Set-Cookie` need), `get()`, `remove()` and `all()`; names are matched case-insensitively, and a name that isn't a header token or a value with a line break throws.
 - Error answers and the CORS preflight go out without the `headers` event.
 - The `code` of `connection_error` is the Engine.IO error code (0 to 5) of the answer, and `message` its message: the one `allowRequest` returned, when it refused.
+- `$io->engine->clientsCount()` is the number of open sessions, as the reference's `engine.clientsCount`.
+
+## Engine middlewares
+
+`$io->engine->use()` adds a middleware for every HTTP request of the server, as the reference's `engine.use()`: the polling requests, with a session or not, and the request that opens a WebSocket, before it is validated. Unlike `allowRequest`, which sees only handshakes, it fits checks that must hold on every request. What it puts in `$request->attributes` stays on the request that opened the session, so on `$socket->request`, as Node middlewares decorate `req`:
+
+```php
+use Marcolin\SocketIO\Engine\Request;
+
+$io->engine->use(function (Request $request, Closure $next): void {
+    $user = users_from_cookie($request->header('Cookie'));   // your own lookup
+    if ($user === null) {
+        $next(new RuntimeException('not logged in'));       // refused with code 3, "Bad request"
+        return;
+    }
+    $request->attributes['user'] = $user;
+    $next();
+});
+
+$io->on('connection', function (Socket $socket): void {
+    $user = $socket->request->attributes['user'];
+});
+```
+
+- `$next()` lets the request through, `$next($error)` refuses it with code 3 (HTTP 400, and `connection_error`), as in the reference. The middlewares after it don't run.
+- Unlike Node, `$next` must be called before the middleware returns, because a WebSocket handshake is answered at once: a middleware that returns without calling it refuses the request. An exception it throws closes the connection, as in `allowRequest`.
+- The CORS preflight (`OPTIONS`) doesn't go through them.
+
+## Session ids
+
+Session ids are 15 random bytes in base64url, as the reference's. To make your own, as the reference's `engine.generateId`, pass a `SessionIdGenerator` to the constructor:
+
+```php
+use Marcolin\SocketIO\Engine\SessionIdGenerator;
+
+$io = new SocketIO(3000, sessionIds: new class implements SessionIdGenerator {
+    public function generate(): string
+    {
+        return 'node-1-' . bin2hex(random_bytes(10));        // unique and unguessable
+    }
+});
+```
 
 ## Debug log
 

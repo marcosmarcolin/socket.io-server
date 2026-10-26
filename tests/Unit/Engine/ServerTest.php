@@ -65,7 +65,7 @@ final class ServerTest extends TestCase
         self::assertCount(1, $this->connections);
         self::assertSame('sid1', $this->connections[0]->id);
         self::assertSame($this->connections[0], $this->server->session('sid1'));
-        self::assertSame(1, $this->server->sessionCount());
+        self::assertSame(1, $this->server->clientsCount());
     }
 
     /**
@@ -91,7 +91,7 @@ final class ServerTest extends TestCase
 
         $this->assertRejected($exchange, $error);
         self::assertSame([], $this->connections);
-        self::assertSame(0, $this->server->sessionCount());
+        self::assertSame(0, $this->server->clientsCount());
     }
 
     public function testRejectsAnOriginWithInvalidCharacters(): void
@@ -173,7 +173,7 @@ final class ServerTest extends TestCase
 
         $this->server->close();
 
-        self::assertSame(0, $this->server->sessionCount());
+        self::assertSame(0, $this->server->clientsCount());
     }
 
     // Suite scenarios that end with "the next poll gets 400"
@@ -472,7 +472,7 @@ final class ServerTest extends TestCase
 
         $this->assertForbidden($handshake, 'Forbidden');
         self::assertSame([], $this->connections);
-        self::assertSame(0, $this->server->sessionCount());
+        self::assertSame(0, $this->server->clientsCount());
     }
 
     public function testAllowRequestRefusesWithItsMessage(): void
@@ -644,7 +644,7 @@ final class ServerTest extends TestCase
 
         $this->assertRejected($this->poll(), ServerError::BadRequest);
         $connection->receive('4hello');
-        self::assertSame(1, $this->server->sessionCount());
+        self::assertSame(1, $this->server->clientsCount());
     }
 
     public function testClosesAnotherWebSocketAfterTheUpgrade(): void
@@ -672,6 +672,171 @@ final class ServerTest extends TestCase
     }
 
     // Helpers
+
+    public function testMiddlewaresRunInOrderForEveryRequest(): void
+    {
+        $seen = [];
+        foreach (['first', 'second'] as $name) {
+            $this->server->use(static function (Request $request, Closure $next) use (&$seen, $name): void {
+                $seen[] = $name . ' ' . ($request->query('sid') ?? 'handshake');
+                $next();
+            });
+        }
+
+        $this->handshake();
+        $this->request('POST', '/engine.io/?EIO=4&transport=polling&sid=sid1', '4hi');
+        $this->server->verifyWebSocket($this->webSocketRequest(self::UPGRADE));
+
+        self::assertSame(
+            ['first handshake', 'second handshake', 'first sid1', 'second sid1', 'first sid1', 'second sid1'],
+            $seen,
+        );
+    }
+
+    public function testWhatAMiddlewareAttachesStaysOnTheSessionsRequest(): void
+    {
+        $this->server->use(static function (Request $request, Closure $next): void {
+            $request->attributes['user'] = 'ana';
+            $next();
+        });
+
+        $this->handshake();
+
+        self::assertSame(['user' => 'ana'], $this->connections[0]->request->attributes);
+    }
+
+    public function testAMiddlewareErrorRefusesTheRequestAsABadRequest(): void
+    {
+        $errors = [];
+        $this->server->on('connection_error', static function (Request $request, int $code) use (&$errors): void {
+            $errors[] = $code;
+        });
+        $this->server->use(static function (Request $request, Closure $next): void {
+            $next(new RuntimeException('no session'));
+        });
+
+        $this->assertRejected($this->request('GET', self::HANDSHAKE), ServerError::BadRequest);
+        self::assertSame([], $this->connections);
+        self::assertSame([ServerError::BadRequest->value], $errors);
+    }
+
+    public function testAMiddlewareThatDoesNotCallNextRefusesTheRequest(): void
+    {
+        $this->server->use(static function (): void {
+        });
+
+        $this->assertRejected($this->request('GET', self::HANDSHAKE), ServerError::BadRequest);
+    }
+
+    public function testAMiddlewareStopsTheOnesAfterIt(): void
+    {
+        $ran = false;
+        $this->server->use(static function (Request $request, Closure $next): void {
+            $next(new RuntimeException('stop'));
+        });
+        $this->server->use(static function (Request $request, Closure $next) use (&$ran): void {
+            $ran = true;
+            $next();
+        });
+
+        $this->request('GET', self::HANDSHAKE);
+
+        self::assertFalse($ran);
+    }
+
+    public function testAMiddlewareCanRefuseAWebSocket(): void
+    {
+        $this->server->use(static function (Request $request, Closure $next): void {
+            $next(new RuntimeException('no'));
+        });
+
+        $rejection = $this->server->verifyWebSocket($this->webSocketRequest('/engine.io/?EIO=4&transport=websocket'));
+
+        self::assertSame(ServerError::BadRequest, $rejection?->error);
+    }
+
+    public function testAnExceptionInAMiddlewarePropagates(): void
+    {
+        $this->server->use(static function (): void {
+            throw new RuntimeException('broken middleware');
+        });
+
+        $this->expectExceptionObject(new RuntimeException('broken middleware'));
+
+        $this->request('GET', self::HANDSHAKE);
+    }
+
+    public function testThePreflightSkipsTheMiddlewares(): void
+    {
+        $ran = false;
+        $this->server->use(static function (Request $request, Closure $next) use (&$ran): void {
+            $ran = true;
+            $next();
+        });
+
+        $this->request('OPTIONS', self::HANDSHAKE);
+
+        self::assertFalse($ran);
+    }
+
+    public function testAWebSocketWithB64GetsBinaryAsBase64Text(): void
+    {
+        $connection = new FakeWebSocketConnection();
+        $request = $this->webSocketRequest('/engine.io/?EIO=4&transport=websocket&b64=1');
+        $this->server->handleWebSocket($request, $connection);
+        $connection->sent = [];
+
+        $this->connections[0]->send(new Binary("\x01\x02"));
+
+        self::assertSame([['data' => 'bAQI=', 'binary' => false]], $connection->sent);
+    }
+
+    public function testAWebSocketWithoutB64GetsBinaryFrames(): void
+    {
+        $connection = new FakeWebSocketConnection();
+        $this->server->handleWebSocket($this->webSocketRequest('/engine.io/?EIO=4&transport=websocket'), $connection);
+        $connection->sent = [];
+
+        $this->connections[0]->send(new Binary("\x01\x02"));
+
+        self::assertSame([['data' => "\x01\x02", 'binary' => true]], $connection->sent);
+    }
+
+    /**
+     * @return iterable<string, array{string|null, string|null}>
+     */
+    public static function subprotocols(): iterable
+    {
+        yield 'none offered' => [null, null];
+        yield 'one' => ['chat', 'chat'];
+        yield 'the first of several' => ['chat.v2, chat.v1', 'chat.v2'];
+        yield 'not a token' => ['bad protocol', null];
+        yield 'empty' => ['', null];
+    }
+
+    #[DataProvider('subprotocols')]
+    public function testPicksTheFirstSubprotocolOffered(?string $offered, ?string $picked): void
+    {
+        $headers = $offered === null ? [] : ['Sec-WebSocket-Protocol' => $offered];
+        $request = new Request('/engine.io/', ['EIO' => '4', 'transport' => 'websocket'], $headers);
+
+        self::assertSame($picked, $this->server->webSocketProtocol($request));
+    }
+
+    public function testClientsCountCountsTheOpenSessions(): void
+    {
+        $this->handshake();
+        $this->request('GET', self::HANDSHAKE);
+
+        self::assertSame(2, $this->server->clientsCount());
+    }
+
+    public function testASessionSpeaksProtocol4(): void
+    {
+        $this->handshake();
+
+        self::assertSame(4, $this->connections[0]->protocol);
+    }
 
     private function server(ServerOptions $options): Server
     {

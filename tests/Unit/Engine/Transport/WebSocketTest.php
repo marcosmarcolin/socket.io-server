@@ -50,6 +50,26 @@ final class WebSocketTest extends TestCase
         self::assertTrue($binary->binary);
     }
 
+    public function testABase64TextFrameIsABinaryMessage(): void
+    {
+        $this->connection->receive('bAQI=');
+
+        self::assertSame("\x01\x02", $this->recorder->packets[0]->data ?? null);
+        self::assertTrue($this->recorder->packets[0]->binary);
+    }
+
+    public function testWithoutBinarySupportBinaryPacketsGoAsBase64Text(): void
+    {
+        $websocket = new WebSocket($this->connection, supportsBinary: false);
+
+        $websocket->send([new Packet(PacketType::Message, "\x01\x02", true), new Packet(PacketType::Message, 'hi')]);
+
+        self::assertSame([
+            ['data' => 'bAQI=', 'binary' => false],
+            ['data' => '4hi', 'binary' => false],
+        ], $this->connection->sent);
+    }
+
     public function testAnInvalidFrameIsAnError(): void
     {
         $this->connection->receive('abc');

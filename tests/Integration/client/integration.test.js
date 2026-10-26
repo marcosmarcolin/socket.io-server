@@ -184,6 +184,19 @@ for (const mode of Object.keys(MODES)) {
       });
     }
 
+    test("an engine middleware refuses a request, or marks the one it lets through", TIMEOUT, async () => {
+      const blocked = client(mode, "/", { query: { blocked: "1" } });
+      const [error] = await next(blocked, "connect_error");
+      assert.ok(error instanceof Error);
+
+      const socket = await connected(mode);
+      assert.deepEqual(await socket.emitWithAck("engine-state"), {
+        attributes: { checkedBy: "engine middleware" },
+        protocol: 4,
+        sameRequest: true,
+      });
+    });
+
     test("receives a middleware refusal with its data", TIMEOUT, async () => {
       const socket = client(mode, "/", { auth: { token: "refuse" } });
 
@@ -233,6 +246,29 @@ for (const mode of Object.keys(MODES)) {
       const socket = await connected(mode);
 
       await assert.rejects(socket.timeout(200).emitWithAck("never-answer"), /operation has timed out/);
+    });
+
+    test("sends and receives binary data with forceBase64", TIMEOUT, async () => {
+      // The client sends binary as base64 text and asks for the same with b64, even over WebSocket.
+      const socket = await connected(mode, "/", { forceBase64: true });
+      const bytes = Buffer.from([0, 1, 2, 255]);
+
+      const echoed = await socket.emitWithAck("echo", { file: bytes });
+      assert.deepEqual(echoed.file, bytes);
+
+      socket.emit("get-binary");
+      const [message] = await next(socket, "binary");
+      assert.deepEqual(message.file, Buffer.from([0, 1, 2, 255]));
+    });
+
+    test("accepts the first WebSocket subprotocol the client offers", TIMEOUT, async () => {
+      // The client refuses a 101 without one of the subprotocols it offered.
+      const socket = await connected(mode, "/", { protocols: ["chat.v2", "chat.v1"] });
+
+      assert.equal(await socket.emitWithAck("echo", "with a subprotocol"), "with a subprotocol");
+      if (socket.io.engine.transport.name === "websocket") {
+        assert.equal(socket.io.engine.transport.ws.protocol, "chat.v2");
+      }
     });
 
     test("sends and receives binary data", TIMEOUT, async () => {

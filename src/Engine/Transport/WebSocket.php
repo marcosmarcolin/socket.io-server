@@ -9,7 +9,8 @@ use Marcolin\SocketIO\Engine\InvalidPacketException;
 use Marcolin\SocketIO\Engine\Parser;
 
 /**
- * WebSocket: one packet per frame, binary packets as binary frames.
+ * WebSocket: one packet per frame, binary packets as binary frames, or as base64 text for a client that asked with
+ * `b64` (forceBase64), as the reference's supportsBinary.
  */
 final class WebSocket extends Transport
 {
@@ -20,6 +21,7 @@ final class WebSocket extends Transport
     public function __construct(
         private readonly WebSocketConnection $connection,
         private readonly ?int $deflateThreshold = null,
+        private readonly bool $supportsBinary = true,
     ) {
         $connection->onMessage(function (string $data, bool $binary): void {
             try {
@@ -45,11 +47,12 @@ final class WebSocket extends Transport
     public function send(array $packets): void
     {
         foreach ($packets as $packet) {
-            $data = Parser::encodePacket($packet);
+            $binary = $packet->binary && $this->supportsBinary;
+            $data = $packet->binary && ! $binary ? Parser::encodeBase64Packet($packet) : Parser::encodePacket($packet);
             $compress = $this->deflateThreshold !== null
                 && $packet->compress
                 && strlen($data) >= $this->deflateThreshold;
-            $this->connection->send($data, $packet->binary, $compress);
+            $this->connection->send($data, $binary, $compress);
         }
         $this->dispatch('drain');
     }

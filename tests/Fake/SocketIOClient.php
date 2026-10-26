@@ -33,10 +33,13 @@ final class SocketIOClient
         $uri = '/socket.io/?' . http_build_query($params);
 
         $this->connection = new FakeWebSocketConnection();
-        $io->engine->handleWebSocket(
-            new Request('/socket.io/', $params, $headers, $uri, '10.0.0.1'),
-            $this->connection,
-        );
+        // As ServerBinding: the request is verified before the 101, then the same object opens the session.
+        $request = new Request('/socket.io/', $params, $headers, $uri, '10.0.0.1');
+        $rejection = $io->engine->verifyWebSocket($request);
+        if ($rejection !== null) {
+            throw new RuntimeException('WebSocket refused: ' . $rejection->message);
+        }
+        $io->engine->handleWebSocket($request, $this->connection);
         $open = $this->connection->sentData()[0] ?? '';
         if (! str_starts_with($open, '0{')) {
             throw new RuntimeException('No Engine.IO handshake: ' . $open);

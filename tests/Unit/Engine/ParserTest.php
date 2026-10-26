@@ -59,6 +59,28 @@ final class ParserTest extends TestCase
         Parser::decodePacket($frame);
     }
 
+    public function testDecodesABase64TextFrameAsBinary(): void
+    {
+        // What a WebSocket client with forceBase64 sends, as the reference's decodePacket() reads it.
+        $packet = Parser::decodePacket('bAQID');
+
+        self::assertSame(PacketType::Message, $packet->type);
+        self::assertSame("\x01\x02\x03", $packet->data);
+        self::assertTrue($packet->binary);
+    }
+
+    public function testAnInvalidBase64TextFrameIsRefused(): void
+    {
+        $this->expectException(InvalidPacketException::class);
+
+        Parser::decodePacket('b!!!');
+    }
+
+    public function testEncodesABinaryPacketAsBase64Text(): void
+    {
+        self::assertSame('bAQID', Parser::encodeBase64Packet(new Packet(PacketType::Message, "\x01\x02\x03", true)));
+    }
+
     public function testEncodesPayloadWithSeparatorAndBase64Binary(): void
     {
         $payload = Parser::encodePayload([

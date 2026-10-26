@@ -60,6 +60,9 @@ final class Socket extends Emitter
 
     private ?int $upgradeTimer = null;
 
+    /** The Engine.IO protocol revision of the session, as the reference's: always 4 here. */
+    public readonly int $protocol;
+
     public function __construct(
         public readonly string $id,
         Transport $transport,
@@ -67,6 +70,7 @@ final class Socket extends Emitter
         private readonly Scheduler $scheduler,
         public readonly Request $request = new Request('/'),
     ) {
+        $this->protocol = 4;
         $this->setTransport($transport);
         $this->sendPacket(PacketType::Open, json_encode([
             'sid' => $id,
