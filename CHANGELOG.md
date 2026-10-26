@@ -23,6 +23,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - **`Emitter`**: sends to the clients from any PHP code that isn't a server, such as a PHP-FPM request, as the reference's emitter packages: `Emitter::redis($url)->to('user:42')->emit('event', $data)`, with `of()`, `except()`, `volatile`, the socket helpers and `serverSideEmit()`. It uses blocking I/O, so it needs no event loop.
 - **The `emitter` example**: a plain PHP endpoint sending notifications to the open tabs through the `Emitter`.
 - **The `session-auth` example**: a page logs in with a PHP session, and a middleware lets in only the sockets whose cookie belongs to a logged-in session, across origins with `withCredentials`.
+- **The `private-messaging` example**: a room per user carries private messages to every tab of the recipient and of the sender, a session id in `auth` keeps the user across reconnections, and "user connected"/"user disconnected" follow each user's first and last tab.
 - **The `dashboard` example**: live dashboards, where a timer started in `workerStart` pushes new numbers every few seconds to the viewers of each dashboard, as a room.
 
 ### Changed

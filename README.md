@@ -85,6 +85,7 @@ Each one runs with `php examples/<name>/start.php start`; then open http://local
 |---|---|
 | [chat](examples/chat) | a chat room: names, typing indicator, join and leave notices |
 | [session-auth](examples/session-auth) | login with a PHP session, and a middleware that lets in only logged-in sessions' sockets |
+| [private-messaging](examples/private-messaging) | private messages to every tab of a user through a room per user, sessions kept across reconnections, and who is online |
 | [rooms](examples/rooms) | `join`, `leave`, messages to a room, live member lists |
 | [acks](examples/acks) | acknowledgements both ways, and the server's `timeout()` |
 | [namespaces](examples/namespaces) | `/public` and `/admin`, a middleware with a token, `ConnectionError` |
