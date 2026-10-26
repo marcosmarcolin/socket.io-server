@@ -21,6 +21,7 @@ use Throwable;
  * fetchSockets with a callback; allSockets and fetchSockets without one read this process.
  *
  * @property-read BroadcastOperator $volatile broadcasts that skip sockets whose transport is busy
+ * @property-read BroadcastOperator $local broadcasts and socket helpers for this process only
  */
 final class Nsp extends Emitter
 {
@@ -180,11 +181,11 @@ final class Nsp extends Emitter
 
     public function __get(string $name): BroadcastOperator
     {
-        if ($name !== 'volatile') {
-            throw new LogicException(sprintf('Undefined property %s::$%s', self::class, $name));
-        }
-
-        return $this->operator()->volatile;
+        return match ($name) {
+            'volatile' => $this->operator()->volatile,
+            'local' => $this->operator()->local,
+            default => throw new LogicException(sprintf('Undefined property %s::$%s', self::class, $name)),
+        };
     }
 
     /**

@@ -55,7 +55,7 @@ A change is done only when all of these hold:
   - network I/O stays behind small interfaces that tests can replace with fakes.
 - Classes are `final` by default. Inheritance only where there's a documented extension point, such as adapters.
 - **No dynamic properties**, neither on our classes nor on Workerman objects. Per-connection state goes in a `WeakMap` or in `$connection->context`.
-- Magic only where the public API requires it and it's documented: `__get` for `broadcast` and `volatile`, for the read-only `connected`, `disconnected` and `rooms` of `Socket`, and for `$io->worker`, annotated with `@property-read`.
+- Magic only where the public API requires it and it's documented: `__get` for `broadcast`, `volatile` and `local`, for the read-only `connected`, `disconnected` and `rooms` of `Socket`, and for `$io->worker`, annotated with `@property-read`.
 - PHPStan at level `max`. No new `ignoreErrors` without a written justification. Third-party docblocks PHPStan can't read are corrected with stubs in `phpstan-stubs/`, each explaining why.
 - Short comments, one line, only to explain why.
 - No `echo`/`print`. Errors become exceptions or `error` events.
@@ -351,7 +351,7 @@ $io->on('connection', function (Socket $socket) use ($io): void {
 Worker::runAll();
 ```
 
-- `SocketIO`: `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- `SocketIO`: `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
 - **`close()`**, as the reference's:
   1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
   2. each adapter's `close()` runs (`PubSubAdapter` unsubscribes from its channels);
@@ -359,8 +359,8 @@ Worker::runAll();
   4. the attached worker stops accepting connections in this process (`unlisten()`, as `httpServer.close()`).
 
   Sockets still in their middlewares never connect. It is not called on `workerStop`: the reference has no such hook, and Workerman closes the connections itself.
-- `Nsp`: `on('connection')` and the `serverSideEmit()` events, `use()`, `to/in/except`, `timeout`, `emit`, `serverSideEmit()`, `fetchSockets(?Closure)`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
-- `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `onAny`, `prependAny`, `offAny`, `listenersAny`, `onAnyOutgoing`, `prependAnyOutgoing`, `offAnyOutgoing`, `listenersAnyOutgoing`, `join`, `leave`, `to/in/except`, `broadcast`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
+- `Nsp`: `on('connection')` and the `serverSideEmit()` events, `use()`, `to/in/except`, `volatile`, `local`, `timeout`, `emit`, `serverSideEmit()`, `fetchSockets(?Closure)`, `allSockets()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`.
+- `Socket`: `id`, `nsp`, `client`, `conn`, `request`, `handshake`, `data`, `rooms`, `connected`, `emit`, `send`, `on`, `onAny`, `prependAny`, `offAny`, `listenersAny`, `onAnyOutgoing`, `prependAnyOutgoing`, `offAnyOutgoing`, `listenersAnyOutgoing`, `join`, `leave`, `to/in/except`, `broadcast`, `local`, `volatile`, `compress()`, `timeout()`, `disconnect(bool $close = false)`.
 - Broadcasts, `socketsJoin`, `socketsLeave`, `disconnectSockets` and `fetchSockets` with a callback go through the adapter, so they reach every process with `ChannelAdapter` or `RedisAdapter`; `allSockets` and `fetchSockets` without a callback read the local process.
 - `RemoteSocket`: `id`, `handshake`, `rooms`, `data`, `emit`, `join`, `leave`, `disconnect`.
 - **Broadcast** (`InMemoryAdapter`), as in the reference:
@@ -393,6 +393,7 @@ Worker::runAll();
   - **`fetchSockets(Closure)`** (`Adapter::fetchClusterSockets()`): PHP has no promises, so `fetchSockets()` without arguments stays synchronous and local, and with a callback it asks every server. `FetchSockets` always goes to the namespace channel, never a room's, since every counted server must answer. Each server answers with `id`, `rooms`, and `handshake` and `data` as JSON strings (objects become arrays, what can't be encoded becomes null), so the message holds only scalars. The callback gets `(?TimeoutException, list<Socket|RemoteSocket>)`: this process's `Socket` objects first, then a `RemoteSocket` per socket elsewhere; on a timeout, the sockets so far (the reference rejects without them). A response with any malformed entry is ignored. `InMemoryAdapter` calls back at once with its sockets.
   - **`RemoteSocket`**: `id`, `handshake`, `rooms`, `data`, and `emit()`, `join()`, `leave()`, `disconnect()`, each through `$nsp->to($id)`/`in($id)`, so through the adapter. `timeout()` returns a copy whose `emit()` takes a callback getting `(?Throwable, mixed $answer)`, one answer instead of a list, as the reference's `expectSingleResponse`; a callback without `timeout()` throws.
   - **Broadcast acks:** `BroadcastOptions` carries the `timeout`. `PubSubAdapter::broadcastWithAck()` publishes the packet with a `requestId` to the namespace channel (never a room's: every counted server must report), then delivers locally. Each other server decodes it, sends it under an ack id of its own namespace, and answers on the requester's response channel with `BroadcastClientCount`, then one `BroadcastAck` per answer (its first argument, as an `ACK` packet). Both sides drop the request after the timeout: the requester forgets the `requestId`, the others make their sockets forget the ack id. A server that never reports (gone without `AdapterClose`) makes the wait end with the timeout.
+  - **The `local` flag** (`$io->local`, `$nsp->local`, `$socket->local`, and `->local` on an operator), as the reference's: `BroadcastOptions::$local` makes `PubSubAdapter` publish nothing, so broadcasts, the socket helpers and `fetchSockets(Closure)` act on this process only. A local broadcast with an ack waits for this server's count only (the reference still waits for `serverCount()` reports and times out). `$socket->local` leaves the socket out, as `broadcast` does.
   - **Not yet:** `allSockets` reads the local process (it is deprecated in the reference).
 - **Setup:** in `workerStart`, call `$io->adapter(ChannelAdapter::factory($host, $port))` with a `Channel\Server` worker running, or `$io->adapter(RedisAdapter::factory($url, $key, $onError))`. `PubSub` is the seam that keeps the static `Channel\Client` and the Redis connections out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
 - **`RedisAdapter`** has its own client, on Workerman's `AsyncTcpConnection`, so it adds no dependency. `workerman/redis` doesn't fit: after its first `SUBSCRIBE` it sends no other command, so rooms couldn't subscribe or unsubscribe, and it prints errors with `echo`.

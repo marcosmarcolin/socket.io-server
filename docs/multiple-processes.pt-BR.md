@@ -108,3 +108,4 @@ RedisAdapter::factory(
 
 - Os clientes precisam conectar com `transports: ['websocket']`: o polling exige que todos os requests de uma sessão cheguem ao mesmo processo, o que vários processos na mesma porta não garantem. Definir `'transports' => ['websocket']` também no servidor recusa o polling de vez. Entre máquinas, um load balancer com sticky sessions permite o polling.
 - `fetchSockets()` sem callback e `allSockets()` leem o processo atual.
+- `local` mantém qualquer um dos itens acima no processo atual: `$io->local->emit('reload')`, `$io->local->disconnectSockets()`.

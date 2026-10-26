@@ -41,6 +41,8 @@ use Marcolin\SocketIO\TimeoutException;
  *
  * A socket's own room (24 hex characters) gets no channel: it goes through the namespace channel.
  *
+ * With the local flag, every operation stays in this process, as the reference's `local` flag.
+ *
  * Messages are arrays of scalars and lists: "uid" (the sending adapter), "type" (a MessageType) and the type's
  * fields. Packets travel as their encoded parts. Malformed messages are ignored.
  */
@@ -105,6 +107,11 @@ abstract class PubSubAdapter extends InMemoryAdapter
         Closure $clientCount,
         Closure $ack,
     ): void {
+        if ($options->local) {
+            parent::broadcastWithAck($packet, $options, $clientCount, $ack);
+
+            return;
+        }
         $timeout = $options->timeout ?? throw new LogicException('A broadcast with an acknowledgement needs a timeout');
         $requestId = bin2hex(random_bytes(8));
         $this->ackRequests[$requestId] = [$clientCount, $ack];
@@ -128,6 +135,9 @@ abstract class PubSubAdapter extends InMemoryAdapter
             $options,
             static fn (): array => is_array($packet->data) ? array_values($packet->data) : [],
         );
+        if ($options->local) {
+            return;
+        }
         $this->publish($this->channelFor($options->rooms), MessageType::Broadcast, [
             'opts' => self::wireOptions($options),
             'parts' => self::wireParts($parts),
@@ -136,35 +146,41 @@ abstract class PubSubAdapter extends InMemoryAdapter
 
     final public function addSockets(BroadcastOptions $options, array $rooms): void
     {
-        $this->publish($this->channelFor($options->rooms), MessageType::SocketsJoin, [
-            'opts' => self::wireOptions($options),
-            'rooms' => $rooms,
-        ]);
+        if (! $options->local) {
+            $this->publish($this->channelFor($options->rooms), MessageType::SocketsJoin, [
+                'opts' => self::wireOptions($options),
+                'rooms' => $rooms,
+            ]);
+        }
         parent::addSockets($options, $rooms);
     }
 
     final public function delSockets(BroadcastOptions $options, array $rooms): void
     {
-        $this->publish($this->channelFor($options->rooms), MessageType::SocketsLeave, [
-            'opts' => self::wireOptions($options),
-            'rooms' => $rooms,
-        ]);
+        if (! $options->local) {
+            $this->publish($this->channelFor($options->rooms), MessageType::SocketsLeave, [
+                'opts' => self::wireOptions($options),
+                'rooms' => $rooms,
+            ]);
+        }
         parent::delSockets($options, $rooms);
     }
 
     final public function disconnectSockets(BroadcastOptions $options, bool $close): void
     {
-        $this->publish($this->channelFor($options->rooms), MessageType::DisconnectSockets, [
-            'opts' => self::wireOptions($options),
-            'close' => $close,
-        ]);
+        if (! $options->local) {
+            $this->publish($this->channelFor($options->rooms), MessageType::DisconnectSockets, [
+                'opts' => self::wireOptions($options),
+                'close' => $close,
+            ]);
+        }
         parent::disconnectSockets($options, $close);
     }
 
     final public function fetchClusterSockets(BroadcastOptions $options, Closure $callback): void
     {
         $local = $this->fetchSockets($options);
-        $uids = $this->nodes->uids();
+        $uids = $options->local ? [] : $this->nodes->uids();
         if ($uids === []) {
             $callback(null, $local);
 
