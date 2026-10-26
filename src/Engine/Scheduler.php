@@ -24,4 +24,10 @@ interface Scheduler
      * Cancels a timer. Unknown, fired or already cancelled ids are ignored.
      */
     public function cancel(int $id): void;
+
+    /**
+     * The current time in milliseconds, from a clock that never goes back; only differences between two calls
+     * mean anything.
+     */
+    public function now(): int;
 }
