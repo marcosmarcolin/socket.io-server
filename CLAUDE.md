@@ -10,6 +10,7 @@ This file is the specification of how the package works. Behavior changes start 
 - A server for `socket.io-client` v3 and v4: **Engine.IO protocol v4** and **Socket.IO protocol v5**.
 - Transports: HTTP long-polling and WebSocket, with the polling-to-WebSocket upgrade.
 - PHP >= 8.1, Workerman ^5.2, standalone. No framework dependency.
+- Workerman's `select()`, `event` and Swoole event loops, all tested in CI.
 
 **It is not** (out of scope; don't implement without an explicit decision):
 - A server for `socket.io-client` 1.x/2.x (Engine.IO v3). Those clients have [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io).
@@ -83,7 +84,10 @@ tests/Integration/run.sh examples              # every example in examples/, eac
 tests/Load/run.sh                              # the load test: 500 WebSocket clients on select()
 LOOP=event CLIENTS=10000 tests/Load/run.sh     # the same with the event extension, past select()'s 1,024
 SERVER=node CLIENTS=10000 tests/Load/run.sh    # the reference Node.js server, for the comparison in docs/performance.md
+LOOP=swoole tests/Integration/run.sh           # any compliance, integration or load script on another event loop
 ```
+
+`tests/php-server.sh` starts the PHP server of every script: in the php service, or, with `LOOP=select|event|swoole`, in the image of `tests/Load/Dockerfile` (PHP 8.1 with `event` and Swoole 6.1, the last line for PHP 8.1), where `tests/event-loop.php`, loaded with `auto_prepend_file`, sets `Worker::$eventLoopClass`, so the servers run unchanged. CI's `swoole` job runs both suites and the integration tests on Swoole.
 
 The integration client (`tests/Integration/client/`) pins `socket.io-client` in `package.json`, and its `package-lock.json` is committed, so `npm ci` checks every package's integrity hash. Its tests use `node:test`, so the client is the only dependency. Each scenario runs over polling only, WebSocket only, and polling with the upgrade. To move to a newer client, regenerate the lockfile in Docker with `npm install --package-lock-only --ignore-scripts`, then read what changed.
 
@@ -222,6 +226,7 @@ src/
   - Workerman caches decoded packages by their raw bytes and may deliver a cached object without decoding again. Never keep state that depends on `decode()` running for every package, except the opcode, which is part of those bytes.
   - Workerman's files use `strict_types`, so `input()` must return an `int`.
   - Exceptions in `onMessage` are caught by Workerman and don't kill the worker. Handle them anyway.
+  - On Swoole's loop (`Workerman\Events\Swoole`), Workerman runs every read, write and timer callback in a new coroutine and turns on `SWOOLE_HOOK_ALL`, so blocking I/O inside a callback (files included) yields to other callbacks. `src/` does none. Its timers fire a few milliseconds late; the heartbeat doesn't depend on their precision.
 
 ## Protocol behavior
 
@@ -253,6 +258,7 @@ src/
   - the next `ping` is scheduled `pingInterval` after the `pong`;
   - any other packet received while waiting for the `pong` restarts the `pingTimeout` once per ping, as the reference does;
   - a `ping` from the client closes the session with `transport error` (v4 heartbeats go from server to client only);
+  - the pong's deadline counts from when the ping was due, not from when its timer fired, so a late timer doesn't extend the session (Swoole's fire a few milliseconds late, which made the suite's "closes the session upon ping timeout" fail about once in 20 runs); a refresh counts from the packet;
   - **timers first, as Node:** Workerman's `Select` loop handles ready sockets before due timers, so a request or packet arriving as the ping timeout ends would find the session open (the official suites' "closes the session upon ping timeout" failed about once in 15 runs). The session keeps the timeout's deadline on `Scheduler::now()`; `Server` calls `Socket::expireIfOverdue()` before routing any request with a `sid` (HTTP or WebSocket), and `Socket` checks it before handling any packet, closing with `ping timeout` first.
 - **Session events** (`Engine\Socket`, `$socket->conn`): `message`, `packet` (each received packet), `packetCreate` (each packet `sendPacket()` buffers: the `open`, messages and pings, as the reference's `sendPacket`; the probe's `pong` and the upgrade's `noop` go straight to the transports and don't fire it), `heartbeat`, `drain`, `upgrading`, `upgrade`, `close`. `packetCreate` fires before the packet is buffered, and not once the session is closing.
 - **Close reasons** (`CloseReason`): `ping timeout`, `transport close`, `transport error`, `parse error` (malformed packet) and `forced close` (closed by the server). A `close` packet over WebSocket closes the session with `transport close`.

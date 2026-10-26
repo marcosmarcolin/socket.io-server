@@ -15,7 +15,10 @@ tests/Integration/run.sh multi-process         # the same over two processes and
 tests/Integration/run.sh multi-process-redis   # the same two processes, joined by Redis
 tests/Integration/run.sh examples              # every example, each against its test
 tests/Load/run.sh                              # the load test; see docs/performance.md
+LOOP=swoole tests/Integration/run.sh           # any of the scripts above on another event loop
 ```
+
+`LOOP=select`, `event` or `swoole` runs the server of the compliance, integration and load scripts on that Workerman event loop, in the image of `tests/Load/Dockerfile`, which has the `event` and `swoole` extensions. CI runs the suites and the integration tests on Swoole too.
 
 ## Secret scanning
 

@@ -272,19 +272,22 @@ final class Socket extends Emitter
 
     private function schedulePing(): void
     {
-        $this->pingIntervalTimer = $this->scheduler->after($this->options->pingInterval, function (): void {
+        $due = $this->scheduler->now() + $this->options->pingInterval;
+        $this->pingIntervalTimer = $this->scheduler->after($this->options->pingInterval, function () use ($due): void {
             $this->pingIntervalTimer = null;
             $this->pingTimeoutRefreshed = false;
             $this->sendPacket(PacketType::Ping);
-            $this->startPingTimeout();
+            // From when the ping was due: a timer that fires late (Swoole's, by a few ms) must not extend the session.
+            $this->startPingTimeout($due);
         });
     }
 
-    private function startPingTimeout(): void
+    private function startPingTimeout(?int $from = null): void
     {
         $this->cancel($this->pingTimeoutTimer);
-        $this->pingDeadline = $this->scheduler->now() + $this->options->pingTimeout;
-        $this->pingTimeoutTimer = $this->scheduler->after($this->options->pingTimeout, function (): void {
+        $now = $this->scheduler->now();
+        $this->pingDeadline = ($from ?? $now) + $this->options->pingTimeout;
+        $this->pingTimeoutTimer = $this->scheduler->after(max(0, $this->pingDeadline - $now), function (): void {
             $this->pingTimeoutTimer = null;
             $this->onClose(CloseReason::PingTimeout);
         });
