@@ -225,7 +225,7 @@ final class SocketTest extends TestCase
 
         self::assertNotSame($emitter, $emitter->timeout(5));
         self::assertNotSame($emitter, $emitter->volatile);
-        self::assertSame($emitter, $emitter->compress(false));
+        self::assertNotSame($emitter, $emitter->compress(false));
 
         $this->socket->compress(false)->emit('plain');
         self::assertSame(['2["plain"]'], $this->client->received());

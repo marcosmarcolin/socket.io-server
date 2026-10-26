@@ -32,10 +32,15 @@ final class Polling extends Transport
      * @param int $closeTimeout milliseconds to wait for a GET that carries the close packet
      * @param int $maxPayload largest POST body accepted, in bytes
      */
+    /**
+     * @param int|null $compressionThreshold compress answers of at least this many bytes, as the reference's
+     *        httpCompression; null never compresses
+     */
     public function __construct(
         private readonly Scheduler $scheduler,
         private readonly int $closeTimeout = 30_000,
         private readonly int $maxPayload = 1_000_000,
+        private readonly ?int $compressionThreshold = null,
     ) {
     }
 
@@ -75,9 +80,14 @@ final class Polling extends Transport
             $packets[] = new Packet(PacketType::Close);
         }
 
-        $exchange->respond(200, Parser::encodePayload($packets), [
-            'Content-Type' => 'text/plain; charset=UTF-8',
-        ] + self::HEADERS);
+        $body = Parser::encodePayload($packets);
+        $headers = ['Content-Type' => 'text/plain; charset=UTF-8'] + self::HEADERS;
+        $encoding = $this->encoding($exchange, $packets, strlen($body));
+        if ($encoding !== null) {
+            $body = $encoding === 'gzip' ? (string) gzencode($body) : (string) gzcompress($body);
+            $headers['Content-Encoding'] = $encoding;
+        }
+        $exchange->respond(200, $body, $headers);
         $this->dispatch('drain');
 
         if ($close !== null) {
@@ -182,5 +192,59 @@ final class Polling extends Transport
 
         // text/html avoids a download dialog in some user agents.
         $exchange->respond(200, 'ok', ['Content-Type' => 'text/html'] + self::HEADERS);
+    }
+
+    /**
+     * The encoding of an answer, as the reference: when compression is on, any packet may be compressed, the body
+     * reaches the threshold, and the client accepts gzip (preferred) or deflate.
+     *
+     * @param list<Packet> $packets
+     */
+    private function encoding(HttpExchange $exchange, array $packets, int $length): ?string
+    {
+        if ($this->compressionThreshold === null || $length < $this->compressionThreshold) {
+            return null;
+        }
+        $compress = false;
+        foreach ($packets as $packet) {
+            $compress = $compress || $packet->compress;
+        }
+        if (! $compress) {
+            return null;
+        }
+        $accepted = self::acceptedEncodings($exchange->header('Accept-Encoding') ?? '');
+        foreach (['gzip', 'deflate'] as $encoding) {
+            if (($accepted[$encoding] ?? $accepted['*'] ?? 0.0) > 0) {
+                return $encoding;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The quality of each encoding in an Accept-Encoding header.
+     *
+     * @return array<string, float>
+     */
+    private static function acceptedEncodings(string $header): array
+    {
+        $accepted = [];
+        foreach (explode(',', $header) as $item) {
+            $parameters = explode(';', $item);
+            $name = strtolower(trim(array_shift($parameters)));
+            if ($name === '') {
+                continue;
+            }
+            $quality = 1.0;
+            foreach ($parameters as $parameter) {
+                if (preg_match('/^\s*q\s*=\s*([0-9.]+)\s*$/i', $parameter, $match) === 1) {
+                    $quality = (float) $match[1];
+                }
+            }
+            $accepted[$name] = $quality;
+        }
+
+        return $accepted;
     }
 }

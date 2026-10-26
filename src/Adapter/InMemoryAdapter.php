@@ -99,7 +99,7 @@ class InMemoryAdapter extends Emitter implements Adapter
             if ($socket->hasOutgoingListeners()) {
                 $socket->notifyOutgoing($data());
             }
-            $socket->client->write($parts, $options->volatile);
+            $socket->client->write($parts, $options->volatile, $options->compress);
         }
         $clientCount($count);
     }
@@ -205,7 +205,7 @@ class InMemoryAdapter extends Emitter implements Adapter
                 $event ??= $data();
                 $socket->notifyOutgoing($event);
             }
-            $socket->client->write($parts, $options->volatile);
+            $socket->client->write($parts, $options->volatile, $options->compress);
         }
     }
 

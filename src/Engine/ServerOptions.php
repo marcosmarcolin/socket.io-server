@@ -26,6 +26,9 @@ final class ServerOptions
      *        false or a message refuses it with code 4 (Forbidden)
      * @param bool $allowUpgrades whether the handshake offers upgrades; without them, polling clients stay on polling
      * @param Cookie|null $cookie the cookie with the session id on the polling handshake, for sticky sessions
+     * @param int|null $httpCompression compress polling answers of at least this many bytes; null never does
+     * @param int|null $perMessageDeflate deflate WebSocket messages of at least this many bytes, when the client
+     *        offers permessage-deflate; null, the default, never does
      */
     public function __construct(
         public readonly int $pingInterval = 25_000,
@@ -38,6 +41,8 @@ final class ServerOptions
         public readonly ?Closure $allowRequest = null,
         public readonly bool $allowUpgrades = true,
         public readonly ?Cookie $cookie = null,
+        public readonly ?int $httpCompression = 1024,
+        public readonly ?int $perMessageDeflate = null,
     ) {
         self::assertPositive('pingInterval', $pingInterval);
         self::assertPositive('pingTimeout', $pingTimeout);
@@ -62,7 +67,25 @@ final class ServerOptions
      */
     public static function fromArray(array $options): self
     {
-        $known = [...self::INT_OPTIONS, 'path', 'cors', 'transports', 'allowRequest', 'allowUpgrades', 'cookie'];
+        // The reference calls maxPayload maxHttpBufferSize; either name works, not both.
+        if (array_key_exists('maxHttpBufferSize', $options)) {
+            if (array_key_exists('maxPayload', $options)) {
+                throw new InvalidArgumentException('Give "maxPayload" or its alias "maxHttpBufferSize", not both');
+            }
+            $options['maxPayload'] = $options['maxHttpBufferSize'];
+            unset($options['maxHttpBufferSize']);
+        }
+        $known = [
+            ...self::INT_OPTIONS,
+            'path',
+            'cors',
+            'transports',
+            'allowRequest',
+            'allowUpgrades',
+            'cookie',
+            'httpCompression',
+            'perMessageDeflate',
+        ];
         foreach (array_keys($options) as $key) {
             if (! in_array($key, $known, true)) {
                 throw new InvalidArgumentException(sprintf('Unknown Engine.IO option "%s"', $key));
@@ -112,8 +135,30 @@ final class ServerOptions
             allowRequest: $allowRequest,
             allowUpgrades: $allowUpgrades,
             cookie: Cookie::fromOption($options['cookie'] ?? false),
+            httpCompression: self::threshold('httpCompression', $options['httpCompression'] ?? true),
+            perMessageDeflate: self::threshold('perMessageDeflate', $options['perMessageDeflate'] ?? false),
         );
     }
+
+    /**
+     * A compression option: true (a 1 KB threshold, the reference's default), false, or ['threshold' => n].
+     */
+    private static function threshold(string $name, mixed $option): ?int
+    {
+        if (is_bool($option)) {
+            return $option ? 1024 : null;
+        }
+        if (is_array($option) && array_keys($option) === ['threshold'] && is_int($option['threshold'])) {
+            return $option['threshold'] >= 0
+                ? $option['threshold']
+                : throw new InvalidArgumentException(sprintf('The %s "threshold" can\'t be negative', $name));
+        }
+
+        throw new InvalidArgumentException(
+            sprintf('The "%s" option must be a boolean or ["threshold" => bytes]', $name),
+        );
+    }
+
 
     private static function corsFromArray(mixed $cors): ?Cors
     {

@@ -14,6 +14,8 @@
 | `$io->sockets` | The main namespace, `/`. |
 | `on('connection', fn (Socket $socket))` | The main namespace's `connection` event; any other event but `workerStart` and `workerStop` is the main namespace's too, as with `serverSideEmit()`. |
 | `on('workerStart' \| 'workerStop', fn (Worker $worker))` | Each process starting or stopping. |
+| `on('new_namespace', fn (Nsp $nsp))` | A namespace other than `/` was created, such as to give every namespace a middleware. |
+| `once()`, `off()`, `listeners()`, `eventNames()`, `removeListener()`, `removeAllListeners()` | As `on()`: the main namespace's listeners, except `workerStart` and `workerStop`. |
 | `use(fn (Socket $socket, Closure $next))` | A middleware on `/`. |
 | `adapter(fn (Nsp $nsp): Adapter)` | How namespaces keep rooms and broadcast, such as `ChannelAdapter::factory()` or `RedisAdapter::factory()`. `$nsp->adapter()` returns a namespace's adapter, with its [events](#adapter-events). |
 | `close()` | Shuts the server down: every socket leaves with `server shutting down`, the connections close, and the worker stops accepting new ones in this process. |
@@ -45,6 +47,7 @@
 | `$socket->nsp`, `$socket->request`, `$socket->conn` | Its namespace, the HTTP request that opened the connection, and the Engine.IO session. |
 | `on(string $event, Closure $listener)` | An event from the client. The listener gets the arguments, plus an acknowledgement `Closure` last when the client asked for one; it answers once. |
 | `emit(string $event, ...$args)`, `send(...$args)` | Sends an event; a `Closure` as the last argument asks the client to acknowledge it. |
+| `once()`, `off()`, `listeners()`, `eventNames()`, `removeListener()`, `removeAllListeners()` | The other listener methods, with the reference's names. |
 | `onAny(Closure $listener)`, `prependAny()`, `offAny(?Closure $listener = null)`, `listenersAny()` | Every event from the client, before its own listeners. The listener gets the event name, then the arguments, with the acknowledgement `Closure` last when the client asked for one. `offAny()` without a listener removes them all. |
 | `onAnyOutgoing(Closure $listener)`, `prependAnyOutgoing()`, `offAnyOutgoing()`, `listenersAnyOutgoing()` | Every event sent to this client, by `emit()` or a broadcast (from other processes too), before it is written: the event name, then the arguments, without the acknowledgement callback. |
 | `use(fn (array $event, Closure $next))` | A middleware for the events from the client, after the `onAny()` listeners and before the event's own; see [Socket middlewares](#socket-middlewares). |
@@ -128,6 +131,8 @@ $socket->on('sum', function (array $numbers, Closure $ack): void {
 });
 ```
 
+PHP has no promises, so the reference's `emitWithAck()` and `serverSideEmitWithAck()` map to a callback: `$socket->timeout(5000)->emit('event', $callback)` and `$io->serverSideEmit('event', $callback)`.
+
 A broadcast takes an acknowledgement callback after `timeout()`. The callback gets one answer per socket it reached, in the order they arrive: the first argument of each client's acknowledgement.
 
 ```php
@@ -157,7 +162,7 @@ $io->volatile->emit('position', $x, $y);          // skipped where the transport
 $io->local->emit('reload');                       // this process only, whatever the adapter
 ```
 
-`compress()` exists for compatibility and has no effect: the server doesn't compress.
+`compress(false)` keeps a broadcast or an emit uncompressed; by default, big polling answers are compressed (see the `httpCompression` option).
 
 ## Adapter events
 

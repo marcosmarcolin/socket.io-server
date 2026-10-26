@@ -103,13 +103,16 @@ final class Socket extends Emitter
 
     /**
      * Sends a message. Ignored once the session is closing.
+     *
+     * @param bool $compress whether the transport may compress it
      */
-    public function send(string|Binary $data): void
+    public function send(string|Binary $data, bool $compress = true): void
     {
         $this->sendPacket(
             PacketType::Message,
             $data instanceof Binary ? $data->data : $data,
             $data instanceof Binary,
+            $compress,
         );
     }
 
@@ -352,12 +355,16 @@ final class Socket extends Emitter
         $this->upgradeTransport = null;
     }
 
-    private function sendPacket(PacketType $type, string $data = '', bool $binary = false): void
-    {
+    private function sendPacket(
+        PacketType $type,
+        string $data = '',
+        bool $binary = false,
+        bool $compress = true,
+    ): void {
         if ($this->state !== SocketState::Open) {
             return;
         }
-        $packet = new Packet($type, $data, $binary);
+        $packet = new Packet($type, $data, $binary, $compress);
         $this->dispatch('packetCreate', $packet);
         $this->writeBuffer[] = $packet;
         $this->flush();

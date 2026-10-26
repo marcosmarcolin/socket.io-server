@@ -34,6 +34,7 @@ final class BroadcastOperator
         private readonly bool $volatile = false,
         private readonly ?int $timeout = null,
         private readonly bool $local = false,
+        private readonly bool $compress = true,
     ) {
     }
 
@@ -90,11 +91,11 @@ final class BroadcastOperator
     }
 
     /**
-     * Kept for API compatibility: the server doesn't compress, so this has no effect.
+     * With false, the broadcast isn't compressed, as in the reference.
      */
     public function compress(bool $compress): self
     {
-        return $this;
+        return $this->with(compress: $compress);
     }
 
     /**
@@ -220,7 +221,14 @@ final class BroadcastOperator
 
     private function options(): BroadcastOptions
     {
-        return new BroadcastOptions($this->rooms, $this->except, $this->volatile, $this->timeout, $this->local);
+        return new BroadcastOptions(
+            $this->rooms,
+            $this->except,
+            $this->volatile,
+            $this->timeout,
+            $this->local,
+            $this->compress,
+        );
     }
 
     /**
@@ -235,6 +243,7 @@ final class BroadcastOperator
         ?bool $volatile = null,
         ?int $timeout = null,
         ?bool $local = null,
+        ?bool $compress = null,
     ): self {
         return new self(
             $this->nsp,
@@ -243,6 +252,7 @@ final class BroadcastOperator
             $volatile ?? $this->volatile,
             $timeout ?? $this->timeout,
             $local ?? $this->local,
+            $compress ?? $this->compress,
         );
     }
 

@@ -10,11 +10,14 @@
 |---|---|---|
 | `pingInterval` | `25000` | How often the server pings each client. |
 | `pingTimeout` | `20000` | How long it waits for the pong before closing the connection. |
-| `maxPayload` | `1000000` | Largest message, in bytes; longer HTTP bodies get 413. |
+| `maxPayload` | `1000000` | Largest message, in bytes; longer HTTP bodies get 413. `maxHttpBufferSize`, the reference's name, is accepted too. |
 | `upgradeTimeout` | `10000` | How long an upgrade from polling to WebSocket may take. |
 | `connectTimeout` | `45000` | How long a client may stay without joining a namespace. |
+| `logger` | `null` | A `Closure(string $scope, string $message)` that gets the debug log; see [Debug log](#debug-log). |
 | `path` | `'/socket.io/'` | The URL path; the client's `path` option must match. |
 | `transports` | `['polling', 'websocket']` | The transports clients may use. With `['websocket']`, polling requests are refused, so clients need `transports: ['websocket']` too (otherwise they get `xhr poll error`). With `['polling']`, no upgrade is offered. |
+| `httpCompression` | `true` | Compresses polling answers of 1 KB or more with gzip or deflate, as the client's `Accept-Encoding` allows, as in the reference. `false` turns it off; `['threshold' => bytes]` changes the size. An answer whose packets were all sent with `compress(false)` stays plain. |
+| `perMessageDeflate` | `false` | With `true`, WebSocket messages of 1 KB or more go deflated (permessage-deflate) when the client offers it, as the reference's option; `['threshold' => bytes]` changes the size. Off by default, as in the reference: it costs CPU and memory per connection. |
 | `cors` | `['origin' => '*']` | `origin` is `'*'`, a list of allowed origins, a `Closure` that decides per request, or `null` to send no CORS headers. `credentials` (`false` by default) lets browsers send cookies. |
 | `allowUpgrades` | `true` | With `false`, the handshake offers no upgrade, so clients that start on polling stay on it; clients with `transports: ['websocket']` still connect over WebSocket. |
 | `cookie` | `false` | With `true`, the polling handshake sets the cookie `io=<session id>` (`Path=/; HttpOnly; SameSite=Lax`), which a load balancer can use for sticky sessions; see [Behind a reverse proxy](reverse-proxy.md). An array changes its attributes: `name`, `path`, `domain`, `httpOnly`, `secure`, `sameSite`, `maxAge` (seconds). |
@@ -107,6 +110,38 @@ $io->engine->on('connection_error', function (Request $request, int $code, strin
 - `ResponseHeaders` has `set()`, `append()` (one line per value, as several `Set-Cookie` need), `get()`, `remove()` and `all()`; names are matched case-insensitively, and a name that isn't a header token or a value with a line break throws.
 - Error answers and the CORS preflight go out without the `headers` event.
 - The `code` of `connection_error` is the Engine.IO error code (0 to 5) of the answer, and `message` its message: the one `allowRequest` returned, when it refused.
+
+## Debug log
+
+The `logger` option gets what the reference logs with `DEBUG=socket.io:*`: a scope and a message for each step of a connection's life. Without it, nothing is logged.
+
+```php
+use Workerman\Worker;
+
+$io = new SocketIO(3000, [
+    'logger' => function (string $scope, string $message): void {
+        Worker::log("[$scope] $message");
+    },
+]);
+```
+
+```text
+[engine] session iZ8v0K2tq_3LFkpbAAAB opened over polling from 203.0.113.7
+[socket.io:socket] socket 6f1c0a2b9d3e4f5a6b7c8d9e joined / over session iZ8v0K2tq_3LFkpbAAAB
+[engine:socket] session iZ8v0K2tq_3LFkpbAAAB upgraded to websocket
+[socket.io:socket] socket 6f1c0a2b9d3e4f5a6b7c8d9e left /: transport close
+[engine:socket] session iZ8v0K2tq_3LFkpbAAAB closed: transport close
+```
+
+| Scope | What |
+|---|---|
+| `engine` | a session opened (transport, client address) or a request refused (code, message) |
+| `engine:socket` | a session upgraded to WebSocket, or closed (reason) |
+| `socket.io:client` | an unknown namespace asked for, no namespace joined in time, an invalid or out-of-turn packet |
+| `socket.io:socket` | a socket joined or left a namespace, a middleware refused one, a `use()` middleware stopped an event |
+| `socket.io:adapter` | with `ChannelAdapter` or `RedisAdapter`, a server joined or left the cluster |
+
+Filter by scope in the `Closure` to keep only what you need. The messages carry ids and addresses, never event data.
 
 ## TLS
 

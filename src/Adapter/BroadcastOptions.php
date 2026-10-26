@@ -15,6 +15,7 @@ final class BroadcastOptions
      * @param bool $volatile skip the sockets whose transport can't take the packet right now
      * @param int|null $timeout how long a broadcast with an acknowledgement waits for the answers, in milliseconds
      * @param bool $local reach the sockets of this process only, even with an adapter that reaches others
+     * @param bool $compress whether the transports may compress the packet
      */
     public function __construct(
         public readonly array $rooms = [],
@@ -22,6 +23,7 @@ final class BroadcastOptions
         public readonly bool $volatile = false,
         public readonly ?int $timeout = null,
         public readonly bool $local = false,
+        public readonly bool $compress = true,
     ) {
     }
 }

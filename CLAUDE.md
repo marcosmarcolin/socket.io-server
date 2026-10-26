@@ -55,10 +55,11 @@ A change is done only when all of these hold:
   - network I/O stays behind small interfaces that tests can replace with fakes.
 - Classes are `final` by default. Inheritance only where there's a documented extension point, such as adapters.
 - **No dynamic properties**, neither on our classes nor on Workerman objects. Per-connection state goes in a `WeakMap` or in `$connection->context`.
+- Every emitter (`Event\Emitter`) has `on`, `once`, `off`, `listeners`, and the reference's names `eventNames`, `removeListener`, `removeAllListeners`.
 - Magic only where the public API requires it and it's documented: `__get` for `broadcast`, `volatile` and `local` (and `volatile` on the `Emitter`), for the read-only `connected`, `disconnected` and `rooms` of `Socket`, and for `$io->worker`, annotated with `@property-read`.
 - PHPStan at level `max`. No new `ignoreErrors` without a written justification. Third-party docblocks PHPStan can't read are corrected with stubs in `phpstan-stubs/`, each explaining why.
 - Short comments, one line, only to explain why.
-- No `echo`/`print`. Errors become exceptions or `error` events.
+- No `echo`/`print`. Errors become exceptions or `error` events, and the debug log goes to the `logger` option.
 - No production dependencies besides Workerman. `workerman/channel` is optional (in `suggest`).
 - Everything in English: code, comments, docs, commits, PRs. The exceptions are the Brazilian Portuguese translations of the user documentation: `README.pt-BR.md` and `docs/*.pt-BR.md`.
 - **`CHANGELOG.md`** follows Keep a Changelog, in English only, like the commits it summarizes. A PR that changes behavior, the API or the requirements adds its line under `[Unreleased]`. A release renames that section to the version and date.
@@ -138,7 +139,7 @@ src/
     SessionIdGenerator.php, RandomSessionIdGenerator.php  20-character base64url session ids
     Socket.php                  session: state, heartbeat, upgrade, write buffer
     SocketState.php, CloseReason.php  session state; close reasons with the reference's strings
-    ServerOptions.php           pingInterval, pingTimeout, maxPayload, upgradeTimeout, path, cors, transports, allowRequest, allowUpgrades, cookie; fromArray()
+    ServerOptions.php           pingInterval, pingTimeout, maxPayload (alias maxHttpBufferSize), upgradeTimeout, path, cors, transports, allowRequest, allowUpgrades, cookie; fromArray()
     Cookie.php                  the cookie option: io=<sid> on the polling handshake, for sticky sessions
     Transport/Transport.php     base transport (Emitter): packet, ready, drain, error, close
     Transport/Polling.php       pending GET, POST, noop on upgrade
@@ -161,6 +162,7 @@ src/
   RemoteSocket.php              a socket on another server, from fetchSockets() with a callback
   AckCollector.php              the answers to one broadcast with acknowledgement, until all arrive or the timeout
   Emitter.php                   sends to the servers' clients from outside them (PHP-FPM), through a Publisher
+  Logger.php                    the debug log of the logger option, or nothing
   Parser/                       socket.io-parser (protocol v5)
     Encoder.php                 Packet → list<string|Binary>: the text part, then one Binary per attachment
     Decoder.php                 one per connection: add(string|Binary): ?Packet, reset()
@@ -266,6 +268,8 @@ src/
 
   After the upgrade, HTTP requests or another WebSocket with the same `sid` are rejected. A second WebSocket during an upgrade is closed too. If the upgrade doesn't complete within `upgradeTimeout` (10 s), or any packet other than `2probe` or `5` arrives on the new transport, the WebSocket is closed and the session stays on polling.
 - **Polling payload:** packets separated by `\x1e`; binary as `b` + base64. Over WebSocket, binary goes as a raw binary frame.
+- **HTTP compression** (`httpCompression` option, on by default with a 1024-byte threshold, as the reference's): a polling data answer is compressed when it reaches the threshold, at least one of its packets may be compressed, and `Accept-Encoding` allows gzip (preferred) or deflate (zlib, `gzcompress()`), q-values and `*` included; it then carries `Content-Encoding`. The `ok` of a POST, errors and handshakes under the threshold go plain. `false` turns it off, `['threshold' => n]` sets the size.
+- **WebSocket compression** (`perMessageDeflate` option, off by default as in the reference; `true` is a 1024-byte threshold): `Server::webSocketExtension()` accepts the client's first `permessage-deflate` offer whose parameters fit Workerman's deflater, which keeps its context with a 15-bit window: `client_max_window_bits` and `client_no_context_takeover` are fine, `server_max_window_bits` only at 15, and `server_no_context_takeover` or unknown parameters decline that offer (RFC 7692). `ServerBinding` adds `Sec-WebSocket-Extensions: permessage-deflate` to the 101, which turns on Workerman's deflate for the connection, and `handleWebSocket()` gives the transport the threshold. Messages of at least the threshold whose packet may be compressed go as Workerman's `*_DEFLATE` frame types (`Protocol\WebSocket::send()`); Workerman inflates what the client deflates.
 - **CORS:** the `cors` option, as the `cors` package the reference uses, including the `OPTIONS` preflight.
   - `origin` is `'*'` (default), a list of origins, a `Closure(string $origin, Request $request): bool` deciding per request, or `null` to disable CORS. `credentials` (default `false`) adds `Access-Control-Allow-Credentials: true`, which browsers need to send cookies cross-origin.
   - The headers go on every polling answer, errors included.
@@ -291,7 +295,7 @@ src/
   - If the connection closed while a middleware worked, the socket is dropped.
 - **Dispatch is synchronous.** The reference defers some steps with `process.nextTick`; here, packets and middleware results are handled at once. An exception from a user listener propagates up to `ServerBinding`, which closes the connection and reports it.
 - **One socket per namespace and connection:** a second `CONNECT` to a joined namespace, or a packet for a namespace the connection didn't join, closes the connection. After leaving a namespace (either side), the client can connect to it again with a new id.
-- **Flags without hidden state:** `timeout()`, `volatile` and `compress()` on a `Socket` return an immutable `SocketEmitter`; the socket itself keeps no flags. `compress()` exists for API compatibility and has no effect: the server doesn't compress. `volatile` drops the emit when the transport can't take it right now.
+- **Flags without hidden state:** `timeout()`, `volatile` and `compress()` on a `Socket` return an immutable `SocketEmitter`; the socket itself keeps no flags. `compress(false)` marks the packets uncompressible, from `SocketEmitter`, `BroadcastOperator` and `BroadcastOptions::$compress` (on the wire between servers too) down to `Engine\Packet::$compress`. `volatile` drops the emit when the transport can't take it right now.
 - **Disconnect reasons** (`DisconnectReason`, given to listeners as strings): the Engine.IO close reasons, plus `server namespace disconnect`, `client namespace disconnect`, `forced server close` and `server shutting down`. `disconnecting` fires while the socket still has its rooms, `disconnect` after it left them.
 - **Ids:** a socket id differs from its Engine.IO session id and differs per namespace. Format: 24 lowercase hex characters, which `PubSubAdapter` relies on to recognize sid rooms.
 - **Strict parser validation** (any violation throws `Parser\InvalidPacketException`, which closes the connection), with the reference's error messages:
@@ -321,6 +325,7 @@ src/
     - each server's `broadcastWithAck()` reports how many sockets it reached, and each answer counts once, with its first argument; `AckCollector` waits for `serverCount()` reports;
     - the callback gets `null` and the answers in arrival order once every server reported and all answered (at once with `[]` when none was reached), or a `TimeoutException` and the answers so far, after which every socket of the namespace forgets the id;
     - a `volatile` packet dropped for a busy transport still counts, so the wait ends with the timeout.
+- **Debug log** (`logger` option, a `Closure(string $scope, string $message)`), in place of the reference's `debug` module: scopes `engine` (session opened with transport and address, request refused with code and message), `engine:socket` (upgraded, closed with reason), `socket.io:client` (unknown namespace, connect timeout, invalid or out-of-turn packet), `socket.io:socket` (joined, refused by a middleware, left with reason, event stopped by a `use()` middleware), `socket.io:adapter` (cluster servers joining and leaving). The engine lines come from the engine's events, wired by `SocketIO` only when the option is set; the others call `SocketIO::logger()`. Lifecycle steps only, never per packet, and never event data.
 - **Socket middlewares** (`$socket->use()`), as the reference's `socket.use()`:
   - they run in order for each received event of a connected socket, after the `onAny` listeners and before the event's own, getting `[name, ...args]` with the ack `Closure` last when asked;
   - `$next()` lets the event through; `$next($error)` stops it and dispatches `error` with `$error`, and the socket stays connected; only the first call counts, and it may come later;
@@ -373,7 +378,7 @@ $io->on('connection', function (Socket $socket) use ($io): void {
 Worker::runAll();
 ```
 
-- `SocketIO`: `$io->engine` (its `initial_headers`, `headers` and `connection_error` events), `of()`, `on()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method), `serverSideEmit()`, `fetchSockets(?Closure)`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()` (all on `/`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
+- `SocketIO`: `$io->engine` (its `initial_headers`, `headers` and `connection_error` events), `of()`, `on()`, `once()`, `off()`, `listeners()`, `eventNames()`, `removeListener()`, `removeAllListeners()` (`workerStart`/`workerStop` are its own; any other event goes to the `/` namespace, as the reference forwards every emitter method; `eventNames()` lists both), `new_namespace` (Nsp) on the `/` namespace when another namespace is created, as the reference's `of()` emits it on `this.sockets` (its docs say the server, its code says the main namespace), `serverSideEmit()`, `fetchSockets(?Closure)`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()` (all on `/`), `use()`, `to/in/except`, `emit`, `send`, `compress`, `volatile`, `local`, `timeout`, `adapter()`, `attach(Worker)`, `close()`, `$io->worker`, `$io->sockets` (the `/` namespace).
 - **`close()`**, as the reference's:
   1. every connected socket of every namespace leaves with `server shutting down`, with no `DISCONNECT` sent;
   2. each adapter's `close()` runs (`PubSubAdapter` unsubscribes from its channels);

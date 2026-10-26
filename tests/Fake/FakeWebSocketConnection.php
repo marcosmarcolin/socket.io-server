@@ -23,9 +23,13 @@ final class FakeWebSocketConnection implements WebSocketConnection
     /** @var list<Closure(): void> */
     private array $closeListeners = [];
 
-    public function send(string $data, bool $binary): void
+    /** @var list<bool> whether each frame sent was to be deflated */
+    public array $compressed = [];
+
+    public function send(string $data, bool $binary, bool $compress = false): void
     {
         $this->sent[] = ['data' => $data, 'binary' => $binary];
+        $this->compressed[] = $compress;
     }
 
     public function close(): void

@@ -220,7 +220,7 @@ final class Socket extends Emitter
     }
 
     /**
-     * Kept for API compatibility: the server doesn't compress, so this has no effect.
+     * With false, the next emit isn't compressed; see the httpCompression option.
      */
     public function compress(bool $compress): SocketEmitter
     {
@@ -316,7 +316,7 @@ final class Socket extends Emitter
      * @internal used by SocketEmitter
      * @param list<mixed> $args
      */
-    public function emitWith(string $event, array $args, ?int $timeout, bool $volatile): void
+    public function emitWith(string $event, array $args, ?int $timeout, bool $volatile, bool $compress = true): void
     {
         if (in_array($event, Packet::RESERVED_EVENTS, true)) {
             throw new InvalidArgumentException(sprintf('"%s" is a reserved event name', $event));
@@ -331,7 +331,7 @@ final class Socket extends Emitter
         }
 
         $this->anyOutgoingListeners->notify($event, ...$args);
-        $this->packet(new Packet(PacketType::Event, $this->nsp->name, [$event, ...$args], $id), $volatile);
+        $this->packet(new Packet(PacketType::Event, $this->nsp->name, [$event, ...$args], $id), $volatile, $compress);
     }
 
     /**
@@ -419,6 +419,12 @@ final class Socket extends Emitter
         if (! $this->isConnected) {
             return;
         }
+        $this->nsp->server->logger()->debug('socket.io:socket', sprintf(
+            'socket %s left %s: %s',
+            $this->id,
+            $this->nsp->name,
+            $reason->value,
+        ));
         $this->dispatch('disconnecting', $reason->value, $description);
         $this->cleanup();
         $this->client->remove($this);
@@ -457,11 +463,12 @@ final class Socket extends Emitter
         return new BroadcastOperator($this->nsp, [], [$this->id]);
     }
 
-    private function packet(Packet $packet, bool $volatile = false): void
+    private function packet(Packet $packet, bool $volatile = false, bool $compress = true): void
     {
         $this->client->packet(
             new Packet($packet->type, $this->nsp->name, $packet->data, $packet->id),
             $volatile,
+            $compress,
         );
     }
 
@@ -528,6 +535,13 @@ final class Socket extends Emitter
             }
             $called = true;
             if ($error !== null) {
+                $name = $event[0] ?? null;
+                $this->nsp->server->logger()->debug('socket.io:socket', sprintf(
+                    'socket %s: a middleware stopped "%s": %s',
+                    $this->id,
+                    is_string($name) || is_int($name) ? $name : '',
+                    $error->getMessage(),
+                ));
                 $this->dispatch('error', $error);
 
                 return;

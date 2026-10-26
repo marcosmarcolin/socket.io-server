@@ -52,6 +52,7 @@ final class Client
         $this->connectTimer = $server->scheduler()->after($server->connectTimeout, function (): void {
             $this->connectTimer = null;
             if ($this->sockets === []) {
+                $this->log(sprintf('joined no namespace within %d ms', $this->server->connectTimeout));
                 $this->close();
             }
         });
@@ -67,12 +68,12 @@ final class Client
      *
      * @param bool $volatile drop the packet if the transport can't take it right now
      */
-    public function packet(Packet $packet, bool $volatile = false): void
+    public function packet(Packet $packet, bool $volatile = false, bool $compress = true): void
     {
         if (! $this->isOpen()) {
             return;
         }
-        $this->write($this->server->encoder()->encode($packet), $volatile);
+        $this->write($this->server->encoder()->encode($packet), $volatile, $compress);
     }
 
     /**
@@ -80,13 +81,13 @@ final class Client
      *
      * @param list<string|Binary> $parts
      */
-    public function write(array $parts, bool $volatile = false): void
+    public function write(array $parts, bool $volatile = false, bool $compress = true): void
     {
         if (! $this->isOpen() || ($volatile && ! $this->conn->transport()->isWritable())) {
             return;
         }
         foreach ($parts as $part) {
-            $this->conn->send($part);
+            $this->conn->send($part, $compress);
         }
     }
 
@@ -122,6 +123,7 @@ final class Client
         try {
             $packet = $this->decoder->add($data);
         } catch (InvalidPacketException $e) {
+            $this->log('sent an invalid packet: ' . $e->getMessage());
             $this->onError($e);
 
             return;
@@ -144,6 +146,7 @@ final class Client
             $socket->onPacket($packet);
         } else {
             // A second CONNECT, or a packet for a namespace this connection didn't join.
+            $this->log(sprintf('sent a packet of type %d out of turn for %s', $packet->type->value, $packet->nsp));
             $this->close();
         }
     }
@@ -154,6 +157,7 @@ final class Client
     private function connect(string $name, array $auth): void
     {
         if (! $this->server->hasNamespace($name)) {
+            $this->log('asked for the unknown namespace ' . $name);
             $this->packet(new Packet(PacketType::ConnectError, $name, ['message' => 'Invalid namespace']));
 
             return;
@@ -196,5 +200,10 @@ final class Client
             $socket->onClose($reason, $error);
         }
         $this->decoder->reset();
+    }
+
+    private function log(string $message): void
+    {
+        $this->server->logger()->debug('socket.io:client', sprintf('session %s %s', $this->conn->id, $message));
     }
 }

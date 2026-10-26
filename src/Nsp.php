@@ -14,8 +14,9 @@ use Throwable;
 /**
  * A namespace.
  *
- * Events: `connection` and `connect` (Socket), when a socket joined, after the middlewares let it in; and the events
- * other servers send with serverSideEmit().
+ * Events: `connection` and `connect` (Socket), when a socket joined, after the middlewares let it in; on the main
+ * namespace, `new_namespace` (Nsp) when another namespace is created; and the events other servers send with
+ * serverSideEmit().
  *
  * Broadcasts, socketsJoin, socketsLeave and disconnectSockets reach every server through the adapter, and so does
  * fetchSockets with a callback; allSockets and fetchSockets without one read this process.
@@ -86,7 +87,7 @@ final class Nsp extends Emitter
     }
 
     /**
-     * Kept for API compatibility: the server doesn't compress, so this has no effect.
+     * With false, the broadcast isn't compressed; see BroadcastOperator::compress().
      */
     public function compress(bool $compress): BroadcastOperator
     {
@@ -226,6 +227,12 @@ final class Nsp extends Emitter
                 return;
             }
             if ($error !== null) {
+                $this->server->logger()->debug('socket.io:socket', sprintf(
+                    '%s refused socket %s: %s',
+                    $this->name,
+                    $socket->id,
+                    $error->getMessage(),
+                ));
                 $socket->cleanup();
                 $socket->refuse($error);
 
@@ -234,6 +241,12 @@ final class Nsp extends Emitter
 
             unset($this->connecting[$socket->id]);
             $this->sockets[$socket->id] = $socket;
+            $this->server->logger()->debug('socket.io:socket', sprintf(
+                'socket %s joined %s over session %s',
+                $socket->id,
+                $this->name,
+                $client->conn->id,
+            ));
             $socket->onConnect();
             $onConnect($socket);
             $this->dispatch('connect', $socket);
@@ -248,6 +261,16 @@ final class Nsp extends Emitter
     public function remove(Socket $socket): void
     {
         unset($this->sockets[$socket->id], $this->connecting[$socket->id]);
+    }
+
+    /**
+     * Tells the main namespace's `new_namespace` listeners about a namespace just created.
+     *
+     * @internal
+     */
+    public function announce(Nsp $nsp): void
+    {
+        $this->dispatch('new_namespace', $nsp);
     }
 
     /**

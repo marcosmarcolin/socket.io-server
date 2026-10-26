@@ -329,8 +329,8 @@ abstract class PubSubAdapter extends InMemoryAdapter
             return;
         }
         // An Emitter publishes but is no server, so it never counts, as in the reference.
-        if ($uid !== Emitter::UID) {
-            $this->nodes->seen($uid);
+        if ($uid !== Emitter::UID && $this->nodes->seen($uid)) {
+            $this->log(sprintf('server %s joined; %d servers', $uid, $this->serverCount()));
         }
 
         match ($type) {
@@ -592,6 +592,7 @@ abstract class PubSubAdapter extends InMemoryAdapter
 
     private function nodeGone(string $uid): void
     {
+        $this->log(sprintf('server %s left; %d servers', $uid, $this->serverCount()));
         foreach ($this->requests as $request) {
             $request->gone($uid);
         }
@@ -607,11 +608,15 @@ abstract class PubSubAdapter extends InMemoryAdapter
         $except = self::strings($value['except'] ?? null);
         $volatile = $value['volatile'] ?? null;
         $timeout = $value['timeout'] ?? null;
-        if ($rooms === null || $except === null || ! is_bool($volatile) || ($timeout !== null && ! is_int($timeout))) {
+        $compress = $value['compress'] ?? true;
+        if ($rooms === null || $except === null || ! is_bool($volatile) || ! is_bool($compress)) {
+            return null;
+        }
+        if ($timeout !== null && ! is_int($timeout)) {
             return null;
         }
 
-        return new BroadcastOptions($rooms, $except, $volatile, $timeout);
+        return new BroadcastOptions($rooms, $except, $volatile, $timeout, compress: $compress);
     }
 
 
@@ -675,5 +680,10 @@ abstract class PubSubAdapter extends InMemoryAdapter
 
         /** @var list<string> $value */
         return $value;
+    }
+
+    private function log(string $message): void
+    {
+        $this->nsp->server->logger()->debug('socket.io:adapter', $this->nsp->name . ': ' . $message);
     }
 }

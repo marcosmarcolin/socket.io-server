@@ -25,7 +25,7 @@ final class Wire
     }
 
     /**
-     * @return array{rooms: list<string>, except: list<string>, volatile: bool, timeout: int|null}
+     * @return array{rooms: list<string>, except: list<string>, volatile: bool, timeout: int|null, compress: bool}
      */
     public static function options(BroadcastOptions $options): array
     {
@@ -34,6 +34,7 @@ final class Wire
             'except' => $options->except,
             'volatile' => $options->volatile,
             'timeout' => $options->timeout,
+            'compress' => $options->compress,
         ];
     }
 

@@ -13,6 +13,7 @@ use Marcolin\SocketIO\ConnectionError;
 use Marcolin\SocketIO\Engine\Packet;
 use Marcolin\SocketIO\Engine\PacketType;
 use Marcolin\SocketIO\Engine\Request;
+use Marcolin\SocketIO\Nsp;
 use Marcolin\SocketIO\Engine\ResponseHeaders;
 use Marcolin\SocketIO\Socket;
 use Marcolin\SocketIO\SocketIO;
@@ -20,12 +21,21 @@ use Workerman\Worker;
 
 require __DIR__ . '/../../vendor/autoload.php';
 
+// The debug log, kept in memory for the clients to read their own lines.
+$debugLog = [];
+
 $io = new SocketIO(options: [
+    'logger' => static function (string $scope, string $message) use (&$debugLog): void {
+        $debugLog[] = $scope . ': ' . $message;
+        $debugLog = array_slice($debugLog, -500);
+    },
     'pingInterval' => 1000,
     'pingTimeout' => 1000,
     'connectTimeout' => 2000,
     // The session id in a cookie on the polling handshake, for sticky sessions.
     'cookie' => true,
+    // WebSocket messages of 1 KB or more go deflated, when the client offers it (Node's ws does).
+    'perMessageDeflate' => true,
 ]);
 
 // A cookie on each session's first answer, and a header on every answer.
@@ -56,7 +66,13 @@ $io->use(static function (Socket $socket, Closure $next): void {
     $next($refused ? new ConnectionError('refused', ['reason' => 'bad token']) : null);
 });
 
-$io->on('connection', static function (Socket $socket) use ($io, &$lastConnectionError): void {
+$io->on('connection', static function (Socket $socket) use ($io, &$lastConnectionError, &$debugLog): void {
+    $socket->on('debug-log', static function (Closure $ack) use ($socket, &$debugLog): void {
+        $ack(array_values(array_filter(
+            $debugLog,
+            static fn (string $line): bool => str_contains($line, $socket->conn->id),
+        )));
+    });
     // A socket middleware stops the events named "forbidden", and the error listener tells the client.
     $socket->use(static function (array $event, Closure $next): void {
         $next($event[0] === 'forbidden' ? new RuntimeException('forbidden event') : null);
@@ -76,6 +92,14 @@ $io->on('connection', static function (Socket $socket) use ($io, &$lastConnectio
         if ($packet->type === PacketType::Message && ! $packet->binary) {
             $created[] = $packet->data;
         }
+    });
+    // A big event, which a polling answer compresses unless told otherwise.
+    $socket->on('big', static function (int $size, bool $compress) use ($socket): void {
+        $socket->compress($compress)->emit('big', str_repeat('x', $size));
+    });
+    // The extensions the client offered when its WebSocket opened the session.
+    $socket->on('ws-extensions', static function (Closure $ack) use ($socket): void {
+        $ack($socket->conn->request->header('Sec-WebSocket-Extensions'));
     });
     $socket->on('say', static function (string $word) use ($socket): void {
         $socket->emit('said', $word);
@@ -158,8 +182,17 @@ $io->on('connection', static function (Socket $socket) use ($io, &$lastConnectio
     });
 });
 
+// As the reference's docs suggest: a middleware for every namespace created after this point.
+$io->on('new_namespace', static function (Nsp $nsp): void {
+    $nsp->use(static function (Socket $socket, Closure $next) use ($nsp): void {
+        $socket->data['checkedBy'] = 'new_namespace:' . $nsp->name;
+        $next();
+    });
+});
+
 $io->of('/admin')->on('connection', static function (Socket $socket): void {
     $socket->emit('admin-welcome', $socket->nsp->name);
+    $socket->emit('admin-checked', $socket->data['checkedBy'] ?? null);
 });
 
 // Dual-stack: the client connects to "localhost", which may resolve to ::1.

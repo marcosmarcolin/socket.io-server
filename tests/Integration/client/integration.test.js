@@ -53,6 +53,59 @@ after(() => {
   }
 });
 
+describe("http compression", () => {
+  // A raw polling session: the handshake, a CONNECT to "/", then each request and its answer.
+  async function session() {
+    const base = `${URL}/socket.io/?EIO=4&transport=polling`;
+    const [, sid] = /"sid":"([^"]+)"/.exec(await (await fetch(base)).text());
+    const url = `${base}&sid=${sid}`;
+    await fetch(url, { method: "POST", body: "40" });
+    await (await fetch(url)).text();
+    return url;
+  }
+
+  async function bigAnswer(url, compress) {
+    await fetch(url, { method: "POST", body: `42["big",4000,${compress}]` });
+    const response = await fetch(url, { headers: { "Accept-Encoding": "gzip" } });
+    return { encoding: response.headers.get("content-encoding"), body: await response.text() };
+  }
+
+  test("a big polling answer is gzipped, and compress(false) leaves it plain", TIMEOUT, async () => {
+    const url = await session();
+
+    const compressed = await bigAnswer(url, true);
+    const plain = await bigAnswer(url, false);
+
+    assert.equal(compressed.encoding, "gzip");
+    assert.equal(compressed.body, `42["big","${"x".repeat(4000)}"]`);
+    assert.equal(plain.encoding, null);
+    assert.equal(plain.body, `42["big","${"x".repeat(4000)}"]`);
+  });
+
+  test("big messages go deflated both ways over WebSocket", TIMEOUT, async () => {
+    const socket = await connected("websocket");
+    const text = "é".repeat(30000);
+    // Node's ws offers the extension by default, so this connection negotiated it.
+    assert.match(await socket.emitWithAck("ws-extensions"), /^permessage-deflate/);
+
+    // The client deflates its frame and the server inflates it; the answer goes back deflated.
+    assert.equal(await socket.emitWithAck("echo", text), text);
+
+    const big = next(socket, "big");
+    socket.emit("big", 100000, true);
+    assert.equal((await big)[0], "x".repeat(100000));
+  });
+
+  test("the official client reads compressed answers over polling", TIMEOUT, async () => {
+    const socket = await connected("polling");
+
+    const big = next(socket, "big");
+    socket.emit("big", 50000, true);
+
+    assert.equal((await big)[0], "x".repeat(50000));
+  });
+});
+
 describe("engine events", () => {
   test("initial_headers and headers change the polling answers, after the cookie option", TIMEOUT, async () => {
     const handshake = await fetch(`${URL}/socket.io/?EIO=4&transport=polling`);
@@ -77,6 +130,7 @@ describe("engine events", () => {
           Connection: "Upgrade",
           Upgrade: "websocket",
           "Sec-WebSocket-Version": "13",
+          "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
           // A fresh nonce, as RFC 6455 asks.
           "Sec-WebSocket-Key": randomBytes(16).toString("base64"),
         },
@@ -91,6 +145,7 @@ describe("engine events", () => {
     });
 
     assert.equal(response.statusCode, 101);
+    assert.equal(response.headers["sec-websocket-extensions"], "permessage-deflate");
     assert.deepEqual(response.headers["set-cookie"], ["io-test=1; Path=/"]);
     assert.equal(response.headers["x-engine"], "php");
   });
@@ -212,6 +267,14 @@ for (const mode of Object.keys(MODES)) {
       assert.equal(Object.keys(manager.nsps).length, 2);
     });
 
+    test("a new_namespace listener put a middleware on /admin", TIMEOUT, async () => {
+      const admin = client(mode, "/admin");
+
+      const [checkedBy] = await next(admin, "admin-checked");
+
+      assert.equal(checkedBy, "new_namespace:/admin");
+    });
+
     test("refuses an unknown namespace", TIMEOUT, async () => {
       const socket = client(mode, "/unknown");
 
@@ -252,6 +315,22 @@ for (const mode of Object.keys(MODES)) {
       // The listener starts in the connection handler, after the CONNECT answer; the acknowledgement that carries
       // this list is written after it is built.
       assert.deepEqual(await socket.emitWithAck("created"), ['2["said","hello"]']);
+    });
+
+    test("the logger option sees the session open, join and upgrade", TIMEOUT, async () => {
+      const socket = await connected(mode);
+      // The upgrade may already be done by now.
+      if (mode === "upgrade" && socket.io.engine.transport.name !== "websocket") {
+        await next(socket.io.engine, "upgrade");
+      }
+      const sid = socket.io.engine.id;
+
+      const lines = await socket.emitWithAck("debug-log");
+
+      const first = mode === "websocket" ? "websocket" : "polling";
+      assert.match(lines[0], new RegExp(`^engine: session ${sid} opened over ${first} from `));
+      assert.ok(lines.includes(`socket.io:socket: socket ${socket.id} joined / over session ${sid}`));
+      assert.equal(lines.includes(`engine:socket: session ${sid} upgraded to websocket`), mode === "upgrade");
     });
 
     test("lets the server see every event both ways with onAny and onAnyOutgoing", TIMEOUT, async () => {
