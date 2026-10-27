@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- **A poll sent right after the upgrade's `5` is refused, as it should be.** When both arrived in the same pass of the event loop, Workerman could read the poll first, and it got a `noop` instead of HTTP 400. Requests arriving during an upgrade now wait for the end of the pass.
+
 ## [0.6.0] - 2026-10-27
 
 A Redis Streams adapter: a process that loses Redis for a while catches up on what it missed, and connection state recovery on any process, without sticky sessions. Custom adapters must update `restoreSession()`, which now takes a callback.

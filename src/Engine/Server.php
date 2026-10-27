@@ -103,15 +103,23 @@ final class Server extends Emitter
             return;
         }
         $sid = $exchange->query('sid');
-        if ($sid !== null) {
-            $transport = $this->sessions[$sid]->transport();
-            // verify() matched the transport name, so this is a safety net.
-            if (! $transport instanceof Polling) {
-                $this->reject($exchange, new Rejection(ServerError::BadRequest));
+        if ($sid !== null && $this->sessions[$sid]->isUpgrading()) {
+            // The client may have sent the upgrade's "5" in this same pass of the event loop, and Workerman's
+            // select() reads sockets in descriptor order, not arrival order: route it once that is read.
+            $aborted = false;
+            $exchange->onAbort(static function () use (&$aborted): void {
+                $aborted = true;
+            });
+            $this->scheduler->after(0, function () use ($exchange, &$aborted): void {
+                if (! $aborted) {
+                    $this->routeToSession($exchange, true);
+                }
+            });
 
-                return;
-            }
-            $transport->handleRequest(new HeadersHttpExchange($exchange, $this->prepareHeaders(...)));
+            return;
+        }
+        if ($sid !== null) {
+            $this->routeToSession($exchange, false);
 
             return;
         }
@@ -134,6 +142,30 @@ final class Server extends Emitter
             },
         ));
         $this->dispatch('connection', $socket);
+    }
+
+
+    /**
+     * Hands a request with a sid to its session's polling transport.
+     *
+     * @param bool $waited verifies it again: the session may have closed or upgraded meanwhile
+     */
+    private function routeToSession(HttpExchange $exchange, bool $waited): void
+    {
+        $rejection = $waited ? $this->verify($exchange->request(), $exchange->method(), false, true) : null;
+        if ($rejection !== null) {
+            $this->reject($exchange, $rejection);
+
+            return;
+        }
+        $transport = $this->sessions[(string) $exchange->query('sid')]->transport();
+        // verify() matched the transport name, so this is a safety net.
+        if (! $transport instanceof Polling) {
+            $this->reject($exchange, new Rejection(ServerError::BadRequest));
+
+            return;
+        }
+        $transport->handleRequest(new HeadersHttpExchange($exchange, $this->prepareHeaders(...)));
     }
 
     /**

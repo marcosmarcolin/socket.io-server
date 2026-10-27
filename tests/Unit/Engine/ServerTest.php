@@ -630,12 +630,45 @@ final class ServerTest extends TestCase
         $this->server->handleWebSocket($request, $connection);
         $connection->receive('2probe');
         $noop = $this->poll();
+        // A poll during the upgrade is routed at the end of the event loop's pass.
+        $this->scheduler->advance(0);
         $connection->receive('5');
 
         self::assertSame(['3probe'], $connection->sentData());
         self::assertSame('6', $noop->responseBody);
         self::assertTrue($this->connections[0]->isUpgraded());
         self::assertCount(1, $this->connections);
+    }
+
+    public function testAPollReadBeforeTheUpgradePacketOfTheSamePassIsRejected(): void
+    {
+        $this->handshake();
+        $connection = new FakeWebSocketConnection();
+        $this->server->handleWebSocket($this->webSocketRequest(self::UPGRADE), $connection);
+        $connection->receive('2probe');
+
+        // select() may read the poll's connection before the WebSocket, though the client sent "5" first.
+        $poll = $this->poll();
+        $connection->receive('5');
+        $this->scheduler->advance(0);
+
+        $this->assertRejected($poll, ServerError::BadRequest);
+        self::assertTrue($this->connections[0]->isUpgraded());
+    }
+
+    public function testAPollCancelledDuringTheUpgradeIsDropped(): void
+    {
+        $this->handshake();
+        $connection = new FakeWebSocketConnection();
+        $this->server->handleWebSocket($this->webSocketRequest(self::UPGRADE), $connection);
+        $connection->receive('2probe');
+
+        $poll = $this->poll();
+        $poll->abort();
+        $this->scheduler->advance(0);
+
+        self::assertNull($poll->status);
+        self::assertSame(1, $this->server->clientsCount());
     }
 
     public function testRejectsHttpRequestsAfterTheUpgrade(): void
