@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-27
+
+A Redis Streams adapter: a process that loses Redis for a while catches up on what it missed, and connection state recovery on any process, without sticky sessions. Custom adapters must update `restoreSession()`, which now takes a callback.
+
 ### Added
 
 - **`RedisStreamsAdapter`**, as the reference's Redis Streams adapter: broadcasts, `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` go through a Redis stream that every process reads from its last entry, so a process that loses Redis for a while gets what it missed, and connection state recovery works on any process, without sticky sessions: offsets are entry ids, and sessions are kept in Redis. Options `streamName`, `maxLen`, `readCount`, `blockTimeInMs` and `sessionKeyPrefix`, with the reference's defaults. Needs Redis 6.2 or later, or Valkey.
@@ -199,7 +203,8 @@ The first release.
 - Across processes, only broadcasts travel; the socket helpers (`fetchSockets`, `socketsJoin`...) act on the current process.
 - With several processes on one port, clients must use `transports: ['websocket']`.
 
-[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.4.0...v0.5.0
