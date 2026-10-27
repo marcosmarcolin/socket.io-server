@@ -3,9 +3,10 @@
 Broadcasts and the socket helpers reach the other processes through an adapter, set in `workerStart` on every process:
 
 - `ChannelAdapter`, on a [workerman/channel](https://github.com/walkor/channel) server: nothing else to run, good for one machine.
-- `RedisAdapter`, on a Redis server: for several machines, or when you already run Redis. It needs no extra package.
+- `RedisAdapter`, on Redis publish and subscribe: for several machines, or when you already run Redis. It needs no extra package.
+- `RedisStreamsAdapter`, on a Redis stream: a process that loses Redis for a while catches up on what it missed, and [connection state recovery](configuration.md#connection-state-recovery) works on any process, without sticky sessions. See [which Redis adapter](#which-redis-adapter).
 
-Both work the same way: each broadcast is encoded once and published once, and every process delivers it to its own sockets.
+All three work the same way: each broadcast is encoded once and sent once, and every process delivers it to its own sockets.
 
 ## What crosses processes
 
@@ -112,6 +113,51 @@ RedisAdapter::factory('rediss://:password@redis.internal:6380', tls: [
 - Servers of different apps sharing one Redis need different `key`s, or they get each other's broadcasts.
 - When Redis is unreachable, the adapter retries every second and reports the failure once to `onError` (`Worker::log` by default). Up to 1,000 publishes wait for the connection; messages published while a process was disconnected are lost, as always with Redis pub/sub.
 
+## Redis Streams
+
+`RedisStreamsAdapter`, as the reference's [Redis Streams adapter](https://socket.io/docs/v4/redis-streams-adapter/), appends broadcasts, `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` to a Redis stream that every process reads. The rest of the cluster protocol (`serverSideEmit()`, `fetchSockets()`, broadcasts with acknowledgements, heartbeats) only matters while someone waits for it, so it stays on publish and subscribe, as in the reference. It needs Redis 6.2 or later, or Valkey.
+
+```php
+use Marcolin\SocketIO\Adapter\RedisStreamsAdapter;
+
+$io = new SocketIO(options: ['connectionStateRecovery' => true]);
+
+$io->on('workerStart', function () use ($io): void {
+    $io->adapter(RedisStreamsAdapter::factory('redis://:password@10.0.0.5:6379'));
+});
+```
+
+It takes `RedisAdapter`'s arguments, `url`, `key`, `onError` and `tls`, which work the same, plus `options`, with the reference's names and defaults:
+
+```php
+RedisStreamsAdapter::factory('redis://127.0.0.1:6379', options: [
+    'streamName' => 'socket.io',          // the stream every process appends to and reads
+    'maxLen' => 10_000,                   // about how many entries the stream keeps (XADD MAXLEN ~)
+    'readCount' => 100,                   // entries per XREAD or XRANGE call
+    'blockTimeInMs' => 5_000,             // how long one XREAD waits before it is sent again
+    'sessionKeyPrefix' => 'sio:session:', // the keys of the sessions kept for connection state recovery
+]);
+```
+
+- **An outage loses nothing that reached Redis.** Each process reads the stream from the last entry it got, so after a reconnection it reads what was appended meanwhile, in order. While a process is disconnected, up to 1,000 commands wait for the connection, as with `RedisAdapter`. What goes past `maxLen` is trimmed, so a process away for long enough misses the oldest entries.
+- **Connection state recovery works on any process.** With the `connectionStateRecovery` option, an event's offset is its entry id, the same on every process, and the session of a socket that dropped is kept in Redis (`<sessionKeyPrefix><pid>`, expiring after `maxDisconnectionDuration`). A client that comes back to any process gets its socket and the events it missed, read from the stream. A session is recovered once. An offset already trimmed by `maxLen` starts over.
+- **The order of a process's own broadcasts:** with recovery on, a broadcast reaches the sockets of its own process once Redis gave its entry id (one round trip), and later broadcasts wait for it, so they keep their order. Without recovery, they go out at once, as with `RedisAdapter`.
+- **`local` broadcasts** are appended too when they can be recovered, since their offset is their entry id: the other processes skip them, and only the sockets of the process that sent them recover them.
+- Each process opens three connections: one for commands, one subscribed to the channels, and one blocked reading the stream. Several apps on one Redis need a different `key` and `streamName` each.
+
+### Which Redis adapter
+
+| | `RedisAdapter` | `RedisStreamsAdapter` |
+|---|---|---|
+| Broadcasts, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()` | publish and subscribe | a Redis stream |
+| A process that loses Redis for a while | misses what was sent meanwhile | reads it when it comes back |
+| Connection state recovery | on the process the client left, with sticky sessions | on any process |
+| Redis | any version | 6.2 or later, or Valkey |
+| Per broadcast | one `PUBLISH` | one `XADD`; with recovery, its own process waits for the reply |
+| Connections per process | 2 | 3 |
+
+Neither speaks the Node.js adapters' format: the servers of a cluster all run this package.
+
 ## Sending from your PHP app: the Emitter
 
 The `Emitter` sends to the clients from any PHP code that isn't a Socket.IO server, such as a PHP-FPM request in your app. It publishes to Redis what a server would, and the servers running `RedisAdapter` deliver it to their sockets:
@@ -132,11 +178,12 @@ $emitter->serverSideEmit('cache-clear', 'users');                 // the servers
 - `of()`, `to()`, `in()`, `except()` and `volatile` return a new emitter, so one can be kept and reused.
 - It only sends: no acknowledgements and no `fetchSockets()`, as in the reference's emitter packages. Data follows the rules of `emit()`, `Binary` included.
 - Servers don't count an emitter as a server, so it never makes them wait for answers.
+- For servers running `RedisStreamsAdapter`, use `Emitter::redisStreams($url, $key, $timeout, $tls, $options)` with the servers' `streamName` and `maxLen`: it appends what crosses the stream there, and its events, except volatile ones, get an offset, so clients recover them.
 - The [emitter example](../examples/emitter) has a plain PHP endpoint that sends notifications to the open tabs.
 
 ## Limits
 
 - With several processes on one port, clients must connect with `transports: ['websocket']`: polling needs every request of a session to reach the same process, which several processes on one port don't guarantee. Setting `'transports' => ['websocket']` on the server too refuses polling outright. Behind a proxy with sticky sessions and one port per process, polling works; see [Behind a reverse proxy](reverse-proxy.md).
 - `fetchSockets()` without a callback and `allSockets()` read the current process.
-- [Connection state recovery](configuration.md#connection-state-recovery) recovers a client that comes back to the process it left, so it needs sticky sessions, such as one port per process behind a proxy. With recovery on, every broadcast that can be recovered goes through the namespace's channel, so every process gets it, whatever the rooms; events sent with the `Emitter` aren't recoverable.
+- With `ChannelAdapter` or `RedisAdapter`, [connection state recovery](configuration.md#connection-state-recovery) recovers a client that comes back to the process it left, so it needs sticky sessions, such as one port per process behind a proxy. With recovery on, every broadcast that can be recovered goes through the namespace's channel, so every process gets it, whatever the rooms; events sent with the `Emitter` aren't recoverable. `RedisStreamsAdapter` recovers on any process, `Emitter` events included.
 - `local` keeps any of the above in the current process: `$io->local->emit('reload')`, `$io->local->disconnectSockets()`.

@@ -2,22 +2,29 @@
 
 /**
  * Two processes with connection state recovery, one per port (3000 and 3001), joined by a workerman/channel server,
- * as behind a proxy with sticky sessions: for tests/Integration/client/recovery-processes.test.js.
+ * as behind a proxy with sticky sessions: for tests/Integration/client/recovery-processes.test.js. With
+ * ADAPTER=redis-streams and REDIS_URL, joined by a Redis stream instead, where a client recovers on either process:
+ * for tests/Integration/client/recovery-streams.test.js.
  *
- * Run by tests/Integration/run.sh recovery-processes: php tests/Integration/recovery-processes-server.php start
+ * Run by tests/Integration/run.sh recovery-processes and recovery-streams:
+ * php tests/Integration/recovery-processes-server.php start
  */
 
 declare(strict_types=1);
 
 use Channel\Server as ChannelServer;
 use Marcolin\SocketIO\Adapter\ChannelAdapter;
+use Marcolin\SocketIO\Adapter\RedisStreamsAdapter;
 use Marcolin\SocketIO\Socket;
 use Marcolin\SocketIO\SocketIO;
 use Workerman\Worker;
 
 require __DIR__ . '/../../vendor/autoload.php';
 
-new ChannelServer('127.0.0.1', 2206);
+$redisUrl = getenv('ADAPTER') === 'redis-streams' ? (string) getenv('REDIS_URL') : null;
+if ($redisUrl === null) {
+    new ChannelServer('127.0.0.1', 2206);
+}
 
 foreach ([3000, 3001] as $port) {
     $io = new SocketIO(options: [
@@ -26,8 +33,12 @@ foreach ([3000, 3001] as $port) {
         'connectionStateRecovery' => ['maxDisconnectionDuration' => 10_000],
     ]);
     // The broker connection needs the process's event loop.
-    $io->on('workerStart', static function () use ($io): void {
-        $io->adapter(ChannelAdapter::factory('127.0.0.1', 2206));
+    $io->on('workerStart', static function () use ($io, $redisUrl): void {
+        $io->adapter(
+            $redisUrl === null
+                ? ChannelAdapter::factory('127.0.0.1', 2206)
+                : RedisStreamsAdapter::factory($redisUrl),
+        );
     });
     $io->on('connection', static function (Socket $socket) use ($io, $port): void {
         $socket->on('join', static function (string $room, Closure $ack) use ($socket): void {

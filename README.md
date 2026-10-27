@@ -18,7 +18,7 @@ It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and 
 - HTTP long-polling and WebSocket on one port, with the upgrade from polling to WebSocket.
 - Namespaces, middlewares, rooms, acknowledgements (broadcasts with a timeout too), binary data and catch-all listeners.
 - Connection state recovery: a client that lost its connection gets its socket, rooms and missed events back.
-- Several processes and machines, through [workerman/channel](https://github.com/walkor/channel) or Redis.
+- Several processes and machines, through [workerman/channel](https://github.com/walkor/channel), Redis publish and subscribe, or a Redis stream that survives outages and recovers clients on any process.
 - An `Emitter` that sends to the clients from any PHP code, such as a PHP-FPM request.
 - CORS with cookies, a hook to refuse connections before the handshake, and TLS.
 - Compression of polling answers and WebSocket messages, and a debug log.
@@ -115,7 +115,7 @@ Each one runs with `php examples/<name>/start.php start`; then open http://local
 
 - [Configuration](docs/configuration.md): server options, CORS and cookies, refusing connections, TLS.
 - [API reference](docs/api.md): `SocketIO`, namespaces, sockets, acknowledgements, broadcasting, JSON and binary data.
-- [Several processes](docs/multiple-processes.md): `ChannelAdapter`, `RedisAdapter`, and the `Emitter`.
+- [Several processes](docs/multiple-processes.md): `ChannelAdapter`, `RedisAdapter`, `RedisStreamsAdapter`, and the `Emitter`.
 - [Behind a reverse proxy](docs/reverse-proxy.md): nginx and HAProxy, TLS, and sticky sessions for polling.
 - [Admin UI](docs/admin-ui.md): watching and acting on the server from the official Admin UI.
 - [Performance and limits](docs/performance.md): what a process holds, the `event` extension, and the load test.

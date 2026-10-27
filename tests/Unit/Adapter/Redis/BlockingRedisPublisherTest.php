@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Marcolin\SocketIO\Tests\Unit\Adapter\Redis;
 
 use Marcolin\SocketIO\Adapter\Redis\BlockingRedisPublisher;
+use Marcolin\SocketIO\Adapter\Redis\BlockingRedisStream;
+use Marcolin\SocketIO\Adapter\Redis\RedisStreamOptions;
 use Marcolin\SocketIO\Adapter\Redis\RedisUrl;
 use Marcolin\SocketIO\Adapter\Redis\Resp;
 use PHPUnit\Framework\TestCase;
@@ -152,6 +154,41 @@ final class BlockingRedisPublisherTest extends TestCase
         } finally {
             fclose($server);
         }
+    }
+
+    public function testACommandReturnsItsReply(): void
+    {
+        $publisher = $this->publisher(RedisUrl::DEFAULT, ["\$3\r\n1-0\r\n"]);
+
+        self::assertSame('1-0', $publisher->command('XADD', 's', '*', 'k', 'v'));
+        self::assertSame([['XADD', 's', '*', 'k', 'v']], $this->commands(0));
+    }
+
+    public function testTheStreamAppendsOverTheSameConnection(): void
+    {
+        $publisher = $this->publisher(RedisUrl::DEFAULT, [":1\r\n\$3\r\n1-0\r\n"]);
+        $stream = new BlockingRedisStream($publisher, new RedisStreamOptions(streamName: 'chat', maxLen: 50));
+
+        $publisher->publish('ch', []);
+        $stream->append('/', ['uid' => 'emitter']);
+
+        self::assertCount(1, $this->servers);
+        self::assertSame([
+            ['PUBLISH', 'ch', serialize([])],
+            ['XADD', 'chat', 'MAXLEN', '~', '50', '*', 'nsp', '/', 'message', serialize(['uid' => 'emitter'])],
+        ], $this->commands(0));
+    }
+
+    public function testAFailedAppendThrows(): void
+    {
+        $stream = new BlockingRedisStream(
+            $this->publisher(RedisUrl::DEFAULT, ["-OOM command not allowed\r\n"]),
+            new RedisStreamOptions(),
+        );
+
+        $this->expectExceptionObject(new RuntimeException('OOM command not allowed'));
+
+        $stream->append('/', []);
     }
 
     /**

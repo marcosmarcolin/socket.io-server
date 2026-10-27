@@ -25,6 +25,22 @@ final class Wire
     }
 
     /**
+     * Whether a message goes through the Stream, when the adapter has one: what every server must apply even after
+     * an outage. Requests, responses and heartbeats only matter while their sender waits, so they go through the
+     * PubSub, as in the reference.
+     *
+     * @param array<string, mixed> $fields
+     */
+    public static function durable(MessageType $type, array $fields): bool
+    {
+        return match ($type) {
+            MessageType::Broadcast => ! isset($fields['requestId']),
+            MessageType::SocketsJoin, MessageType::SocketsLeave, MessageType::DisconnectSockets => true,
+            default => false,
+        };
+    }
+
+    /**
      * @return array{rooms: list<string>, except: list<string>, volatile: bool, timeout: int|null, compress: bool}
      */
     public static function options(BroadcastOptions $options): array

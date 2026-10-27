@@ -7,12 +7,15 @@ namespace Marcolin\SocketIO;
 use Closure;
 use InvalidArgumentException;
 use LogicException;
+use Marcolin\SocketIO\Adapter\Appender;
 use Marcolin\SocketIO\Adapter\BroadcastOptions;
 use Marcolin\SocketIO\Adapter\Cluster\Channels;
 use Marcolin\SocketIO\Adapter\Cluster\MessageType;
 use Marcolin\SocketIO\Adapter\Cluster\Wire;
 use Marcolin\SocketIO\Adapter\Publisher;
 use Marcolin\SocketIO\Adapter\Redis\BlockingRedisPublisher;
+use Marcolin\SocketIO\Adapter\Redis\BlockingRedisStream;
+use Marcolin\SocketIO\Adapter\Redis\RedisStreamOptions;
 use Marcolin\SocketIO\Adapter\Redis\RedisUrl;
 use Marcolin\SocketIO\Parser\Encoder;
 use Marcolin\SocketIO\Parser\Packet;
@@ -22,6 +25,10 @@ use Marcolin\SocketIO\Parser\PacketType;
  * Sends events to the clients of the servers, from any PHP code that isn't one of them, such as a PHP-FPM
  * request: it publishes what a server's PubSubAdapter would, and every server delivers it to its own sockets. As
  * the reference's emitter packages, it only sends: no acknowledgements, no fetchSockets.
+ *
+ * With an Appender (Emitter::redisStreams()), what a server's PubSubAdapter would append to its Stream goes there:
+ * events, socketsJoin, socketsLeave and disconnectSockets. Its events that aren't volatile get an offset, so clients
+ * recover them.
  *
  * Immutable: of(), to(), in(), except() and volatile return a new emitter.
  *
@@ -49,9 +56,13 @@ final class Emitter
 
     /**
      * @param string $key the servers' channel key: the `key` of RedisAdapter::factory()
+     * @param Appender|null $stream the servers' Stream, when they have one
      */
-    public function __construct(private readonly Publisher $publisher, private readonly string $key = 'socket.io')
-    {
+    public function __construct(
+        private readonly Publisher $publisher,
+        private readonly string $key = 'socket.io',
+        private readonly ?Appender $stream = null,
+    ) {
         $this->encoder = new Encoder();
     }
 
@@ -70,6 +81,30 @@ final class Emitter
         array $tls = [],
     ): self {
         return new self(new BlockingRedisPublisher(RedisUrl::parse($url)->withTlsOptions($tls), $timeout), $key);
+    }
+
+    /**
+     * An emitter for the servers of RedisStreamsAdapter, with blocking I/O: no event loop needed.
+     *
+     * @param string $url redis://[[user]:password@]host[:port], or rediss:// for TLS, the one the servers use
+     * @param string $key the servers' channel key: the `key` of RedisStreamsAdapter::factory()
+     * @param float $timeout seconds to connect, and to wait for each reply
+     * @param array<string, mixed> $tls PHP's ssl context options for rediss://, such as cafile or local_cert
+     * @param array<string, mixed> $options the servers' streamName and maxLen; the other stream options are
+     *     accepted, so the servers' array can be passed as is
+     * @throws InvalidArgumentException for an invalid URL or option, or TLS options without rediss://
+     */
+    public static function redisStreams(
+        string $url = RedisUrl::DEFAULT,
+        string $key = 'socket.io',
+        float $timeout = 5.0,
+        array $tls = [],
+        array $options = [],
+    ): self {
+        $streamOptions = RedisStreamOptions::fromArray($options);
+        $publisher = new BlockingRedisPublisher(RedisUrl::parse($url)->withTlsOptions($tls), $timeout);
+
+        return new self($publisher, $key, new BlockingRedisStream($publisher, $streamOptions));
     }
 
     public function __get(string $name): self
@@ -91,7 +126,7 @@ final class Emitter
         if (! str_starts_with($nsp, '/')) {
             throw new InvalidArgumentException(sprintf('A namespace starts with "/", got "%s"', $nsp));
         }
-        $copy = new self($this->publisher, $this->key);
+        $copy = new self($this->publisher, $this->key, $this->stream);
         $copy->nsp = $nsp;
 
         return $copy;
@@ -137,10 +172,15 @@ final class Emitter
         if (in_array($event, Packet::RESERVED_EVENTS, true)) {
             throw new InvalidArgumentException(sprintf('"%s" is a reserved event name', $event));
         }
-        $this->publish($this->channels()->forRooms($this->rooms), MessageType::Broadcast, [
+        $fields = [
             'opts' => Wire::options($this->options()),
             'parts' => $this->parts($event, array_values($args)),
-        ]);
+        ];
+        // Through a Stream, the servers add the entry id as its offset.
+        if ($this->stream !== null && ! $this->volatile) {
+            $fields['recoverable'] = true;
+        }
+        $this->publish($this->channels()->forRooms($this->rooms), MessageType::Broadcast, $fields);
 
         return $this;
     }
@@ -224,7 +264,13 @@ final class Emitter
      */
     private function publish(string $channel, MessageType $type, array $fields): void
     {
-        $this->publisher->publish($channel, Wire::message(self::UID, $type, $fields));
+        $message = Wire::message(self::UID, $type, $fields);
+        if ($this->stream !== null && Wire::durable($type, $fields)) {
+            $this->stream->append($this->nsp, $message);
+
+            return;
+        }
+        $this->publisher->publish($channel, $message);
     }
 
     private function channels(): Channels
