@@ -12,11 +12,15 @@
     input { flex: 1; padding: .5rem; font: inherit; }
     button { padding: .5rem 1rem; font: inherit; }
     .muted { color: #888; }
+    #rooms { display: flex; gap: .4rem; flex-wrap: wrap; min-height: 1.6rem; }
+    #rooms button { padding: .2rem .6rem; font-size: 13px; }
   </style>
 </head>
 <body>
   <h1>Rooms</h1>
   <p class="muted">Open this page in two tabs, join the same room, and message it.</p>
+  <p class="muted">Rooms that exist now (click one to fill it in):</p>
+  <div id="rooms"></div>
   <form id="join"><input id="room" value="php" required><button>Join</button><button type="button" id="leave">Leave</button></form>
   <form id="send"><input id="text" placeholder="Message to the room" required><button>Send</button></form>
   <ul id="log"></ul>
@@ -47,6 +51,17 @@
     onSubmit("send", () => socket.emit("room message", value("room"), value("text")));
     socket.on("room message", ({ room, from, text }) => log(`[${room}] ${from}: ${text}`));
     socket.on("members", ({ room, members }) => log(`[${room}] members: ${members.length}`));
+    // The server's list of rooms, sent on connecting and whenever a room is created or deleted.
+    socket.on("rooms", (rooms) => {
+      const list = document.getElementById("rooms");
+      list.replaceChildren(...rooms.map((room) => {
+        const button = document.createElement("button");
+        button.textContent = room;
+        button.addEventListener("click", () => (document.getElementById("room").value = room));
+        return button;
+      }));
+      if (rooms.length === 0) list.textContent = "none yet";
+    });
   </script>
 </body>
 </html>

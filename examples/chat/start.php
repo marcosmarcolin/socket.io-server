@@ -1,7 +1,8 @@
 <?php
 
 /**
- * A chat room: users join with a name, see who is typing, and get each other's messages.
+ * A chat room: users join with a name, see who is typing, and get each other's messages. With connection state
+ * recovery, a user whose connection drops for a moment comes back in the room, with the messages sent meanwhile.
  *
  *   php examples/chat/start.php start
  *
@@ -19,47 +20,52 @@ use Workerman\Worker;
 
 require __DIR__ . '/../../vendor/autoload.php';
 
-$io = new SocketIO(3000);
+$io = new SocketIO(3000, [
+    // A user back within two minutes keeps their socket, name and room, and gets what they missed.
+    'connectionStateRecovery' => ['maxDisconnectionDuration' => 120_000],
+]);
 
-// Names of the users in the room. One process, so a plain array is enough.
-$users = [];
+// The users who joined are in this room, so its size is the number of users, recovered ones included.
+const ROOM = 'chat';
 
-$io->on('connection', static function (Socket $socket) use (&$users): void {
-    $socket->on('add user', static function (string $username) use ($socket, &$users): void {
+$count = static fn (): int => count($io->in(ROOM)->fetchSockets());
+
+$io->on('connection', static function (Socket $socket) use ($count): void {
+    $username = static fn (): string => is_string($socket->data['username'] ?? null) ? $socket->data['username'] : '?';
+
+    // Back after a short drop: the socket has its name and room again, and the others hear it.
+    if ($socket->recovered && isset($socket->data['username'])) {
+        $socket->broadcast->emit('user joined', ['username' => $username(), 'numUsers' => $count(), 'back' => true]);
+    }
+
+    $socket->on('add user', static function (string $name) use ($socket, $count): void {
         if (isset($socket->data['username'])) {
             return;
         }
-        $socket->data['username'] = $username;
-        $users[$socket->id] = $username;
+        $socket->data['username'] = $name;
+        $socket->join(ROOM);
 
-        $socket->emit('login', ['numUsers' => count($users)]);
-        $socket->broadcast->emit('user joined', ['username' => $username, 'numUsers' => count($users)]);
+        $socket->emit('login', ['numUsers' => $count()]);
+        $socket->broadcast->emit('user joined', ['username' => $name, 'numUsers' => $count()]);
     });
 
-    $socket->on('new message', static function (string $message) use ($socket): void {
-        $socket->broadcast->emit('new message', [
-            'username' => $socket->data['username'] ?? '?',
-            'message' => $message,
-        ]);
+    $socket->on('new message', static function (string $message) use ($socket, $username): void {
+        $socket->broadcast->emit('new message', ['username' => $username(), 'message' => $message]);
     });
 
-    $socket->on('typing', static function () use ($socket): void {
-        $socket->broadcast->emit('typing', ['username' => $socket->data['username'] ?? '?']);
+    $socket->on('typing', static function () use ($socket, $username): void {
+        $socket->broadcast->emit('typing', ['username' => $username()]);
     });
 
-    $socket->on('stop typing', static function () use ($socket): void {
-        $socket->broadcast->emit('stop typing', ['username' => $socket->data['username'] ?? '?']);
+    $socket->on('stop typing', static function () use ($socket, $username): void {
+        $socket->broadcast->emit('stop typing', ['username' => $username()]);
     });
 
-    $socket->on('disconnect', static function () use ($socket, &$users): void {
-        if (! isset($users[$socket->id])) {
-            return;
+    // The socket has left the room by now, so the count no longer includes it.
+    $socket->on('disconnect', static function () use ($socket, $count, $username): void {
+        if (isset($socket->data['username'])) {
+            $socket->broadcast->emit('user left', ['username' => $username(), 'numUsers' => $count()]);
         }
-        unset($users[$socket->id]);
-        $socket->broadcast->emit('user left', [
-            'username' => $socket->data['username'] ?? '?',
-            'numUsers' => count($users),
-        ]);
     });
 });
 

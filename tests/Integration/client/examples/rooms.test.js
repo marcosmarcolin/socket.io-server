@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertPageServed, connected, next, record, sleep, TIMEOUT } from "./helpers.js";
+import { assertPageServed, client, connected, next, record, sleep, TIMEOUT } from "./helpers.js";
 
 test("serves the page", TIMEOUT, assertPageServed);
 
@@ -38,4 +38,33 @@ test("messages reach the other members of the room only", TIMEOUT, async () => {
   members = next(a, "members");
   b.disconnect();
   assert.deepEqual((await members)[0], { room: "php", members: [a.id] });
+});
+
+test("everyone gets the list of rooms, created with their first member and deleted with their last", TIMEOUT, async () => {
+  const a = await connected();
+  const b = await connected();
+  const until = (socket, check) =>
+    new Promise((resolve) => {
+      const listener = (rooms) => {
+        if (check(rooms)) {
+          socket.off("rooms", listener);
+          resolve(rooms);
+        }
+      };
+      socket.on("rooms", listener);
+    });
+
+  let rooms = until(b, (list) => list.includes("games"));
+  await a.emitWithAck("join room", "games");
+  assert.ok((await rooms).includes("games"));
+  // A socket's own room isn't listed.
+  assert.ok(!(await rooms).includes(a.id));
+
+  rooms = until(b, (list) => !list.includes("games"));
+  await a.emitWithAck("leave room", "games");
+  await rooms;
+
+  // A client that connects later gets the list at once.
+  rooms = next(client(), "rooms");
+  assert.ok(Array.isArray((await rooms)[0]));
 });

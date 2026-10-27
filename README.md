@@ -9,6 +9,8 @@ A [Socket.IO](https://socket.io) v4 server for PHP, built on [Workerman](https:/
 
 It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and apps use the official `socket.io-client` v3 or v4. It passes the official Engine.IO and Socket.IO compliance suites, and CI runs it against the official client.
 
+![A client and the PHP server send each other events, both ways and at any time, over WebSocket or HTTP long-polling.](docs/images/bidirectional.svg)
+
 > **Version 0.x.** The API may still change between minor versions until 1.0; each change is listed in the [changelog](CHANGELOG.md).
 
 ## Features
@@ -90,19 +92,20 @@ socket.emit("chat", "hi", (status) => console.log(status)); // "delivered"
 
 ## Examples
 
-Each one runs with `php examples/<name>/start.php start`; then open http://localhost:3001.
+Each one runs with `php examples/<name>/start.php start`; then open http://localhost:3001. Each folder's README says what to try and how it works.
 
 | Example | Shows |
 |---|---|
-| [chat](examples/chat) | a chat room: names, typing indicator, join and leave notices |
+| [chat](examples/chat) | a chat room: names, typing indicator, join and leave notices, and users who come back after a dropped connection with the messages they missed |
 | [admin-ui](examples/admin-ui) | the chat, watched and driven live from the official Admin UI |
 | [session-auth](examples/session-auth) | login with a PHP session, and a middleware that lets in only logged-in sessions' sockets |
 | [private-messaging](examples/private-messaging) | private messages to every tab of a user through a room per user, sessions kept across reconnections, and who is online |
-| [rooms](examples/rooms) | `join`, `leave`, messages to a room, live member lists |
+| [rooms](examples/rooms) | `join`, `leave`, messages to a room, live member lists, and the list of rooms from the adapter's room events |
 | [acks](examples/acks) | acknowledgements both ways, and the server's `timeout()` |
 | [namespaces](examples/namespaces) | `/public` and `/admin`, a middleware with a token, `ConnectionError` |
 | [binary](examples/binary) | file upload and download with `Binary` |
 | [pong](examples/pong) | multiplayer Pong: a queue pairs players, one room per match, the game loop on the server at 30 frames a second with `volatile` state |
+| [arena](examples/arena) | a multiplayer space arena: everyone in one room, bots while few play, a scoreboard, touch controls, and ships kept for players whose connection drops |
 | [dashboard](examples/dashboard) | live dashboards: a server timer pushes new numbers every few seconds to the viewers of each one |
 | [multi-process](examples/multi-process) | four processes and `ChannelAdapter` |
 | [emitter](examples/emitter) | a plain PHP endpoint sending notifications to the clients with the `Emitter`; it needs a Redis server |
