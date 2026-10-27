@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arena</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0b0d17; color: #e9ecef; margin: 0; padding: 12px; }
+    h1 { margin: 4px 0 10px; font-size: 22px; }
+    main { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+    #stage { flex: 1 1 640px; max-width: 1200px; }
+    canvas { width: 100%; aspect-ratio: 3 / 2; background: radial-gradient(#141833, #05060c); border: 1px solid #2b2f45; border-radius: 6px; touch-action: none; }
+    aside { flex: 0 0 220px; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: #868e96; margin: 6px 0; }
+    ol, ul { margin: 0 0 12px; padding-left: 20px; font-size: 14px; }
+    #feed { list-style: none; padding: 0; color: #adb5bd; min-height: 6em; }
+    #status { color: #74c0fc; min-height: 1.4em; margin: 6px 0; }
+    form { display: flex; gap: 8px; margin: 8px 0; }
+    input, button { font: inherit; padding: 6px 10px; border-radius: 4px; border: 1px solid #495057; background: #1c1f2e; color: inherit; }
+    .help { color: #868e96; font-size: 13px; }
+    #pad { display: none; gap: 8px; margin-top: 8px; }
+    #pad button { flex: 1; padding: 14px 0; font-size: 18px; user-select: none; }
+    @media (pointer: coarse) { #pad { display: flex; } }
+  </style>
+</head>
+<body>
+  <h1>Arena</h1>
+  <main>
+    <div id="stage">
+      <canvas id="arena" width="1200" height="800"></canvas>
+      <div id="status">Pick a name and join.</div>
+      <form id="join">
+        <input id="name" placeholder="Your name" maxlength="16" autocomplete="off" required>
+        <button>Join</button>
+      </form>
+      <div id="pad">
+        <button data-turn="-1">⟲</button><button data-thrust>▲</button><button data-turn="1">⟳</button><button data-fire>●</button>
+      </div>
+      <p class="help">Arrows or WASD steer and thrust, space fires. A new ship has a shield for a moment. Bots join while few people play.</p>
+    </div>
+    <aside>
+      <h2>Scoreboard</h2>
+      <ol id="scores"></ol>
+      <h2>Kills</h2>
+      <ul id="feed"></ul>
+    </aside>
+  </main>
+
+  <script src="https://cdn.socket.io/4.8.4/socket.io.min.js"
+          integrity="sha384-fBrXvbDtHoeKWJ/hcA6M+YGueiDW+h45I7V6F2kD1S8bOkrF9rZYPLVkCR6BLR/1"
+          crossorigin="anonymous"></script>
+  <script>
+    const socket = io(`http://${location.hostname}:3000`);
+    const canvas = document.getElementById("arena");
+    const context = canvas.getContext("2d");
+    const status = document.getElementById("status");
+    let me = null;
+    let world = { width: 1200, height: 800, radius: 14 };
+    let state = { ships: [], bullets: [] };
+
+    document.getElementById("join").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const joined = await socket.emitWithAck("join", document.getElementById("name").value);
+      me = joined.id;
+      world = joined.world;
+      event.target.hidden = true;
+      status.textContent = "Fly!";
+    });
+
+    socket.on("state", (data) => { state = data; });
+    socket.on("scores", (scores) => {
+      document.getElementById("scores").replaceChildren(...scores.map((s) => {
+        const item = document.createElement("li");
+        item.textContent = `${s.name} ${s.kills} / ${s.deaths}`;
+        item.style.color = s.color;
+        return item;
+      }));
+    });
+    socket.on("kill", ({ killer, victim }) => {
+      const feed = document.getElementById("feed");
+      const item = document.createElement("li");
+      item.textContent = `${killer} ⟶ ${victim}`;
+      feed.prepend(item);
+      while (feed.children.length > 6) feed.lastChild.remove();
+    });
+    // After a short drop the server gives the ship back: same id, same room.
+    socket.on("connect", () => { if (me) status.textContent = socket.recovered ? "Back in the arena." : "Reconnected: join again."; if (me && !socket.recovered) { me = null; document.getElementById("join").hidden = false; } });
+    socket.on("disconnect", () => { if (me) status.textContent = "Connection lost, reconnecting… your ship waits a few seconds."; });
+
+    // Controls: held keys or buttons; the server hears only when something changes.
+    const held = { left: false, right: false, thrust: false, fire: false };
+    let sent = "";
+    function steer() {
+      if (!me) return;
+      const turn = (held.right ? 1 : 0) - (held.left ? 1 : 0);
+      const now = `${turn}${held.thrust}${held.fire}`;
+      if (now !== sent) {
+        sent = now;
+        socket.emit("steer", turn, held.thrust, held.fire);
+      }
+    }
+    const keys = { ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right", ArrowUp: "thrust", KeyW: "thrust", Space: "fire" };
+    for (const [type, down] of [["keydown", true], ["keyup", false]]) {
+      document.addEventListener(type, (event) => {
+        if (!(event.code in keys) || document.activeElement.tagName === "INPUT") return;
+        event.preventDefault();
+        held[keys[event.code]] = down;
+        steer();
+      });
+    }
+    for (const button of document.querySelectorAll("#pad button")) {
+      const key = button.dataset.turn === "-1" ? "left" : button.dataset.turn === "1" ? "right" : "thrust" in button.dataset ? "thrust" : "fire";
+      const set = (down) => (event) => { event.preventDefault(); held[key] = down; steer(); };
+      button.addEventListener("pointerdown", set(true));
+      button.addEventListener("pointerup", set(false));
+      button.addEventListener("pointerleave", set(false));
+    }
+
+    function drawShip(ship) {
+      context.save();
+      context.translate(ship.x, ship.y);
+      context.globalAlpha = ship.away ? 0.35 : 1;
+      context.rotate(ship.angle);
+      const r = world.radius;
+      if (ship.thrust) {
+        context.fillStyle = "#ffa94d";
+        context.beginPath();
+        context.moveTo(-r * 0.8, -r * 0.35);
+        context.lineTo(-r * 1.6, 0);
+        context.lineTo(-r * 0.8, r * 0.35);
+        context.fill();
+      }
+      context.fillStyle = ship.color;
+      context.strokeStyle = ship.id === me ? "#fff" : "transparent";
+      context.lineWidth = 2;
+      context.beginPath();
+      context.moveTo(r, 0);
+      context.lineTo(-r * 0.8, -r * 0.7);
+      context.lineTo(-r * 0.4, 0);
+      context.lineTo(-r * 0.8, r * 0.7);
+      context.closePath();
+      context.fill();
+      context.stroke();
+      context.restore();
+      if (ship.shield) {
+        context.strokeStyle = "rgba(116, 192, 252, .6)";
+        context.beginPath();
+        context.arc(ship.x, ship.y, r * 1.5, 0, Math.PI * 2);
+        context.stroke();
+      }
+      context.fillStyle = "#adb5bd";
+      context.font = "12px system-ui";
+      context.textAlign = "center";
+      context.fillText(ship.away ? `${ship.name} (away)` : ship.name, ship.x, ship.y + r * 2.2);
+    }
+
+    function draw() {
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#ffe066";
+      for (const [x, y] of state.bullets) {
+        context.beginPath();
+        context.arc(x, y, 3, 0, Math.PI * 2);
+        context.fill();
+      }
+      for (const ship of state.ships) {
+        if (ship.alive) drawShip(ship);
+      }
+      requestAnimationFrame(draw);
+    }
+    draw();
+  </script>
+</body>
+</html>

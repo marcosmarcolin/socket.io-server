@@ -64,7 +64,7 @@ A change is done only when all of these hold:
 - No production dependencies besides Workerman. `workerman/channel` is optional (in `suggest`).
 - Everything in English: code, comments, docs, commits, PRs. The user docs have no translations.
 - **`CHANGELOG.md`** follows Keep a Changelog, in English only, like the commits it summarizes. A PR that changes behavior, the API or the requirements adds its line under `[Unreleased]`. A release renames that section to the version and date.
-- **The README stays short:** what the package is, features, requirements, installation, a quick start, the examples and links to `docs/`. Details go in the guides in `docs/`.
+- **The README stays short:** what the package is, the diagram, features, requirements, installation, a quick start, the examples and links to `docs/`. Details go in the guides in `docs/`.
 
 ## Verification
 
@@ -100,7 +100,7 @@ The load test (`tests/Load/`) runs `server.php` in PHP and `load.mjs` with the i
 
 ## Examples
 
-`examples/<name>/` holds a `start.php` (Socket.IO on port 3000, its page on port 3001 through a plain Workerman HTTP worker) and an `index.html` that loads `socket.io-client` 4.8.4 from `cdn.socket.io` with its SRI hash. Examples are code: phpcs and PHPStan check them, they follow the code rules, and `tests/Integration/client/examples/<name>.test.js` checks each one. Run one with `tests/Integration/run.sh example <name>`; `run.sh` starts a Redis next to the `redis` and `emitter` examples.
+`examples/<name>/` holds a `start.php` (Socket.IO on port 3000, its page on port 3001 through a plain Workerman HTTP worker), a `README.md` (what it shows, how to run it, what to try, how it works, its test) and an `index.html` that loads `socket.io-client` 4.8.4 from `cdn.socket.io` with its SRI hash. Examples are code: phpcs and PHPStan check them, they follow the code rules, and `tests/Integration/client/examples/<name>.test.js` checks each one. Run one with `tests/Integration/run.sh example <name>`; `run.sh` starts a Redis next to the `redis` and `emitter` examples.
 
 Examples show the API users will write, so they use Workerman directly where users would, such as `Workerman\Timer::add()` in `workerStart` for periodic work (the `dashboard` example). The `Scheduler` rule applies to `src/`, whose timing tests replace.
 
@@ -110,7 +110,7 @@ User docs live in the README and in `docs/`, in English only, updated in the sam
 
 | File | Covers | Update it when |
 |---|---|---|
-| `README.md` | what the package is, features, requirements, installation, a short quick start, the examples table, links to `docs/` | a feature, requirement or example is added or removed; keep it short, details go to `docs/` |
+| `README.md` | what the package is, the diagram (`docs/images/architecture.svg`), features, requirements, installation, a short quick start, the examples table, links to `docs/` | a feature, requirement or example is added or removed, or the architecture the diagram shows changes; keep it short, details go to `docs/` |
 | `docs/configuration.md` | server options, CORS and cookies, `allowRequest`, TLS | an option or its behavior changes |
 | `docs/api.md` | `SocketIO`, `Nsp`, `Socket`, events and disconnect reasons, acknowledgements, broadcasting, errors, JSON and binary data | the public API or its behavior changes |
 | `docs/reverse-proxy.md` | nginx and HAProxy in front of the server: TLS, the upgrade headers, the read timeout, client addresses, and sticky sessions with one port per process | the `cookie` option, transports or anything a proxy must know changes; its configs were checked with nginx 1.27 and HAProxy 3.0 in Docker, and are checked again when they change |

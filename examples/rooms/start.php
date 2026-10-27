@@ -1,7 +1,8 @@
 <?php
 
 /**
- * Rooms: join and leave rooms, message the others in a room, and watch its member list.
+ * Rooms: join and leave rooms, message the others in a room, and watch its member list and the list of rooms,
+ * which the adapter's room events keep up to date.
  *
  *   php examples/rooms/start.php start
  *
@@ -27,7 +28,31 @@ $sendMembers = static function (string $room) use ($io): void {
     $io->to($room)->emit('members', ['room' => $room, 'members' => $members]);
 };
 
-$io->on('connection', static function (Socket $socket) use ($sendMembers): void {
+// The rooms that exist, from the adapter's room events: a room is created with its first member and deleted with
+// its last. Each socket's own room, named after its id, isn't one of them.
+$rooms = [];
+$sendRooms = static function (?Socket $to = null) use ($io, &$rooms): void {
+    $list = array_keys($rooms);
+    sort($list);
+    $to === null ? $io->emit('rooms', $list) : $to->emit('rooms', $list);
+};
+$adapter = $io->sockets->adapter();
+$adapter->on('create-room', static function (string $room) use ($io, &$rooms, $sendRooms): void {
+    if (! isset($io->sockets->sockets()[$room])) {
+        $rooms[$room] = true;
+        $sendRooms();
+    }
+});
+$adapter->on('delete-room', static function (string $room) use (&$rooms, $sendRooms): void {
+    if (isset($rooms[$room])) {
+        unset($rooms[$room]);
+        $sendRooms();
+    }
+});
+
+$io->on('connection', static function (Socket $socket) use ($sendMembers, $sendRooms): void {
+    $sendRooms($socket);
+
     $socket->on('join room', static function (string $room, Closure $ack) use ($socket, $sendMembers): void {
         $socket->join($room);
         $ack($socket->rooms);

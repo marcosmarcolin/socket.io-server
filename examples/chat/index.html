@@ -13,10 +13,14 @@
     input { flex: 1; padding: .5rem; font: inherit; }
     button { padding: .5rem 1rem; font: inherit; }
     #typing { color: #888; height: 1.2em; font-size: 13px; }
+    #status { font-size: 13px; color: #888; }
+    #status.on::before { content: "● "; color: #2a2; }
+    #status.off::before { content: "● "; color: #c33; }
   </style>
 </head>
 <body>
   <h1>Chat</h1>
+  <p id="status">connecting…</p>
   <form id="login">
     <input id="username" placeholder="Your name" autocomplete="off" required>
     <button>Join</button>
@@ -75,9 +79,17 @@
       message.focus();
     });
     socket.on("new message", ({ username, message }) => add(`${username}: ${message}`));
-    socket.on("user joined", ({ username, numUsers }) => add(`${username} joined (${numUsers} here)`, "log"));
+    socket.on("user joined", ({ username, numUsers, back }) =>
+      add(`${username} ${back ? "is back" : "joined"} (${numUsers} here)`, "log"));
     socket.on("user left", ({ username, numUsers }) => add(`${username} left (${numUsers} here)`, "log"));
     socket.on("typing", ({ username }) => (typing.textContent = `${username} is typing…`));
+
+    // The connection's state. After a short drop the server recovers the session: same name, same room, and the
+    // messages sent meanwhile arrive before "connect".
+    const status = document.getElementById("status");
+    const show = (text, on) => { status.textContent = text; status.className = on ? "on" : "off"; };
+    socket.on("connect", () => show(socket.recovered ? "reconnected, nothing missed" : "connected", true));
+    socket.on("disconnect", () => show("connection lost, reconnecting…", false));
     socket.on("stop typing", () => (typing.textContent = ""));
   </script>
 </body>
