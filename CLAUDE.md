@@ -110,7 +110,7 @@ User docs live in the README and in `docs/`, in English only, updated in the sam
 
 | File | Covers | Update it when |
 |---|---|---|
-| `README.md` | what the package is, the diagram (`docs/images/architecture.svg`), features, requirements, installation, a short quick start, the examples table, links to `docs/` | a feature, requirement or example is added or removed, or the architecture the diagram shows changes; keep it short, details go to `docs/` |
+| `README.md` | what the package is, the diagram (`docs/images/bidirectional.svg`), features, requirements, installation, a short quick start, the examples table, links to `docs/` | a feature, requirement or example is added or removed; keep it short, details go to `docs/` |
 | `docs/configuration.md` | server options, CORS and cookies, `allowRequest`, TLS | an option or its behavior changes |
 | `docs/api.md` | `SocketIO`, `Nsp`, `Socket`, events and disconnect reasons, acknowledgements, broadcasting, errors, JSON and binary data | the public API or its behavior changes |
 | `docs/reverse-proxy.md` | nginx and HAProxy in front of the server: TLS, the upgrade headers, the read timeout, client addresses, and sticky sessions with one port per process | the `cookie` option, transports or anything a proxy must know changes; its configs were checked with nginx 1.27 and HAProxy 3.0 in Docker, and are checked again when they change |

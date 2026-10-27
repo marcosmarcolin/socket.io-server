@@ -9,7 +9,7 @@ A [Socket.IO](https://socket.io) v4 server for PHP, built on [Workerman](https:/
 
 It speaks the current protocols, Engine.IO v4 and Socket.IO v5, so browsers and apps use the official `socket.io-client` v3 or v4. It passes the official Engine.IO and Socket.IO compliance suites, and CI runs it against the official client.
 
-![Clients connect over long-polling or WebSocket to a PHP process, where Engine.IO, Socket.IO and your code run, and an adapter carries broadcasts to other processes through Redis or workerman/channel; your PHP app can send through the Emitter.](docs/images/architecture.svg)
+![A client and the PHP server send each other events, both ways and at any time, over WebSocket or HTTP long-polling.](docs/images/bidirectional.svg)
 
 > **Version 0.x.** The API may still change between minor versions until 1.0; each change is listed in the [changelog](CHANGELOG.md).
 

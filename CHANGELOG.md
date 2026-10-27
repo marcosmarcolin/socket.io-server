@@ -8,7 +8,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 - **An arena example** (`examples/arena`): a multiplayer space shooter run by the server at 30 frames a second, with bots while few people play, a scoreboard, touch controls for phones, and connection state recovery keeping a player's ship through a short drop.
 - **A README in every example's folder**: what it shows, how to run it, what to try, how it works and its test.
-- **A diagram of how the server works** in the README (`docs/images/architecture.svg`).
+- **A diagram in the README** of the events a client and the server send each other (`docs/images/bidirectional.svg`).
 
 ### Changed
 
