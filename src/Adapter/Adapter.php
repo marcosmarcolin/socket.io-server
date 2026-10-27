@@ -118,10 +118,13 @@ interface Adapter
     public function persistSession(Session $session): void;
 
     /**
-     * The session kept under this private id, with the events sent after the offset that its socket missed, or null
-     * when the session expired, is unknown, or the offset is no longer kept.
+     * Looks up the session kept under this private id, with the events sent after the offset that its socket missed.
+     * The callback may run later, when the sessions are kept outside this process.
+     *
+     * @param Closure(?RestoredSession): void $callback gets null when the session expired, is unknown, or the offset
+     *     is no longer kept
      */
-    public function restoreSession(string $pid, string $offset): ?RestoredSession;
+    public function restoreSession(string $pid, string $offset, Closure $callback): void;
 
     /**
      * Releases what the adapter holds outside this process, when the server shuts down.

@@ -28,7 +28,7 @@ One process, WebSocket clients from the official `socket.io-client`, measured wi
 
 - **Memory** grows linearly: about 24 KB per connection, both the PHP heap and the process's resident memory. Of that, about 14 KB are this package's objects (the Engine.IO session, the request, the client and the socket) and the rest is Workerman's connection and its buffers.
 - **Echoes** are acknowledgements: every client sends 20, one after the other, all clients at once. The latency is under that full load, not of a quiet server.
-- **Broadcasts** are 50 events of 100 bytes to every client, sent at once. One process's CPU is the limit: more processes, with `ChannelAdapter` or `RedisAdapter`, multiply it (see [Several processes](multiple-processes.md)). A single event to 10,000 clients (`MESSAGES=1`) reaches them all in about 75 ms, 129,000 deliveries per second.
+- **Broadcasts** are 50 events of 100 bytes to every client, sent at once. One process's CPU is the limit: more processes, with `ChannelAdapter`, `RedisAdapter` or `RedisStreamsAdapter`, multiply it (see [Several processes](multiple-processes.md)). A single event to 10,000 clients (`MESSAGES=1`) reaches them all in about 75 ms, 129,000 deliveries per second.
 
 ## Compared with the reference Node.js server
 

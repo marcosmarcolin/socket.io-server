@@ -204,7 +204,12 @@ class InMemoryAdapter extends Emitter implements Adapter
         $this->sessions[$session->pid] = ['session' => $session, 'disconnectedAt' => $now];
     }
 
-    public function restoreSession(string $pid, string $offset): ?RestoredSession
+    public function restoreSession(string $pid, string $offset, Closure $callback): void
+    {
+        $callback($this->restore($pid, $offset));
+    }
+
+    private function restore(string $pid, string $offset): ?RestoredSession
     {
         $recovery = $this->nsp->server->connectionStateRecovery;
         $kept = $this->sessions[$pid] ?? null;
@@ -356,7 +361,7 @@ class InMemoryAdapter extends Emitter implements Adapter
      * @param list<string> $rooms
      * @param list<string> $except
      */
-    private static function reaches(array $socketRooms, array $rooms, array $except): bool
+    protected static function reaches(array $socketRooms, array $rooms, array $except): bool
     {
         return ($rooms === [] || array_intersect($socketRooms, $rooms) !== [])
             && array_intersect($socketRooms, $except) === [];

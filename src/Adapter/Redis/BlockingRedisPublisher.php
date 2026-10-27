@@ -11,7 +11,7 @@ use UnexpectedValueException;
 
 /**
  * Publishes to Redis with blocking I/O, for code outside the event loop, such as a PHP-FPM request: the Emitter's
- * connection. Messages are serialized as RedisPubSub does.
+ * connection, which BlockingRedisStream shares. Messages are serialized as RedisPubSub does.
  *
  * It connects on the first publish, logs in when the URL has a password, and keeps the connection; a publish on a
  * connection that dropped reconnects once.
@@ -52,14 +52,22 @@ final class BlockingRedisPublisher implements Publisher
      */
     public function publish(string $channel, array $message): void
     {
-        $command = Resp::command('PUBLISH', $channel, serialize($message));
+        $this->command('PUBLISH', $channel, serialize($message));
+    }
+
+    /**
+     * Sends any command and returns its reply.
+     *
+     * @throws RuntimeException when Redis can't be reached, refuses the login, or answers with an error
+     */
+    public function command(string ...$arguments): mixed
+    {
+        $command = Resp::command(...$arguments);
         for ($attempt = 0;; $attempt++) {
             $fresh = $this->stream === null;
             $stream = $this->stream ?? $this->open();
             try {
-                $this->reply($stream, $command);
-
-                return;
+                return $this->reply($stream, $command);
             } catch (ConnectionLost $lost) {
                 $this->close();
                 // A kept connection may have dropped while idle; a new one that fails is a real failure.

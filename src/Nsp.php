@@ -8,6 +8,7 @@ use Closure;
 use InvalidArgumentException;
 use LogicException;
 use Marcolin\SocketIO\Adapter\Adapter;
+use Marcolin\SocketIO\Adapter\RestoredSession;
 use Marcolin\SocketIO\Event\Emitter;
 use Throwable;
 
@@ -217,7 +218,7 @@ final class Nsp extends Emitter
     }
 
     /**
-     * Runs the middlewares for a new socket, then connects it.
+     * Gives the client its recovered socket, or a new one, then runs the middlewares and connects it.
      *
      * @internal
      * @param array<mixed> $auth
@@ -225,13 +226,29 @@ final class Nsp extends Emitter
      */
     public function add(Client $client, array $auth, Closure $onConnect): void
     {
-        $socket = $this->recover($client, $auth) ?? new Socket(
-            $this,
-            $client,
-            $auth,
-            $this->server->newSocketId(),
-            $this->server->connectionStateRecovery === null ? null : $this->server->newPrivateSessionId(),
-        );
+        $this->recover($auth, function (?RestoredSession $restored) use ($client, $auth, $onConnect): void {
+            // The connection may have closed while the adapter looked the session up.
+            if (! $client->isOpen()) {
+                return;
+            }
+            $socket = $restored === null ? new Socket(
+                $this,
+                $client,
+                $auth,
+                $this->server->newSocketId(),
+                $this->server->connectionStateRecovery === null ? null : $this->server->newPrivateSessionId(),
+            ) : $this->restored($client, $auth, $restored);
+            $this->connect($client, $socket, $onConnect);
+        });
+    }
+
+    /**
+     * Runs the middlewares for a new or recovered socket, then connects it.
+     *
+     * @param Closure(Socket): void $onConnect
+     */
+    private function connect(Client $client, Socket $socket, Closure $onConnect): void
+    {
         $this->connecting[$socket->id] = $socket;
 
         $done = function (?Throwable $error) use ($client, $socket, $onConnect): void {
@@ -276,22 +293,32 @@ final class Nsp extends Emitter
     }
 
     /**
-     * The socket of a session the client asks back with the pid and offset of its CONNECT, as the reference does:
-     * same id, rooms and data, and the events it missed sent first, so the client handles them on connecting.
+     * Asks the adapter for the session the client wants back with the pid and offset of its CONNECT, as the
+     * reference does; the callback gets null when there is none.
      *
      * @param array<mixed> $auth
+     * @param Closure(?RestoredSession): void $callback
      */
-    private function recover(Client $client, array $auth): ?Socket
+    private function recover(array $auth, Closure $callback): void
     {
         $pid = $auth['pid'] ?? null;
         $offset = $auth['offset'] ?? null;
         if ($this->server->connectionStateRecovery === null || ! is_string($pid) || ! is_string($offset)) {
-            return null;
+            $callback(null);
+
+            return;
         }
-        $restored = $this->adapter->restoreSession($pid, $offset);
-        if ($restored === null) {
-            return null;
-        }
+        $this->adapter->restoreSession($pid, $offset, $callback);
+    }
+
+    /**
+     * The socket of a recovered session: same id, rooms and data, and the events it missed sent first, so the
+     * client handles them on connecting.
+     *
+     * @param array<mixed> $auth
+     */
+    private function restored(Client $client, array $auth, RestoredSession $restored): Socket
+    {
         $session = $restored->session;
         $socket = new Socket($this, $client, $auth, $session->sid, $session->pid, recovered: true);
         $socket->join($session->rooms);

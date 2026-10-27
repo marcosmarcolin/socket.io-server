@@ -1,10 +1,10 @@
 <?php
 
 /**
- * Two worker processes on port 3000, joined by a workerman/channel server, or by Redis with ADAPTER=redis and
- * REDIS_URL, for tests/Integration/client/multi-process.test.js.
+ * Two worker processes on port 3000, joined by a workerman/channel server, or by Redis with ADAPTER=redis (publish
+ * and subscribe) or ADAPTER=redis-streams (a stream) and REDIS_URL, for tests/Integration/client/multi-process.test.js.
  *
- * Run by tests/Integration/run.sh multi-process and multi-process-redis:
+ * Run by tests/Integration/run.sh multi-process, multi-process-redis and multi-process-redis-streams:
  * php tests/Integration/multi-process-server.php start
  */
 
@@ -12,17 +12,22 @@ declare(strict_types=1);
 
 use Channel\Server as ChannelServer;
 use Marcolin\SocketIO\Adapter\ChannelAdapter;
+use Marcolin\SocketIO\Adapter\Redis\BlockingRedisPublisher;
+use Marcolin\SocketIO\Adapter\Redis\RedisUrl;
 use Marcolin\SocketIO\Adapter\RedisAdapter;
+use Marcolin\SocketIO\Adapter\RedisStreamsAdapter;
 use Marcolin\SocketIO\RemoteSocket;
 use Marcolin\SocketIO\Socket;
 use Marcolin\SocketIO\SocketIO;
+use Workerman\Timer;
 use Workerman\Worker;
 
 require __DIR__ . '/../../vendor/autoload.php';
 
 const PROCESSES = 2;
 
-$redisUrl = getenv('ADAPTER') === 'redis' ? (string) getenv('REDIS_URL') : null;
+$adapter = (string) getenv('ADAPTER');
+$redisUrl = in_array($adapter, ['redis', 'redis-streams'], true) ? (string) getenv('REDIS_URL') : null;
 // The authority of the TLS-only Redis, for rediss:// URLs.
 $redisTls = (string) getenv('REDIS_TLS_CA') === '' ? [] : ['cafile' => (string) getenv('REDIS_TLS_CA')];
 if ($redisUrl === null) {
@@ -32,15 +37,15 @@ if ($redisUrl === null) {
 $io = new SocketIO(options: ['pingInterval' => 5000, 'pingTimeout' => 5000]);
 
 // The broker connection needs each process's event loop, so the adapter is set when the process starts.
-$io->on('workerStart', static function () use ($io, $redisUrl, $redisTls): void {
-    $io->adapter(
-        $redisUrl === null
-            ? ChannelAdapter::factory('127.0.0.1', 2206)
-            : RedisAdapter::factory($redisUrl, tls: $redisTls),
-    );
+$io->on('workerStart', static function () use ($io, $adapter, $redisUrl, $redisTls): void {
+    $io->adapter(match (true) {
+        $redisUrl === null => ChannelAdapter::factory('127.0.0.1', 2206),
+        $adapter === 'redis-streams' => RedisStreamsAdapter::factory($redisUrl, tls: $redisTls),
+        default => RedisAdapter::factory($redisUrl, tls: $redisTls),
+    });
 });
 
-$io->on('connection', static function (Socket $socket) use ($io, $redisUrl): void {
+$io->on('connection', static function (Socket $socket) use ($io, $adapter, $redisUrl, $redisTls): void {
     $socket->on('whoami', static function (Closure $ack): void {
         $ack(getmypid());
     });
@@ -126,6 +131,28 @@ $io->on('connection', static function (Socket $socket) use ($io, $redisUrl): voi
         $ack(['skipped' => false, 'status' => $status, 'output' => implode("\n", $output)]);
     };
     $socket->on('emit-from-another-process', $emitFromAnotherProcess);
+    // Has Redis drop the connections of both processes, then sends numbered events to a room while they reconnect:
+    // through a stream, none is lost.
+    $socket->on(
+        'outage',
+        static function (string $room, int $count, Closure $ack) use ($io, $adapter, $redisUrl, $redisTls): void {
+            if ($adapter !== 'redis-streams' || $redisUrl === null) {
+                $ack(['skipped' => true]);
+
+                return;
+            }
+            $redis = new BlockingRedisPublisher(RedisUrl::parse($redisUrl)->withTlsOptions($redisTls));
+            // Every command and reader connection; the subscribers stay, and so does this one.
+            $redis->command('CLIENT', 'KILL', 'TYPE', 'normal');
+            // Once the processes saw their connections close, so the events wait for the next ones.
+            Timer::add(0.3, static function () use ($io, $room, $count): void {
+                for ($i = 0; $i < $count; $i++) {
+                    $io->to($room)->emit('outage', $i);
+                }
+            }, persistent: false);
+            $ack(['skipped' => false]);
+        },
+    );
     // Asks the other processes for their pid.
     $socket->on('servers', static function (Closure $ack) use ($io): void {
         $io->serverSideEmit('pid', static function (?Throwable $error, array $pids) use ($ack): void {

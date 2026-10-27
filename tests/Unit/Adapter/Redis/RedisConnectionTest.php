@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Marcolin\SocketIO\Tests\Unit\Adapter\Redis;
 
 use Closure;
+use Marcolin\SocketIO\Adapter\Redis\ConnectionLost;
 use Marcolin\SocketIO\Adapter\Redis\Dialer;
 use Marcolin\SocketIO\Adapter\Redis\Link;
 use Marcolin\SocketIO\Adapter\Redis\RedisConnection;
+use Marcolin\SocketIO\Adapter\Redis\RedisError;
 use Marcolin\SocketIO\Adapter\Redis\RedisUrl;
 use Marcolin\SocketIO\Tests\Fake\FakeDialer;
 use Marcolin\SocketIO\Tests\Fake\FakeScheduler;
@@ -262,6 +264,100 @@ final class RedisConnectionTest extends TestCase
 
         self::assertTrue($this->dialer->last()->closed);
         self::assertSame("Unknown Redis reply type: '?'", $this->messages()[0]);
+    }
+
+    public function testACallGetsItsOwnReplyInOrder(): void
+    {
+        $connection = $this->ready();
+        $got = [];
+
+        $connection->call(static function (mixed $reply) use (&$got): void {
+            $got[] = ['first', $reply];
+        }, 'GET', 'a');
+        $connection->send('PUBLISH', 'ch', 'x');
+        $connection->call(static function (mixed $reply) use (&$got): void {
+            $got[] = ['second', $reply];
+        }, 'GET', 'b');
+        $this->dialer->last()->receive("\$1\r\n1\r\n:0\r\n\$-1\r\n");
+
+        self::assertSame([['first', '1'], ['second', null]], $got);
+        // The reply to the plain send goes to onReply, as before.
+        self::assertSame([0], $this->replies);
+    }
+
+    public function testACallGetsAnErrorReplyWhichIsReportedToo(): void
+    {
+        $connection = $this->ready();
+        $got = null;
+
+        $connection->call(static function (mixed $reply) use (&$got): void {
+            $got = $reply;
+        }, 'XADD', 'stream');
+        $this->dialer->last()->receive("-ERR wrong number of arguments\r\n");
+
+        self::assertInstanceOf(RedisError::class, $got);
+        self::assertSame(['Redis error: ERR wrong number of arguments'], $this->messages());
+    }
+
+    public function testACallQueuedUntilReadyGetsItsReply(): void
+    {
+        $connection = $this->connection();
+        $connection->open();
+        $got = null;
+
+        $connection->call(static function (mixed $reply) use (&$got): void {
+            $got = $reply;
+        }, 'PING');
+        $this->dialer->last()->open();
+        $this->dialer->last()->receive("+PONG\r\n");
+
+        self::assertSame('PONG', $got);
+    }
+
+    public function testACallWithoutAReplyBeforeTheDropGetsConnectionLost(): void
+    {
+        $connection = $this->ready();
+        $got = null;
+        $connection->call(static function (mixed $reply) use (&$got): void {
+            $got = $reply;
+        }, 'XREAD', 'BLOCK', '5000');
+
+        $this->dialer->last()->drop();
+
+        self::assertInstanceOf(ConnectionLost::class, $got);
+        // The next connection starts with no callbacks left over.
+        $this->scheduler->advance(RedisConnection::RECONNECT_DELAY);
+        $this->dialer->last()->open();
+        $this->dialer->last()->receive(":1\r\n");
+        self::assertSame([1], $this->replies);
+    }
+
+    public function testACallBeyondTheQueueLimitGetsConnectionLost(): void
+    {
+        $connection = $this->connection();
+        $connection->open();
+        for ($i = 0; $i < RedisConnection::MAX_QUEUED; $i++) {
+            $connection->send('PING');
+        }
+        $got = null;
+
+        $connection->call(static function (mixed $reply) use (&$got): void {
+            $got = $reply;
+        }, 'PING');
+
+        self::assertInstanceOf(ConnectionLost::class, $got);
+    }
+
+    public function testAnExceptionFromACallbackIsReported(): void
+    {
+        $connection = $this->ready();
+        $connection->call(static function (): void {
+            throw new RuntimeException('callback failed');
+        }, 'PING');
+
+        $this->dialer->last()->receive("+PONG\r\n");
+
+        self::assertSame(['callback failed'], $this->messages());
     }
 
     // Helpers

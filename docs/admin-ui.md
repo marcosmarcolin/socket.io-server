@@ -57,7 +57,7 @@ Either way the server's `cors` option must allow the UI's origin with `credentia
 - **In development mode**, also every socket (transport, handshake without the `auth` payload, rooms, `data`), and live: connections, disconnections with their reason, rooms joined and left, and every event received and sent.
 - **Actions** (unless `readonly`): emit to a namespace or a room, make sockets join or leave a room, disconnect them, on every server the adapter reaches. They act on namespaces the server already has.
 
-With `ChannelAdapter` or `RedisAdapter`, the admin namespace reaches every process like any other, so one UI sees the whole cluster.
+With `ChannelAdapter`, `RedisAdapter` or `RedisStreamsAdapter`, the admin namespace reaches every process like any other, so one UI sees the whole cluster.
 
 ## Things to know
 

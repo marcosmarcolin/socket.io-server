@@ -15,7 +15,12 @@ use UnexpectedValueException;
  * ready.
  *
  * While it is not ready, it keeps up to 1000 commands and drops the rest. Errors, Redis error replies and
- * exceptions from onReply go to onError; a failure to connect is reported once until the connection is ready again.
+ * exceptions from onReply and the reply callbacks go to onError; a failure to connect is reported once until the
+ * connection is ready again.
+ *
+ * A command sent with call() gets its own reply, since Redis answers in order: a RedisError for an error reply, or a
+ * ConnectionLost when the connection dropped before the reply, or the command was dropped. Only on a connection
+ * that doesn't subscribe, whose pushed messages answer no command.
  */
 final class RedisConnection
 {
@@ -34,8 +39,11 @@ final class RedisConnection
 
     private bool $failureReported = false;
 
-    /** @var list<string> */
+    /** @var list<array{string, (Closure(mixed): void)|null}> commands kept until ready, with their callbacks */
     private array $queue = [];
+
+    /** @var list<(Closure(mixed): void)|null> the callbacks of the commands sent, in order, until their replies */
+    private array $callbacks = [];
 
     private readonly Resp $resp;
 
@@ -100,11 +108,31 @@ final class RedisConnection
      */
     public function send(string ...$command): void
     {
-        $bytes = Resp::command(...$command);
+        $this->write(Resp::command(...$command), null);
+    }
+
+    /**
+     * Sends a command now, or once the connection is ready, and hands its reply to the callback.
+     *
+     * @param Closure(mixed): void $onReply
+     */
+    public function call(Closure $onReply, string ...$command): void
+    {
+        $this->write(Resp::command(...$command), $onReply);
+    }
+
+    /**
+     * @param (Closure(mixed): void)|null $onReply
+     */
+    private function write(string $bytes, ?Closure $onReply): void
+    {
         if ($this->ready && $this->link !== null) {
+            $this->callbacks[] = $onReply;
             $this->link->send($bytes);
         } elseif (count($this->queue) < self::MAX_QUEUED) {
-            $this->queue[] = $bytes;
+            $this->queue[] = [$bytes, $onReply];
+        } elseif ($onReply !== null) {
+            $this->answer($onReply, new ConnectionLost('too many commands waiting for the connection'));
         }
     }
 
@@ -133,9 +161,16 @@ final class RedisConnection
         foreach ($replies as $reply) {
             if ($this->authenticating) {
                 $this->authenticated($reply);
-            } elseif ($reply instanceof RedisError) {
+
+                continue;
+            }
+            if ($reply instanceof RedisError) {
                 ($this->onError)(new RuntimeException('Redis error: ' . $reply->message));
-            } else {
+            }
+            $onReply = array_shift($this->callbacks);
+            if ($onReply !== null) {
+                $this->answer($onReply, $reply);
+            } elseif (! $reply instanceof RedisError) {
                 $this->deliver($reply);
             }
         }
@@ -160,15 +195,23 @@ final class RedisConnection
         ($this->onReady)();
         $queue = $this->queue;
         $this->queue = [];
-        foreach ($queue as $bytes) {
-            $this->link?->send($bytes);
+        foreach ($queue as [$bytes, $onReply]) {
+            $this->write($bytes, $onReply);
         }
     }
 
     private function deliver(mixed $reply): void
     {
+        $this->answer($this->onReply, $reply);
+    }
+
+    /**
+     * @param Closure(mixed): void $onReply
+     */
+    private function answer(Closure $onReply, mixed $reply): void
+    {
         try {
-            ($this->onReply)($reply);
+            $onReply($reply);
         } catch (Throwable $error) {
             ($this->onError)($error);
         }
@@ -197,6 +240,13 @@ final class RedisConnection
         $this->ready = false;
         $this->authenticating = false;
         $this->resp->reset();
+        $callbacks = $this->callbacks;
+        $this->callbacks = [];
         $this->scheduler->after(self::RECONNECT_DELAY, $this->open(...));
+        foreach ($callbacks as $onReply) {
+            if ($onReply !== null) {
+                $this->answer($onReply, new ConnectionLost('the connection closed before the reply'));
+            }
+        }
     }
 }

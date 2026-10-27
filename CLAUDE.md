@@ -15,7 +15,7 @@ This file is the specification of how the package works. Behavior changes start 
 **It is not** (out of scope; don't implement without an explicit decision):
 - A server for `socket.io-client` 1.x/2.x (Engine.IO v3). Those clients have [workerman/phpsocket.io](https://github.com/walkor/phpsocket.io).
 - WebTransport, JSONP, custom parsers (msgpack), dynamic namespaces (regex or callback).
-- Compatibility with the Node adapters (`@socket.io/redis-adapter`, `@socket.io/redis-emitter`): `RedisAdapter` speaks only to other servers of this package.
+- Compatibility with the Node adapters (`@socket.io/redis-adapter`, `@socket.io/redis-streams-adapter`, `@socket.io/redis-emitter`): `RedisAdapter` and `RedisStreamsAdapter` speak only to other servers of this package.
 
 ## Sources of truth
 
@@ -39,7 +39,7 @@ A change is done only when all of these hold:
 3. **The protocol suites pass in CI**, once they exist:
    - the official **Engine.IO v4 suite**, against a pure Engine.IO server on `/engine.io/` that echoes every message back (`tests/Compliance/engine-io-server.php`, run by `tests/Compliance/engine-io.sh`);
    - the official **Socket.IO v5 suite**, against the reference server described in the spec: `pingInterval` 300, `pingTimeout` 200, `connectTimeout` 1000, a `/custom` namespace, and the `auth`, `message-back` and `message-with-ack` handlers (`tests/Compliance/socket-io-server.php`, run by `tests/Compliance/socket-io.sh`).
-4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary, connection state recovery and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh`, `tests/Integration/run.sh recovery`, `tests/Integration/run.sh multi-process` and `tests/Integration/run.sh multi-process-redis`).
+4. **The official client works:** an integration test with `socket.io-client@4` (pinned version) covers polling, WebSocket, upgrade, namespaces, rooms, acks, binary, connection state recovery and multi-process (`tests/Integration/`, run by `tests/Integration/run.sh`, `tests/Integration/run.sh recovery`, `tests/Integration/run.sh multi-process`, `tests/Integration/run.sh multi-process-redis`, `tests/Integration/run.sh multi-process-redis-streams` and `tests/Integration/run.sh recovery-streams`).
 5. **The docs are current:** the README, the user guides in `docs/` (configuration, API reference, reverse proxy, several processes, Admin UI, performance, migration, development), CLAUDE.md and examples match the behavior, and `CHANGELOG.md` lists every user-visible change under `[Unreleased]`. Each example has a test with the official client (`tests/Integration/client/examples/`) that CI runs, so an example that stops working fails the build.
 
 ## Code rules
@@ -79,10 +79,12 @@ tests/Compliance/socket-io.sh                  # official Socket.IO v5 suite, in
 tests/Integration/run.sh                       # the official socket.io-client against our server, in Docker
 tests/Integration/run.sh multi-process         # the same over two processes and a channel server
 tests/Integration/run.sh multi-process-redis   # the same two processes, joined by a Redis server over TLS
+tests/Integration/run.sh multi-process-redis-streams  # the same, joined by a Redis stream over TLS, and an outage
 tests/Integration/run.sh examples              # every example in examples/, each against its test
 tests/Integration/run.sh admin                 # the Admin UI's protocol with the official client: admin-server.php
 tests/Integration/run.sh recovery              # connection state recovery with the official client: recovery-server.php
 tests/Integration/run.sh recovery-processes    # the same over two processes, one port each, joined by a channel server
+tests/Integration/run.sh recovery-streams      # the same joined by a Redis stream: a client recovers on the other port
 tests/Load/run.sh                              # the load test: 500 WebSocket clients on select()
 LOOP=event CLIENTS=10000 tests/Load/run.sh     # the same with the event extension, past select()'s 1,024
 SERVER=node CLIENTS=10000 tests/Load/run.sh    # the reference Node.js server, for the comparison in docs/performance.md
@@ -191,22 +193,31 @@ src/
     Session.php, RestoredSession.php  what a socket that dropped leaves for its recovery, and what it gets back
     BroadcastOptions.php        rooms, except and volatile of a broadcast
     InMemoryAdapter.php         local rooms and broadcast, and the room events; not final, the base of other adapters
-    PubSubAdapter.php           the cluster protocol through a PubSub; abstract, the base of the two below
+    PubSubAdapter.php           the cluster protocol through a PubSub, and a Stream when given; abstract, the base of
+                                the three below
     Cluster/                    MessageType (the reference's numbers), Nodes (server count), Request (waiting for responses),
                                 Channels and Wire (channel names and message shapes, shared with the Emitter)
     Publisher.php               publish only: what the Emitter needs; PubSub extends it
     ChannelAdapter.php          PubSubAdapter on workerman/channel; final, only adds factory()
     RedisAdapter.php            PubSubAdapter on Redis; final, only adds factory()
+    RedisStreamsAdapter.php     PubSubAdapter on Redis with a RedisStream; final, only adds factory()
     PubSub.php                  publish/subscribe between processes, faked in tests
+    Stream.php                  an append-only log shared by the servers, with the recovery sessions; faked in tests
+    Appender.php                append only: what the Emitter needs from a Stream
     WorkermanChannelPubSub.php  PubSub on workerman/channel: the only class touching the static Channel\Client
     Redis/                      our own Redis pub/sub client, on Workerman only
       RedisPubSub.php           PubSub over two connections, a publisher and a subscriber
-      RedisConnection.php       one connection: login, queue until ready, reconnect
+      RedisStream.php           Stream on a Redis stream: XADD and sessions on the commands connection, a blocking XREAD
+                                on its own
+      RedisStreamOptions.php    streamName, maxLen, readCount, blockTimeInMs, sessionKeyPrefix
+      RedisConnection.php       one connection: login, queue until ready, reconnect, a callback per command (call())
+      WorkermanRedis.php        the event loop checks and the Workerman dialer and scheduler of both Redis adapters
       Resp.php, RedisError.php  RESP2 commands out, replies in
       RedisUrl.php              redis:// or rediss://[[user]:password@]host[:port][/database], and the TLS options
       Dialer.php, Link.php      TCP I/O interfaces, faked in tests
       WorkermanDialer.php, WorkermanLink.php  the same on AsyncTcpConnection
       BlockingRedisPublisher.php  a Publisher with blocking I/O, for the Emitter outside the event loop
+      BlockingRedisStream.php   an Appender over it, for Emitter::redisStreams()
 ```
 
 ### Workerman 5 integration
@@ -372,9 +383,10 @@ src/
   - With the option, every socket gets a private id (`pid`, 15 random bytes in base64url) sent in the CONNECT answer as `{"sid","pid"}`.
   - `InMemoryAdapter::broadcast()` gives every `EVENT` without an ack id that isn't volatile an offset as its last argument (a random per-adapter prefix and a counter), and keeps its encoded parts with the rooms and `except`, for `maxDisconnectionDuration`. A socket's own `emit()` goes through `adapter()->broadcast()` to its id room with `local` (the reference doesn't set `local`, so a pub/sub adapter would publish it), so it gets an offset and is kept too; `onAnyOutgoing` listeners see the offset, as in the reference.
   - A socket leaving with a recoverable reason (`transport error`, `transport close`, `forced close`, `ping timeout`, `server shutting down`, `forced server close`; `DisconnectReason::isRecoverable()`) is persisted after `disconnecting` and before it leaves its rooms: id, pid, rooms, data.
-  - A CONNECT whose payload has string `pid` and `offset` asks `restoreSession()`: an unknown or expired pid, or an offset no longer kept, gets a new socket. Otherwise the socket takes the old id and pid, joins its rooms, gets its data, and the missed events (the kept ones after the offset that its rooms reach and its `except` doesn't) are written before the CONNECT answer, so the client handles them before its `connect` event; `$socket->recovered` is true. With `skipMiddlewares`, it connects without running them.
+  - A CONNECT whose payload has string `pid` and `offset` asks `restoreSession($pid, $offset, $callback)`, whose callback may run later (`RedisStreamsAdapter` asks Redis); `Nsp::add()` waits for it, and drops the client if its connection closed meanwhile: an unknown or expired pid, or an offset no longer kept, gets a new socket. Otherwise the socket takes the old id and pid, joins its rooms, gets its data, and the missed events (the kept ones after the offset that its rooms reach and its `except` doesn't) are written before the CONNECT answer, so the client handles them before its `connect` event; `$socket->recovered` is true. With `skipMiddlewares`, it connects without running them.
   - Unlike the reference, a session is recovered once (`restoreSession()` drops it), so two clients can't take the same socket id. Expiry is lazy, on the scheduler's clock: expired sessions go when another is persisted or this one asked for, expired events when another is kept; no timers.
-  - **Per process with `PubSubAdapter`** (an extension; the reference's pub/sub adapters recover nothing, and its Redis Streams adapter, not built here, recovers anywhere): it inherits `InMemoryAdapter`'s sessions, so a client that comes back to the process it left recovers, which needs sticky sessions. `broadcast()` gives a recoverable event its offset (`recoverable()`, `withOffset()`, `offset()` and `keep()` are protected in `InMemoryAdapter`), keeps it, and publishes it with an `offset` field to the **namespace channel**, not the room's: a process whose last member of the room dropped has left the room's channel but keeps that member's session, so it must still get the event. `onBroadcast()` keeps a received event under the sender's offset (offsets have a random 12-hex prefix per adapter, so they don't collide). Messages from the `Emitter` carry no offset and aren't kept. `run.sh recovery-processes` tests it with two processes on ports 3000 and 3001 and the official client.
+  - **On any process with `RedisStreamsAdapter`**, as the reference's `@socket.io/redis-streams-adapter` 0.3.1 (`lib/adapter.ts`): see "With a Stream" under Multiple processes. `run.sh recovery-streams` tests it with the client reconnecting to the other port.
+  - **Per process with `PubSubAdapter`** without a Stream (an extension; the reference's pub/sub adapters recover nothing, and its Redis Streams adapter, not built here, recovers anywhere): it inherits `InMemoryAdapter`'s sessions, so a client that comes back to the process it left recovers, which needs sticky sessions. `broadcast()` gives a recoverable event its offset (`recoverable()`, `withOffset()`, `offset()` and `keep()` are protected in `InMemoryAdapter`), keeps it, and publishes it with an `offset` field to the **namespace channel**, not the room's: a process whose last member of the room dropped has left the room's channel but keeps that member's session, so it must still get the event. `onBroadcast()` keeps a received event under the sender's offset (offsets have a random 12-hex prefix per adapter, so they don't collide). Messages from the `Emitter` carry no offset and aren't kept. `run.sh recovery-processes` tests it with two processes on ports 3000 and 3001 and the official client.
 - **Admin UI** (`Admin\AdminUi::instrument($io, $options)`), as the reference's `instrument()` from `@socket.io/admin-ui` 0.5.1 (`lib/index.ts`), in the main package: no dependency (bcrypt is `password_verify()`), and it uses internals (room events, `fetchSockets`, `onAny`). Only the server side; the UI is the official one, hosted at admin.socket.io or self-hosted from the npm package's `ui/dist`.
   - Options: `auth` (required: `false` or basic with a bcrypt hash, `$2a/$2b/$2y`), `namespaceName` (`/admin`), `readonly`, `serverId` (`hostname#pid`, computed at each stats, since workers fork), `store` (`Admin\Store`, `InMemoryStore` by default), `mode` (`development` by default, as the reference without `NODE_ENV`). Unknown options and wrong values throw.
   - Basic auth: a middleware on the admin namespace accepts a known `sessionId` from the store, or the username and password, then saves a new 16-hex session id and emits `session` **after** CONNECT (the reference emits it before; a socket here can't emit before connecting, with recovery's adapter path).
@@ -454,7 +466,7 @@ Worker::runAll();
 ## Multiple processes
 
 - `InMemoryAdapter` is the default.
-- `PubSubAdapter` holds the cross-process logic, on any `PubSub`; `ChannelAdapter` (workerman/channel) and `RedisAdapter` (Redis) only add a `factory()`. It carries over phpsocket.io 3.x's `ChannelAdapter` fixes:
+- `PubSubAdapter` holds the cross-process logic, on any `PubSub` and optionally a `Stream`; `ChannelAdapter` (workerman/channel), `RedisAdapter` (Redis pub/sub) and `RedisStreamsAdapter` (Redis pub/sub plus a stream) only add a `factory()`. It carries over phpsocket.io 3.x's `ChannelAdapter` fixes:
   - per-namespace channels (`<key>#<nsp>#` and `<key>#<nsp>#<room>#`, the key `socket.io` by default), with one listener per channel;
   - sid rooms are detected by their shape (24 hex characters) and go through the namespace's default channel instead of getting their own;
   - a channel is unsubscribed only once its room is empty in the process;
@@ -473,13 +485,22 @@ Worker::runAll();
   - **`RemoteSocket`**: `id`, `handshake`, `rooms`, `data`, and `emit()`, `join()`, `leave()`, `disconnect()`, each through `$nsp->to($id)`/`in($id)`, so through the adapter. `timeout()` returns a copy whose `emit()` takes a callback getting `(?Throwable, mixed $answer)`, one answer instead of a list, as the reference's `expectSingleResponse`; a callback without `timeout()` throws.
   - **Broadcast acks:** `BroadcastOptions` carries the `timeout`. `PubSubAdapter::broadcastWithAck()` publishes the packet with a `requestId` to the namespace channel (never a room's: every counted server must report), then delivers locally. Each other server decodes it, sends it under an ack id of its own namespace, and answers on the requester's response channel with `BroadcastClientCount`, then one `BroadcastAck` per answer (its first argument, as an `ACK` packet). Both sides drop the request after the timeout: the requester forgets the `requestId`, the others make their sockets forget the ack id. A server that never reports (gone without `AdapterClose`) makes the wait end with the timeout.
   - **The `local` flag** (`$io->local`, `$nsp->local`, `$socket->local`, and `->local` on an operator), as the reference's: `BroadcastOptions::$local` makes `PubSubAdapter` publish nothing, so broadcasts, the socket helpers and `fetchSockets(Closure)` act on this process only. A local broadcast with an ack waits for this server's count only (the reference still waits for `serverCount()` reports and times out). `$socket->local` leaves the socket out, as `broadcast` does.
-  - **Not yet:** `allSockets` reads the local process (it is deprecated in the reference). Connection state recovery across processes needs sticky sessions.
+  - **Not yet:** `allSockets` reads the local process (it is deprecated in the reference). Connection state recovery across processes needs sticky sessions, except with `RedisStreamsAdapter`.
+- **With a Stream** (`RedisStreamsAdapter`, as the reference's redis-streams-adapter; `PubSubAdapter`'s optional fourth argument):
+  - `Wire::durable()` messages go through `Stream::append()` instead of a channel: broadcasts without a `requestId`, `SocketsJoin`, `SocketsLeave` and `DisconnectSockets`. Requests, responses, heartbeats and `AdapterClose` stay on the PubSub (the reference sends them with PUBLISH too, as ephemeral). No room channels are subscribed: every process reads every entry of its namespaces and filters by rooms. Stream entries count as signs of life for `Cluster\Nodes`, as any message.
+  - `RedisStream`: one stream for every namespace (`streamName`, `socket.io`), each entry `nsp` plus `message` (`serialize()`, read back as `RedisPubSub` does), trimmed with `XADD MAXLEN ~ maxLen`. XADD, SET and the restore go through the commands connection, shared with `RedisPubSub`'s publisher; a third connection loops on `XREAD COUNT readCount BLOCK blockTimeInMs STREAMS <stream> <last id>` (`$` before the first entry), started on its login and while a namespace listens, so after an outage it resumes from the last entry. An error reply retries after 1 s; a listener's exception goes to `onError` and the loop goes on. `RedisConnection::call()` gives each command its reply (Redis answers in order), `ConnectionLost` when the connection closed first or the queue was full.
+  - **Recovery:** a recoverable broadcast (`recoverable()`) is appended with `recoverable: true`, even when `local` (with `local: true`, which the other processes skip): its offset is the entry id. Local delivery waits for the id (one round trip) and later local deliveries wait behind it, in order (`deliverInOrder()`); without an id (an error or a lost connection) the sockets get it without an offset. Receivers splice `,"<id>"` before the final `]` of the encoded text part (`withEntryId()`), so nothing is encoded again; the Emitter's non-volatile events carry `recoverable: true` too.
+  - `persistSession()` saves JSON (`sid`, `pid`, `rooms`, `data`, and the adapter's `uid`) with `SET <sessionKeyPrefix><pid> ... PX maxDisconnectionDuration`; `restoreSession()` sends `GETDEL` (Redis 6.2), then `XRANGE <stream> <offset> + COUNT 1`, whose first entry must be the offset (else it was trimmed: a new socket), then `XRANGE (<id> + COUNT readCount` until a short batch or 100 calls (`MAX_RESTORE_READS`, the reference's cap). Missed events are the namespace's recoverable broadcasts that reach the session's rooms and aren't excepted, local ones only from the session's `uid`. Offsets that aren't `\d+-\d+` ask nothing. A session is taken once, as with `InMemoryAdapter`.
+  - Unlike the reference (`ClusterAdapter::broadcast()` in `cluster-adapter.ts`): the server count stays on our heartbeats (its `PUBSUB NUMSUB` is asynchronous); without recovery a broadcast reaches local sockets at once (it always awaits the XADD); and a recoverable `local` broadcast is appended for its offset (it gives local ones none). A socket's own `emit()` is `local` here, and appended, so it gets an offset as in the reference, whose `socket.emit()` broadcasts to the socket's room without `local`.
+  - Not built: `streamCount` (one blocking connection per stream), `useShardedPubSub` (our client speaks no Redis Cluster) and `onlyPlaintext` (messages are `serialize()`d). Unknown options throw.
+  - `run.sh multi-process-redis-streams` runs the multi-process tests on a TLS-only Redis, plus an outage: `CLIENT KILL TYPE normal` drops every command and reader connection, events sent 300 ms later wait in the queue, and all reach a client on the other process, in order.
 - **`Emitter`**, as the reference's `@socket.io/redis-emitter` and `@socket.io/postgres-emitter`: sends from code that isn't a server.
   - It publishes through a `Publisher` exactly what `PubSubAdapter` would, with the uid `emitter` (`Emitter::UID`), using `Cluster\Channels` and `Cluster\Wire`, so the two can't drift. Servers never count that uid as a node, as `ClusterAdapterWithHeartbeat` skips `EMITTER_UID`.
   - API: `of()`, `to()`/`in()`, `except()`, `volatile` (each returns a copy), `emit()`, `send()`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets()`, `serverSideEmit()`. A `Closure` argument throws (no acks, no `fetchSockets`), and so do reserved names.
+  - `Emitter::redisStreams($url, $key, $timeout, $tls, $options)` adds a `BlockingRedisStream` (an `Appender` on the same connection, `BlockingRedisPublisher::command()`): durable messages are appended with `XADD`, the rest published.
   - `Emitter::redis($url, $key, $timeout)` builds it on `BlockingRedisPublisher`: `stream_socket_client`, `AUTH` first when the URL has a password, `serialize()` as `RedisPubSub` does. It connects lazily, keeps the connection, and reconnects once when a kept connection dropped; a fresh connection that fails, an error reply or a refused login throws `RuntimeException`, never with the password. Replies read ahead are queued for their commands.
   - The Channel adapter has no emitter: `Channel\Client` needs the event loop.
-- **Setup:** in `workerStart`, call `$io->adapter(ChannelAdapter::factory($host, $port))` with a `Channel\Server` worker running, or `$io->adapter(RedisAdapter::factory($url, $key, $onError))`. `PubSub` is the seam that keeps the static `Channel\Client` and the Redis connections out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
+- **Setup:** in `workerStart`, call `$io->adapter(ChannelAdapter::factory($host, $port))` with a `Channel\Server` worker running, or `$io->adapter(RedisAdapter::factory($url, $key, $onError))`, or `RedisStreamsAdapter::factory($url, $key, $onError, $tls, $options)`. `PubSub` is the seam that keeps the static `Channel\Client` and the Redis connections out of everything else. The `InMemoryAdapter` hooks `roomCreated()`/`roomDeleted()` drive the room subscriptions.
 - **`RedisAdapter`** has its own client, on Workerman's `AsyncTcpConnection`, so it adds no dependency. `workerman/redis` doesn't fit: after its first `SUBSCRIBE` it sends no other command, so rooms couldn't subscribe or unsubscribe, and it prints errors with `echo`.
   - `factory()` arguments, all optional: `url` (`redis://127.0.0.1:6379`), `key` (`socket.io`; apps sharing one Redis need different keys), and `onError` (`Worker::log` by default). An invalid URL throws `InvalidArgumentException` before the event loop check; the message never includes the URL, which may hold a password.
   - URLs: `redis://[[user]:password@]host[:port][/database]`, percent-decoded. A user without a password, a path other than a database number, a query or another scheme throws. The database is ignored: pub/sub channels are shared by every database.
@@ -511,3 +532,4 @@ Worker::runAll();
     - [x] heartbeats and server count, `socketsJoin`/`socketsLeave`, `disconnectSockets` and `serverSideEmit` across processes;
     - [x] `fetchSockets(Closure)` across processes, with `RemoteSocket`;
     - [x] broadcast acks across processes, and acks on `RemoteSocket`.
+13. [x] `RedisStreamsAdapter`: broadcasts through a Redis stream, connection state recovery on any process, `Emitter::redisStreams()`.

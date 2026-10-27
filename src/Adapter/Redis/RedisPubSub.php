@@ -26,12 +26,20 @@ final class RedisPubSub implements PubSub
 
     /**
      * @param Closure(Throwable): void $onError
+     * @param RedisConnection|null $publisher a connection opened by its owner, shared with RedisStream; else its own
      */
-    public function __construct(RedisUrl $url, Dialer $dialer, Scheduler $scheduler, Closure $onError)
-    {
-        $this->publisher = new RedisConnection($url, $dialer, $scheduler, static function (): void {
-        }, static function (): void {
-        }, $onError);
+    public function __construct(
+        RedisUrl $url,
+        Dialer $dialer,
+        Scheduler $scheduler,
+        Closure $onError,
+        ?RedisConnection $publisher = null,
+    ) {
+        if ($publisher === null) {
+            $publisher = self::connection($url, $dialer, $scheduler, $onError);
+            $publisher->open();
+        }
+        $this->publisher = $publisher;
         $this->subscriber = new RedisConnection(
             $url,
             $dialer,
@@ -40,8 +48,23 @@ final class RedisPubSub implements PubSub
             $this->onReply(...),
             $onError,
         );
-        $this->publisher->open();
         $this->subscriber->open();
+    }
+
+    /**
+     * A connection for commands only, whose replies need nothing unless a command asks for them.
+     *
+     * @param Closure(Throwable): void $onError
+     */
+    public static function connection(
+        RedisUrl $url,
+        Dialer $dialer,
+        Scheduler $scheduler,
+        Closure $onError,
+    ): RedisConnection {
+        return new RedisConnection($url, $dialer, $scheduler, static function (): void {
+        }, static function (): void {
+        }, $onError);
     }
 
     public function subscribe(string $channel, Closure $listener): void
@@ -97,9 +120,12 @@ final class RedisPubSub implements PubSub
     }
 
     /**
-     * @return array<mixed>|null null for anything that isn't a serialized array
+     * A message, or null for anything that isn't a serialized array; RedisStream reads its entries with it too.
+     *
+     * @internal
+     * @return array<mixed>|null
      */
-    private static function unserialize(string $payload): ?array
+    public static function unserialize(string $payload): ?array
     {
         // A malformed payload makes unserialize() warn; any client of the server can publish to the channel.
         set_error_handler(static fn (): bool => true);

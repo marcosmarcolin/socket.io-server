@@ -5,8 +5,10 @@
 #   tests/Integration/run.sh admin            the Admin UI's protocol: admin-server.php
 #   tests/Integration/run.sh recovery         connection state recovery: recovery-server.php
 #   tests/Integration/run.sh recovery-processes  the same across two processes, one per port
+#   tests/Integration/run.sh recovery-streams  the same two processes joined by a Redis stream, recovering on either
 #   tests/Integration/run.sh multi-process    two processes and a channel server: multi-process-server.php
 #   tests/Integration/run.sh multi-process-redis  the same two processes, joined by a Redis server over TLS
+#   tests/Integration/run.sh multi-process-redis-streams  the same, joined by a Redis stream over TLS
 #   tests/Integration/run.sh example <name>   the example in examples/<name>
 #   tests/Integration/run.sh examples         every example, one after the other
 # LOOP=select|event|swoole runs the server on that Workerman event loop (tests/php-server.sh).
@@ -21,22 +23,30 @@ fi
 
 redis=""
 tls=""
+adapter=""
 case "${1:-single}" in
     single) server_script="tests/Integration/server.php"; test_file="integration.test.js" ;;
     admin) server_script="tests/Integration/admin-server.php"; test_file="admin.test.js" ;;
     recovery) server_script="tests/Integration/recovery-server.php"; test_file="recovery.test.js" ;;
     recovery-processes)
         server_script="tests/Integration/recovery-processes-server.php"; test_file="recovery-processes.test.js" ;;
+    recovery-streams)
+        server_script="tests/Integration/recovery-processes-server.php"; test_file="recovery-streams.test.js"
+        redis=1; adapter="redis-streams" ;;
     multi-process) server_script="tests/Integration/multi-process-server.php"; test_file="multi-process.test.js" ;;
     multi-process-redis)
-        server_script="tests/Integration/multi-process-server.php"; test_file="multi-process.test.js"; redis=1; tls=1 ;;
+        server_script="tests/Integration/multi-process-server.php"; test_file="multi-process.test.js"; redis=1; tls=1
+        adapter="redis" ;;
+    multi-process-redis-streams)
+        server_script="tests/Integration/multi-process-server.php"; test_file="multi-process.test.js"; redis=1; tls=1
+        adapter="redis-streams" ;;
     example)
         [ -n "${2:-}" ] || { echo "usage: $0 example <name>" >&2; exit 2; }
         server_script="examples/$2/start.php"; test_file="examples/$2.test.js"
         case "$2" in redis|emitter) redis=1 ;; esac ;;
-    *) echo "usage: $0 [single|admin|recovery|recovery-processes|multi-process|multi-process-redis|example <name>|examples]" >&2; exit 2 ;;
+    *) echo "usage: $0 [single|admin|recovery|recovery-processes|recovery-streams|multi-process|multi-process-redis|multi-process-redis-streams|example <name>|examples]" >&2; exit 2 ;;
 esac
-echo "integration: $server_script${redis:+ with Redis}"
+echo "integration: $server_script${redis:+ with Redis}${adapter:+ ($adapter)}"
 
 # Keep in sync with tests/Compliance/suite.sh.
 NODE_IMAGE="node:24.21.0-alpine"
@@ -57,7 +67,7 @@ if [ -n "$tls" ]; then
     docker compose run --rm php php tests/Integration/redis-tls.php .cache/redis-tls 2>/dev/null
     redis_url="rediss://:$REDIS_PASSWORD@127.0.0.1:6379"
 fi
-server=$(php_server -e ADAPTER="${redis:+redis}" -e REDIS_URL="$redis_url" \
+server=$(php_server -e ADAPTER="$adapter" -e REDIS_URL="$redis_url" \
     -e REDIS_TLS_CA="${tls:+/app/.cache/redis-tls/ca.crt}" "$server_script" start)
 redis_server=""
 trap 'docker stop -t 2 "$server" $redis_server >/dev/null 2>&1 || true' EXIT

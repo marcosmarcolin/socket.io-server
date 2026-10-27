@@ -1,5 +1,6 @@
 // Multi-process tests with the official socket.io-client, against tests/Integration/multi-process-server.php:
-// two worker processes on one port, joined by ChannelAdapter over workerman/channel, or by RedisAdapter.
+// two worker processes on one port, joined by ChannelAdapter over workerman/channel, by RedisAdapter, or by
+// RedisStreamsAdapter.
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { io } from "socket.io-client";
@@ -249,6 +250,24 @@ describe("multiple processes", () => {
     const [[message, pid]] = got[0];
     assert.equal(message, "hello from php");
     assert.ok(![a1.pid, b1.pid].includes(pid), "the emitter ran in its own process");
+  });
+
+  test("events sent while Redis drops the connections all arrive, in order", TIMEOUT, async (t) => {
+    const [[a1], [b1]] = [...byProcess.values()];
+    await b1.emitWithAck("join", "outage");
+    const got = record(b1, "outage");
+
+    const result = await a1.emitWithAck("outage", "outage", 20);
+    if (result.skipped) {
+      t.skip("only a Redis stream keeps what is sent during an outage");
+      return;
+    }
+    // The processes reconnect a second later, then read what was appended.
+    for (let i = 0; i < 100 && got.length < 20; i++) {
+      await sleep(100);
+    }
+
+    assert.deepEqual(got, Array.from({ length: 20 }, (_, i) => [i]));
   });
 
   test("scale: 200 clients get 20 broadcasts each, once and in order", { timeout: 60_000 }, async () => {

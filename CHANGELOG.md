@@ -6,12 +6,15 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- **`RedisStreamsAdapter`**, as the reference's Redis Streams adapter: broadcasts, `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` go through a Redis stream that every process reads from its last entry, so a process that loses Redis for a while gets what it missed, and connection state recovery works on any process, without sticky sessions: offsets are entry ids, and sessions are kept in Redis. Options `streamName`, `maxLen`, `readCount`, `blockTimeInMs` and `sessionKeyPrefix`, with the reference's defaults. Needs Redis 6.2 or later, or Valkey.
+- **`Emitter::redisStreams()`**, an `Emitter` for servers running `RedisStreamsAdapter`; its events can be recovered.
 - **An arena example** (`examples/arena`): a multiplayer space shooter run by the server at 30 frames a second, with bots while few people play, a scoreboard, touch controls for phones, and connection state recovery keeping a player's ship through a short drop.
 - **A README in every example's folder**: what it shows, how to run it, what to try, how it works and its test.
 - **A diagram in the README** of the events a client and the server send each other (`docs/images/bidirectional.svg`).
 
 ### Changed
 
+- **Breaking, for custom adapters only:** `Adapter::restoreSession()` takes a callback that gets the `RestoredSession` or `null`, instead of returning it, since an adapter may keep sessions outside the process. `InMemoryAdapter` and its subclasses call it at once.
 - The `chat` example recovers dropped connections: a user who comes back gets the messages sent meanwhile, and the others see them return.
 - The `rooms` example lists the rooms that exist, from the adapter's `create-room` and `delete-room` events.
 

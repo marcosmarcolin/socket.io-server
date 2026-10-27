@@ -30,9 +30,9 @@
 | `emit()`, `send()`, `to()`, `in()`, `except()`, `volatile`, `local`, `compress()`, `timeout()` | Broadcasting to the namespace. See [Acknowledgements](#acknowledgements) for `timeout()`. |
 | `sockets(): array<string, Socket>` | The connected sockets, by id. |
 | `allSockets(): list<string>` | Their ids. |
-| `fetchSockets(): list<Socket>`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets(bool $close = false)` | Act on the selected sockets; use `to()` and `except()` first to select. With `ChannelAdapter` or `RedisAdapter`, `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` reach every process; `fetchSockets()` reads this one. |
+| `fetchSockets(): list<Socket>`, `socketsJoin()`, `socketsLeave()`, `disconnectSockets(bool $close = false)` | Act on the selected sockets; use `to()` and `except()` first to select. With `ChannelAdapter`, `RedisAdapter` or `RedisStreamsAdapter`, `socketsJoin()`, `socketsLeave()` and `disconnectSockets()` reach every process; `fetchSockets()` reads this one. |
 | `fetchSockets(fn (?Throwable $error, array $sockets))` | The selected sockets of every server: `Socket` objects from this process, a [`RemoteSocket`](#remotesocket) for each one elsewhere. The error is a `TimeoutException`, with the sockets so far, when some server didn't answer within 5 seconds. |
-| `serverSideEmit(string $event, ...$args)` | Sends an event to this namespace on the other servers, whose `on($event)` listeners get it. A `Closure` last gets `(?Throwable $error, array $responses)`, one response per other server; the error is a `TimeoutException` after 5 seconds. Needs `ChannelAdapter` or `RedisAdapter`; `connect`, `connection` and `new_namespace` are reserved. See [Several processes](multiple-processes.md#what-crosses-processes). |
+| `serverSideEmit(string $event, ...$args)` | Sends an event to this namespace on the other servers, whose `on($event)` listeners get it. A `Closure` last gets `(?Throwable $error, array $responses)`, one response per other server; the error is a `TimeoutException` after 5 seconds. Needs `ChannelAdapter`, `RedisAdapter` or `RedisStreamsAdapter`; `connect`, `connection` and `new_namespace` are reserved. See [Several processes](multiple-processes.md#what-crosses-processes). |
 
 ## `Socket`
 
@@ -145,7 +145,7 @@ $io->to('room1')->timeout(5000)->emit('vote', function (?Throwable $error, array
 - Without `timeout()`, passing a `Closure` throws, since a socket that never answers would keep the callback waiting forever.
 - With no socket to reach, the callback runs at once with `[]`.
 - With `volatile`, a socket skipped because its transport was busy still counts, so the wait ends with the timeout.
-- With `ChannelAdapter` or `RedisAdapter`, it reaches the sockets of every process: the callback runs once every server reported how many sockets it reached and all of them answered.
+- With `ChannelAdapter`, `RedisAdapter` or `RedisStreamsAdapter`, it reaches the sockets of every process: the callback runs once every server reported how many sockets it reached and all of them answered.
 
 ## Broadcasting: `BroadcastOperator`
 

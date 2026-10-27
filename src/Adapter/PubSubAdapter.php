@@ -48,6 +48,15 @@ use Marcolin\SocketIO\TimeoutException;
  *
  * Messages are arrays of scalars and lists: "uid" (the sending adapter), "type" (a MessageType) and the type's
  * fields. Packets travel as their encoded parts. Malformed messages are ignored.
+ *
+ * With a Stream (RedisStreamsAdapter), what every server must apply goes through it instead of the channels:
+ * broadcasts without an acknowledgement, socketsJoin, socketsLeave and disconnectSockets (Wire::durable()). A server
+ * that lost the broker reads them when it comes back, so no room channels are needed. With connectionStateRecovery,
+ * an event's offset is its entry id, the same on every server, and sessions are kept in the Stream, so a client
+ * recovers on any server:
+ * - a recoverable broadcast reaches this process's sockets once the Stream gave its id, and the ones after it wait,
+ *   so they keep their order; a local one goes through the Stream too, for its offset, and the others skip it;
+ * - receivers add the entry id as the event's last argument to its encoded text, without encoding it again.
  */
 abstract class PubSubAdapter extends InMemoryAdapter
 {
@@ -81,11 +90,23 @@ abstract class PubSubAdapter extends InMemoryAdapter
     /** @var array<string, array{Closure(int): void, Closure(mixed...): void}> broadcasts waiting for acks, by id */
     private array $ackRequests = [];
 
+    /** @var array<int, (Closure(): void)|null> local deliveries by position; null while waiting for the Stream */
+    private array $deliveries = [];
+
+    private int $nextDelivery = 0;
+
+    private int $firstDelivery = 0;
+
     /**
      * @param string $key the first part of every channel name, which keeps apps sharing a broker apart
+     * @param Stream|null $stream where what every server must apply goes, instead of the channels
      */
-    public function __construct(Nsp $nsp, private readonly PubSub $pubSub, string $key = 'socket.io')
-    {
+    public function __construct(
+        Nsp $nsp,
+        private readonly PubSub $pubSub,
+        string $key = 'socket.io',
+        private readonly ?Stream $stream = null,
+    ) {
         parent::__construct($nsp);
         $this->uid = bin2hex(random_bytes(8));
         $this->channels = new Channels($key, $nsp->name);
@@ -94,6 +115,9 @@ abstract class PubSubAdapter extends InMemoryAdapter
         $this->nodes = new Nodes($this->scheduler, self::HEARTBEAT_TIMEOUT, $this->nodeGone(...));
         $this->listen($this->channels->namespace);
         $this->listen($this->responseChannel);
+        $this->stream?->subscribe($nsp->name, function (array $message, string $id): void {
+            $this->onMessage($message, $id);
+        });
         // The others answer with a heartbeat, so this server learns about them at once.
         $this->publish($this->channels->namespace, MessageType::InitialHeartbeat);
     }
@@ -132,6 +156,11 @@ abstract class PubSubAdapter extends InMemoryAdapter
 
     final public function broadcast(Packet $packet, BroadcastOptions $options): void
     {
+        if ($this->stream !== null) {
+            $this->broadcastThroughStream($this->stream, $packet, $options);
+
+            return;
+        }
         $offset = $this->recoverable($packet, $options) ? $this->offset() : null;
         if ($offset !== null) {
             $packet = self::withOffset($packet, $offset);
@@ -159,6 +188,58 @@ abstract class PubSubAdapter extends InMemoryAdapter
             'parts' => Wire::parts($parts),
             'offset' => $offset,
         ]);
+    }
+
+    /**
+     * Keeps the session in the Stream, when there is one, so any server can restore it.
+     */
+    final public function persistSession(Session $session): void
+    {
+        $recovery = $this->nsp->server->connectionStateRecovery;
+        if ($this->stream === null || $recovery === null) {
+            parent::persistSession($session);
+
+            return;
+        }
+        // The uid tells which local broadcasts reached it: only this server's.
+        $this->stream->saveSession($session->pid, self::json([
+            'sid' => $session->sid,
+            'pid' => $session->pid,
+            'rooms' => $session->rooms,
+            'data' => $session->data,
+            'uid' => $this->uid,
+        ]), $recovery->maxDisconnectionDuration);
+    }
+
+    final public function restoreSession(string $pid, string $offset, Closure $callback): void
+    {
+        if ($this->stream === null) {
+            parent::restoreSession($pid, $offset, $callback);
+
+            return;
+        }
+        $this->stream->restoreSession(
+            $this->nsp->name,
+            $pid,
+            $offset,
+            function (?string $kept, array $entries) use ($callback): void {
+                $found = $kept === null ? null : self::session($kept);
+                if ($found === null) {
+                    $callback(null);
+
+                    return;
+                }
+                [$session, $uid] = $found;
+                $missed = [];
+                foreach ($entries as [$message, $id]) {
+                    $parts = self::missed($message, $id, $session, $uid);
+                    if ($parts !== null) {
+                        $missed[] = $parts;
+                    }
+                }
+                $callback(new RestoredSession($session, $missed));
+            },
+        );
     }
 
     final public function addSockets(BroadcastOptions $options, array $rooms): void
@@ -259,23 +340,89 @@ abstract class PubSubAdapter extends InMemoryAdapter
         }
         $this->pubSub->unsubscribe($this->channels->namespace);
         $this->pubSub->unsubscribe($this->responseChannel);
+        $this->stream?->unsubscribe($this->nsp->name);
     }
 
     final protected function roomCreated(string $room): void
     {
-        if (! Channels::isSocketRoom($room)) {
+        // With a Stream, every server reads every durable message and filters by the rooms itself.
+        if ($this->stream === null && ! Channels::isSocketRoom($room)) {
             $this->listen($this->channels->room($room));
         }
     }
 
     final protected function roomDeleted(string $room): void
     {
-        if (! Channels::isSocketRoom($room)) {
+        if ($this->stream === null && ! Channels::isSocketRoom($room)) {
             $this->pubSub->unsubscribe($this->channels->room($room));
         }
     }
 
+    /**
+     * A broadcast with a Stream. A recoverable one goes through it even when local, since its offset is its entry
+     * id; its local delivery waits for the id, and later ones wait for it, so this process keeps the order.
+     */
+    private function broadcastThroughStream(Stream $stream, Packet $packet, BroadcastOptions $options): void
+    {
+        $parts = $this->encode($packet);
+        $fields = ['opts' => Wire::options($options), 'parts' => Wire::parts($parts)];
+        if (! $this->recoverable($packet, $options)) {
+            $this->deliverInOrder(function () use ($parts, $options, $packet): void {
+                $this->deliver($parts, $options, self::eventData($packet));
+            });
+            if (! $options->local) {
+                $this->publish($this->channels->namespace, MessageType::Broadcast, $fields);
+            }
 
+            return;
+        }
+        $position = $this->nextDelivery++;
+        $this->deliveries[$position] = null;
+        $fields['recoverable'] = true;
+        if ($options->local) {
+            $fields['local'] = true;
+        }
+        $stream->append(
+            $this->nsp->name,
+            Wire::message($this->uid, MessageType::Broadcast, $fields),
+            function (?string $id) use ($position, $parts, $packet, $options): void {
+                $this->deliveries[$position] = function () use ($id, $parts, $packet, $options): void {
+                    // Without an id, the sockets get the event all the same, only without an offset.
+                    if ($id !== null) {
+                        $packet = self::withOffset($packet, $id);
+                        $parts = $this->encode($packet);
+                    }
+                    $this->deliver($parts, $options, self::eventData($packet));
+                };
+                $this->flushDeliveries();
+            },
+        );
+        $this->postponeHeartbeat();
+    }
+
+    /**
+     * Delivers now, or after the broadcasts still waiting for their entry id.
+     *
+     * @param Closure(): void $delivery
+     */
+    private function deliverInOrder(Closure $delivery): void
+    {
+        if ($this->firstDelivery === $this->nextDelivery) {
+            $delivery();
+
+            return;
+        }
+        $this->deliveries[$this->nextDelivery++] = $delivery;
+    }
+
+    private function flushDeliveries(): void
+    {
+        while (($delivery = $this->deliveries[$this->firstDelivery] ?? null) !== null) {
+            unset($this->deliveries[$this->firstDelivery]);
+            ++$this->firstDelivery;
+            $delivery();
+        }
+    }
 
     private function listen(string $channel): void
     {
@@ -291,7 +438,18 @@ abstract class PubSubAdapter extends InMemoryAdapter
      */
     private function publish(string $channel, MessageType $type, array $fields = []): void
     {
-        $this->pubSub->publish($channel, Wire::message($this->uid, $type, $fields));
+        $message = Wire::message($this->uid, $type, $fields);
+        if ($this->stream !== null && Wire::durable($type, $fields)) {
+            $this->stream->append($this->nsp->name, $message, static function (): void {
+            });
+        } else {
+            $this->pubSub->publish($channel, $message);
+        }
+        $this->postponeHeartbeat();
+    }
+
+    private function postponeHeartbeat(): void
+    {
         if ($this->closed) {
             return;
         }
@@ -326,7 +484,10 @@ abstract class PubSubAdapter extends InMemoryAdapter
         $this->publish($this->channels->namespace, $type, $fields + ['requestId' => $requestId]);
     }
 
-    private function onMessage(mixed $message): void
+    /**
+     * @param string|null $id the entry id, for a message read from the Stream
+     */
+    private function onMessage(mixed $message, ?string $id = null): void
     {
         if (! is_array($message)) {
             return;
@@ -349,7 +510,7 @@ abstract class PubSubAdapter extends InMemoryAdapter
 
         match ($type) {
             MessageType::InitialHeartbeat => $this->publish($this->channels->namespace, MessageType::Heartbeat),
-            MessageType::Broadcast => $this->onBroadcast($uid, $message),
+            MessageType::Broadcast => $this->onBroadcast($uid, $message, $id),
             MessageType::SocketsJoin, MessageType::SocketsLeave => $this->onRooms($type, $message),
             MessageType::DisconnectSockets => $this->onDisconnectSockets($message),
             MessageType::ServerSideEmit => $this->onServerSideEmit($uid, $message),
@@ -365,13 +526,26 @@ abstract class PubSubAdapter extends InMemoryAdapter
      * Delivers another server's broadcast to the sockets of this one.
      *
      * @param array<mixed> $message
+     * @param string|null $id the entry id, for a broadcast read from the Stream
      */
-    private function onBroadcast(string $uid, array $message): void
+    private function onBroadcast(string $uid, array $message, ?string $id): void
     {
         $options = self::options($message['opts'] ?? null);
         $parts = self::parts($message['parts'] ?? null);
         if ($options === null || $parts === null) {
             return;
+        }
+        if ($id !== null) {
+            // A local broadcast is in the Stream only for the recovery of the sender's sockets.
+            if (($message['local'] ?? false) === true) {
+                return;
+            }
+            if (($message['recoverable'] ?? false) === true && $this->nsp->server->connectionStateRecovery !== null) {
+                $parts = self::withEntryId($parts, $id);
+                if ($parts === null) {
+                    return;
+                }
+            }
         }
         $requestId = $message['requestId'] ?? null;
         if ($requestId !== null) {
@@ -607,6 +781,75 @@ abstract class PubSubAdapter extends InMemoryAdapter
     private static function json(mixed $value): string
     {
         return json_encode($value, JSON_PARTIAL_OUTPUT_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE) ?: 'null';
+    }
+
+    /**
+     * The session a server kept in the Stream, and that server's uid.
+     *
+     * @return array{Session, string}|null
+     */
+    private static function session(string $kept): ?array
+    {
+        $value = json_decode($kept, true);
+        if (! is_array($value)) {
+            return null;
+        }
+        $sid = $value['sid'] ?? null;
+        $pid = $value['pid'] ?? null;
+        $rooms = self::strings($value['rooms'] ?? null);
+        $data = $value['data'] ?? null;
+        $uid = $value['uid'] ?? null;
+        if (! is_string($sid) || ! is_string($pid) || $rooms === null || ! is_array($data) || ! is_string($uid)) {
+            return null;
+        }
+
+        return [new Session($sid, $pid, $rooms, $data), $uid];
+    }
+
+    /**
+     * The encoded event a recovering socket missed, with its offset, or null when this entry doesn't reach it: as
+     * the reference, only recoverable broadcasts to its rooms, and local ones only from the server it was on.
+     *
+     * @param array<mixed> $message
+     * @return list<string|Binary>|null
+     */
+    private static function missed(array $message, string $id, Session $session, string $uid): ?array
+    {
+        if (
+            ($message['type'] ?? null) !== MessageType::Broadcast->value
+            || ($message['recoverable'] ?? false) !== true
+            || (($message['local'] ?? false) === true && ($message['uid'] ?? null) !== $uid)
+        ) {
+            return null;
+        }
+        $options = self::options($message['opts'] ?? null);
+        $parts = self::parts($message['parts'] ?? null);
+        if ($options === null || $parts === null) {
+            return null;
+        }
+        if (! self::reaches($session->rooms, $options->rooms, $options->except)) {
+            return null;
+        }
+
+        return self::withEntryId($parts, $id);
+    }
+
+    /**
+     * An encoded event with the entry id as its last argument, added to its text: the event's arguments are a JSON
+     * array, so it ends with "]".
+     *
+     * @param list<string|Binary> $parts
+     * @return list<string|Binary>|null
+     */
+    private static function withEntryId(array $parts, string $id): ?array
+    {
+        $text = $parts[0];
+        if (! is_string($text) || ! str_ends_with($text, ']')) {
+            return null;
+        }
+        $parts[0] = substr($text, 0, -1) . ',' . json_encode($id) . ']';
+
+        return $parts;
     }
 
     private function nodeGone(string $uid): void
