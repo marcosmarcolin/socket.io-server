@@ -4,6 +4,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-27
+
+Fixes a rare race during the upgrade from polling to WebSocket.
+
 ### Fixed
 
 - **A poll sent right after the upgrade's `5` is refused, as it should be.** When both arrived in the same pass of the event loop, Workerman could read the poll first, and it got a `noop` instead of HTTP 400. Requests arriving during an upgrade now wait for the end of the pass.
@@ -207,7 +211,8 @@ The first release.
 - Across processes, only broadcasts travel; the socket helpers (`fetchSockets`, `socketsJoin`...) act on the current process.
 - With several processes on one port, clients must use `transports: ['websocket']`.
 
-[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/marcosmarcolin/socket.io-server/compare/v0.5.0...v0.5.1
