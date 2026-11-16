@@ -4,6 +4,7 @@
 #   LOOP=event CLIENTS=5000 tests/Load/run.sh   the event extension, past select()'s 1024 connections
 #   LOOP=swoole CLIENTS=5000 tests/Load/run.sh  Workerman on Swoole's event loop
 #   SERVER=node CLIENTS=5000 tests/Load/run.sh  the reference Node.js server (tests/Load/node), for comparison
+#   LOOP=event PHP_VERSION=8.5 JIT=1 tests/Load/run.sh  another PHP, with OPcache and its tracing JIT (tests/php-server.sh)
 # CLIENTS, ROUNDS (echoes per client), MESSAGES (broadcasts) and SIZE (bytes per broadcast) tune it.
 set -eu
 
@@ -25,7 +26,7 @@ trap 'docker stop -t 2 "$server" >/dev/null 2>&1 || true' EXIT
 
 docker run --rm --network "container:$server" --ulimit nofile=65536:65536 \
     -v "$root/tests/Integration/client:/client:ro" -v "$root/tests/Load:/load:ro" \
-    -e CLIENTS="${CLIENTS:-500}" -e ROUNDS="${ROUNDS:-20}" -e MESSAGES="${MESSAGES:-50}" -e SIZE="${SIZE:-100}" \
+    -e JIT="${JIT:-0}" -e CLIENTS="${CLIENTS:-500}" -e ROUNDS="${ROUNDS:-20}" -e MESSAGES="${MESSAGES:-50}" -e SIZE="${SIZE:-100}" \
     "$NODE_IMAGE" sh -c '
     ready=""
     for i in $(seq 1 150); do

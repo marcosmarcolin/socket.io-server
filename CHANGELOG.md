@@ -4,6 +4,14 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **The load test runs on any PHP version, with or without the JIT:** `PHP_VERSION` (8.1 by default) and `EVENT_VERSION` pick the image of `tests/Load/Dockerfile`, `JIT=1` turns OPcache and its tracing JIT on, and each run reports the PHP version and whether the JIT really ran.
+
+### Changed
+
+- **The performance guide recommends OPcache with its JIT on the CLI**, which PHP leaves off: about 20% more acknowledgements and 20 to 30% more broadcast deliveries per process, close to the Node.js server. Its tables were measured again in one session, with PHP 8.1 and 8.5, with and without the JIT, Swoole and Node.js.
+
 ## [0.6.1] - 2026-10-27
 
 Fixes a rare race during the upgrade from polling to WebSocket.

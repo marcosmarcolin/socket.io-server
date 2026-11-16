@@ -69,8 +69,16 @@ const emitMicros = await control.emitWithAck("flood", MESSAGES, SIZE);
 await allReceived;
 const floodMs = performance.now() - floodStart;
 
+// After the run, so the JIT buffer shows what was compiled under load.
+const final = await control.emitWithAck("stats");
+if (process.env.JIT === "1" && final.php !== undefined && !final.jit?.on) {
+  throw new Error("JIT=1, but the server's JIT is off");
+}
+
 const result = {
   loop: after.loop,
+  php: final.php,
+  jit: final.jit,
   clients: CLIENTS,
   heapPerConnection: Math.round((after.heap - before.heap) / CLIENTS),
   rssPerConnection: Math.round((after.rss - before.rss) / CLIENTS),

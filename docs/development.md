@@ -22,7 +22,7 @@ DURATION=1200 tests/Soak/run.sh                # the soak test: clients come and
 LOOP=swoole tests/Integration/run.sh           # any of the scripts above on another event loop
 ```
 
-`LOOP=select`, `event` or `swoole` runs the server of the compliance, integration and load scripts on that Workerman event loop, in the image of `tests/Load/Dockerfile`, which has the `event` extension, or of `tests/Load/swoole.Dockerfile`, on the Swoole project's PHP image. CI runs the suites and the integration tests on Swoole too.
+`LOOP=select`, `event` or `swoole` runs the server of the compliance, integration and load scripts on that Workerman event loop, in the image of `tests/Load/Dockerfile`, which has the `event` extension, or of `tests/Load/swoole.Dockerfile`, on the Swoole project's PHP image. With `LOOP`, `PHP_VERSION` (8.1 by default) picks the PHP of `tests/Load/Dockerfile`, and `JIT=1` turns OPcache and its tracing JIT on. CI runs the suites and the integration tests on Swoole too.
 
 ## Secret scanning
 

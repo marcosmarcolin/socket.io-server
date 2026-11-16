@@ -23,17 +23,33 @@ $rss = static function (): int {
     return preg_match('/^VmRSS:\s+(\d+) kB/m', $status, $match) === 1 ? (int) $match[1] * 1024 : 0;
 };
 
-$io->on('connection', static function (Socket $socket) use ($io, $rss): void {
+// Whether the JIT really runs, and how much of its buffer it filled, not just what the ini asked for.
+$jit = static function (): array {
+    $status = function_exists('opcache_get_status') ? opcache_get_status(false) : false;
+    $jit = is_array($status) && is_array($status['jit'] ?? null) ? $status['jit'] : [];
+
+    return [
+        'opcache' => is_array($status) && ($status['opcache_enabled'] ?? false) === true,
+        'on' => ($jit['on'] ?? false) === true,
+        'kind' => ini_get('opcache.jit'),
+        'bufferUsed' => is_int($jit['buffer_size'] ?? null) && is_int($jit['buffer_free'] ?? null)
+            ? $jit['buffer_size'] - $jit['buffer_free'] : 0,
+    ];
+};
+
+$io->on('connection', static function (Socket $socket) use ($io, $rss, $jit): void {
     $socket->on('echo', static function (mixed $data, Closure $ack): void {
         $ack($data);
     });
-    $socket->on('stats', static function (Closure $ack) use ($io, $rss): void {
+    $socket->on('stats', static function (Closure $ack) use ($io, $rss, $jit): void {
         gc_collect_cycles();
         $ack([
             'heap' => memory_get_usage(),
             'rss' => $rss(),
             'sockets' => count($io->sockets->sockets()),
             'loop' => (new ReflectionClass(Worker::getEventLoop()))->getShortName(),
+            'php' => PHP_VERSION,
+            'jit' => $jit(),
         ]);
     });
     // Broadcasts numbered messages to every socket, then says how long the emits took.
