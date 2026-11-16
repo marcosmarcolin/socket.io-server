@@ -123,6 +123,10 @@ Each one runs with `php examples/<name>/start.php start`; then open http://local
 - [Development](docs/development.md): tests, linters and the compliance suites, all in Docker.
 - [Changelog](CHANGELOG.md).
 
+## Further reading
+
+- [Socket.IO v4 in PHP: a new server benchmarked against Node.js](https://www.marcosmarcolin.com.br/en/blog/socket-io-v4-php-server-en) ([in Portuguese](https://www.marcosmarcolin.com.br/blog/socket-io-v4-servidor-php)): why this package exists, how it compares to the official Node.js server, and how it was built.
+
 ## License
 
 MIT
