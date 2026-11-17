@@ -7,6 +7,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Added
 
 - **The load test runs on any PHP version, with or without the JIT:** `PHP_VERSION` (8.1 by default) and `EVENT_VERSION` pick the image of `tests/Load/Dockerfile`, `JIT=1` turns OPcache and its tracing JIT on, and each run reports the PHP version and whether the JIT really ran.
+- **A room latency test** (`tests/Load/room.sh`): the p50, p90 and p99 latency of broadcasts to a room, from the request to each member, with the clients spread over several containers; `docs/performance.md` measures a room of 1,000 among 10,000 clients against the Node.js server.
 
 ### Changed
 

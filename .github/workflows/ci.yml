@@ -94,6 +94,7 @@ jobs:
       - run: CLIENTS=200 ROUNDS=5 tests/Load/run.sh
       # The image with event on another PHP, and OPcache's JIT, which the run fails without.
       - run: LOOP=event PHP_VERSION=8.5 JIT=1 CLIENTS=200 ROUNDS=5 tests/Load/run.sh
+      - run: CLIENTS=200 ROOM=50 WORKERS=2 ROOM_MESSAGES=20 tests/Load/room.sh
 
       # A short soak, so the script keeps working: clients come and go, and no message may be lost.
       - run: DURATION=60 CLIENTS=300 tests/Soak/run.sh
