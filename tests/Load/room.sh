@@ -24,15 +24,16 @@ else
     server=$(php_server -d memory_limit=1G tests/Load/server.php start)
 fi
 workers=""
-deps=$(mktemp -d)
+# A volume, not a host directory: on Linux, npm writes its files as root, which the host can't delete.
+deps=$(docker volume create)
 out=$(mktemp)
-trap 'docker rm -f "$server" $workers >/dev/null 2>&1 || true; rm -rf "$deps" "$out"' EXIT
+trap 'docker rm -f "$server" $workers >/dev/null 2>&1; docker volume rm -f "$deps" >/dev/null 2>&1; rm -f "$out"' EXIT
 
 # One copy of the client's dependencies, installed once and mounted read-only by every container.
-docker run --rm -v "$root/tests/Integration/client:/client:ro" -v "$deps:/work" "$NODE_IMAGE" sh -c '
-    cp /client/package.json /client/package-lock.json /work/ && cd /work
+docker run --rm -v "$root/tests/Integration/client:/client:ro" -v "$root/tests/Load:/load:ro" -v "$deps:/work" \
+    "$NODE_IMAGE" sh -c '
+    cp /client/package.json /client/package-lock.json /load/room.mjs /work/ && cd /work
     npm ci --ignore-scripts --no-audit --no-fund --loglevel=error' >/dev/null
-cp tests/Load/room.mjs "$deps/"
 
 client() {
     docker run "$@" --network "container:$server" --ulimit nofile=65536:65536 -v "$deps:/work:ro" -w /work \
