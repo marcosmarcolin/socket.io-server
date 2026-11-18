@@ -89,6 +89,27 @@ Runs vary by up to about 10% from one session to another, for both servers, and 
 SERVER=node CLIENTS=10000 tests/Load/run.sh
 ```
 
+### Latency of a broadcast to a room
+
+Throughput doesn't say how long one message takes to arrive. `tests/Load/room.sh` connects 10,000 clients over 10 containers, a thousand in each, so that no client process limits the measure; 1,000 of them join a room, and 100 messages of 100 bytes go to it, one every 50 ms. A delivery's latency runs from the request's send to the member's receipt. The median of three runs, in the same session:
+
+| Server | p50 | p99 | Slowest delivery |
+|---|---|---|---|
+| this server, PHP 8.1 | 7.3 ms | 14.4 ms | 16.6 to 18.3 ms |
+| this server, PHP 8.5 with the JIT | 6.9 ms | 14.2 ms | 17.1 to 20.8 ms |
+| Node.js | 6.3 ms | 14.0 ms | 18.2 to 22.6 ms |
+
+- **The three tie,** within the run-to-run variation. Neither server is the limit at this load: the server and eleven Node.js processes share one machine and Docker's network, and that sets the time. Telling the servers apart would take clients on other machines.
+- **Spreading the clients barely matters:** with every client in one process, the p99 was about 15 to 16 ms, on every server.
+- **A smaller room is faster:** a room of 100 among 10,000 clients had a p99 of about 10 ms here and 11.5 ms on Node.js, in one run each.
+
+```sh
+LOOP=event tests/Load/room.sh                  # 10,000 clients, a room of 1,000, over 10 containers
+SERVER=node tests/Load/room.sh                 # the same against the reference server
+```
+
+`CLIENTS`, `ROOM`, `WORKERS`, `ROOM_MESSAGES`, `ROOM_INTERVAL` (ms) and `SIZE` tune it.
+
 ## On Swoole's event loop
 
 Workerman 5 can also run on the event loop of the [Swoole](https://github.com/swoole/swoole-src) extension. This server works on it: the official suites and the integration tests pass on it too, in CI. Choose it before `Worker::runAll()`:

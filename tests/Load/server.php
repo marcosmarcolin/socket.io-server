@@ -52,6 +52,17 @@ $io->on('connection', static function (Socket $socket) use ($io, $rss, $jit): vo
             'jit' => $jit(),
         ]);
     });
+    $socket->on('join', static function (string $room, Closure $ack) use ($socket): void {
+        $socket->join($room);
+        $ack(true);
+    });
+    // One message to the members of a room, with its send time, for the latency of a room broadcast.
+    $socket->on('room', static function (string $room, int $i, int $size, float $at) use ($io): void {
+        $io->to($room)->emit('room', $i, $at, str_repeat('x', $size));
+    });
+    $socket->on('size', static function (string $room, Closure $ack) use ($io): void {
+        $ack(['sockets' => count($io->sockets->sockets()), 'room' => count($io->in($room)->allSockets())]);
+    });
     // Broadcasts numbered messages to every socket, then says how long the emits took.
     $socket->on('flood', static function (int $count, int $size, Closure $ack) use ($io): void {
         $payload = str_repeat('x', $size);
